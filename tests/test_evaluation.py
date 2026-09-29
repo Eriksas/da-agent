@@ -66,7 +66,9 @@ def test_score_pass_and_each_failure_reason() -> None:
     assert score(CASE, fake_run("2011-W02 的客单价下降。"), CHECKS_OK, None)["passed"] is True
     missed = score(CASE, fake_run("2011-W02 的 GMV 上升。"), CHECKS_OK, None)
     assert missed["passed"] is False and missed["mentions"][1]["hit"] is False
-    assert score(CASE, fake_run("2011-W02 的客单价下降，增长全靠老客。"), CHECKS_OK, None)["violations"] == ["全靠"]
+    violated = score(CASE, fake_run("2011-W02 的客单价下降，增长全靠老客。"), CHECKS_OK, None)
+    assert violated["violations"] == ["全靠"]
+    assert violated["passed"] is False  # 变异测试发现：原来只查了“记录了违规”，没查“有违规就不通过”
     ungrounded = {"numbers": {"checked": 2, "ungrounded": [{"text": "9.9"}]}, "process": {"skills": []}}
     assert score(CASE, fake_run("2011-W02 的客单价下降。"), ungrounded, None)["passed"] is False
     assert score(CASE, fake_run("2011-W02 的客单价下降。", status="llm_error"), CHECKS_OK, None)["passed"] is False
