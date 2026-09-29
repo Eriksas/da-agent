@@ -47,3 +47,12 @@ def test_key_is_hidden_when_printed(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_tool_call_limit_is_bounded() -> None:
     with pytest.raises(ValueError):
         make_settings(llm_max_tool_calls=0)
+
+
+def test_empty_environment_values_keep_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    """GitHub Actions 中未设置的变量以空字符串传入，不能覆盖默认值。"""
+    monkeypatch.setenv("LLM_MODEL", "")
+    monkeypatch.setenv("LLM_BASE_URL", "")
+    settings = make_settings()
+    assert settings.llm_model == "MiniMax-M3"
+    assert settings.llm_base_url == "https://api.minimax.cn/v1"

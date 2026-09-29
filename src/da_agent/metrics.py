@@ -120,6 +120,19 @@ def round_value(value: float | None, unit: str) -> float | int | None:
     return round(value, 4)
 
 
+def format_value(value: float | int | None, unit: str) -> str:
+    """按单位把数字排版成给人看的文字：金额千分位两位小数，比率百分号，计数千分位。"""
+    if value is None:
+        return "—"
+    if unit == "money":
+        return f"{value:,.2f}"
+    if unit == "rate":
+        return f"{value:.2%}"
+    if unit == "count":
+        return f"{value:,}"
+    return f"{value:.4f}"
+
+
 def week_warnings(con: duckdb.DuckDBPyConnection, week: str, *, role: str = "当期",
                   customer_type: bool = False) -> list[str]:
     """这一周在比较时需要注意的问题：不完整、停业、节假日、左删失、极端大额行。"""

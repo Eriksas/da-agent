@@ -17,7 +17,8 @@ class MissingApiKeyError(RuntimeError):
 class Settings(BaseSettings):
     """项目配置。字段名对应大写的环境变量，例如 llm_api_key ↔ LLM_API_KEY。"""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # env_ignore_empty：GitHub Actions 里没设置的变量会以空字符串传入，不能让它覆盖默认值
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", env_ignore_empty=True)
 
     llm_base_url: str = "https://api.minimax.cn/v1"
     llm_api_key: SecretStr | None = None
