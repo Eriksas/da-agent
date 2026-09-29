@@ -5,7 +5,8 @@
 - `da-agent prepare-data`：下载并转换数据集
 - `da-agent quality`：生成数据质量报告（reports/data_quality.md 和 .json）
 - `da-agent week 2011-W48`：不经过模型，直接用分析工具输出某一周的指标、拆解和下钻
-- `da-agent ask "问题"`：用真实模型（或 --llm fake 加剧本）回答问题，运行记录存到 runs/
+- `da-agent ask "问题"`：用真实模型（或 --llm fake 加剧本）回答问题，运行记录、核查结果和报告存到 runs/
+- `da-agent check runs/<运行编号>`：对已保存的运行补做核查，重新生成报告，不调用模型
 
 过程日志用 logging；命令行给用户看的结果用 print。
 """
@@ -72,6 +73,18 @@ def _print_run(run: "AgentRun", run_dir: Path) -> None:
     print(f"运行记录：{run_dir}")
 
 
+def _review(run_dir: Path) -> dict:
+    """生成核查结果和报告，并打印核查摘要。"""
+    from .report import write_review
+
+    checks = write_review(run_dir)
+    print(checks["summary"])
+    for mention in checks["numbers"]["ungrounded"]:
+        print(f"  找不到出处：{mention['text']}（{mention['context']}）")
+    print(f"报告：{run_dir / 'report.md'}")
+    return checks
+
+
 def demo(llm_kind: str) -> int:
     """离线演示：在内置的两周小样例上，用假模型剧本走完整个 Agent 循环。不需要密钥和真实数据。"""
     if llm_kind != "fake":
@@ -83,7 +96,9 @@ def demo(llm_kind: str) -> int:
     with connect_frame(read_normalized_csv(DEMO_DATA)) as con:
         run = run_agent(DEMO_QUESTION, llm=FakeLLM.from_file(DEMO_SCRIPT), con=con,
                         max_tool_calls=Settings().llm_max_tool_calls)
-    _print_run(run, save_run(run, RUNS_DIR))
+    run_dir = save_run(run, RUNS_DIR)
+    _print_run(run, run_dir)
+    _review(run_dir)
     return 0 if run.status == "completed" else 1
 
 
@@ -105,8 +120,18 @@ def ask(question: str, llm_kind: str, script: Path | None) -> int:
         llm = OpenAICompatibleLLM(settings)
     with connect(PARQUET_PATH) as con:
         run = run_agent(question, llm=llm, con=con, max_tool_calls=settings.llm_max_tool_calls)
-    _print_run(run, save_run(run, RUNS_DIR))
+    run_dir = save_run(run, RUNS_DIR)
+    _print_run(run, run_dir)
+    _review(run_dir)
     return 0 if run.status == "completed" else 1
+
+
+def check(run_dir: Path) -> int:
+    """对已保存的运行补做核查。有找不到出处的数字时返回 1，方便在自动化流程里当关卡用。"""
+    if not (run_dir / "run.json").exists():
+        raise SystemExit(f"{run_dir} 下没有 run.json")
+    checks = _review(run_dir)
+    return 1 if checks["numbers"]["ungrounded"] else 0
 
 
 def prepare_data(force: bool) -> int:
@@ -214,6 +239,8 @@ def main(argv: list[str] | None = None) -> int:
     ask_parser.add_argument("question", help="例如：上周 GMV 为什么下降？")
     ask_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 调用真实模型（默认）；fake 按剧本回放")
     ask_parser.add_argument("--script", type=Path, help="--llm fake 时使用的剧本文件")
+    check_parser = commands.add_parser("check", help="对已保存的运行补做核查并重新生成报告，不调用模型")
+    check_parser.add_argument("run_dir", type=Path, help="运行目录，例如 runs/20260929T144747-a7db30")
     prepare_parser = commands.add_parser("prepare-data", help="下载并转换 UCI Online Retail II 数据集")
     prepare_parser.add_argument("--force", action="store_true", help="即使已有 parquet 也重新转换")
     commands.add_parser("quality", help="生成数据质量报告")
@@ -234,6 +261,8 @@ def main(argv: list[str] | None = None) -> int:
             return week(args.week, args.compare)
         if args.command == "ask":
             return ask(args.question, args.llm, args.script)
+        if args.command == "check":
+            return check(args.run_dir)
         return demo(args.llm)
     except (ValueError, MissingApiKeyError) as exc:  # 输入不合法或缺少密钥：给出原因，不打印报错堆栈
         print(f"错误：{exc}")

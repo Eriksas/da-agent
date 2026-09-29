@@ -243,7 +243,8 @@ def drilldown(con: duckdb.DuckDBPyConnection, week: str, compare: str = "wow", m
     others = None
     if rest:
         others_change = sum(r["change"] for r in rest)
-        others = {"segments": len(rest), "base": round(sum(r["base"] for r in rest), 2),
+        others = {"description": f"前 {top_n} 名以外的 {len(rest)} 个分组合计；不等于只剔除某一个分组后的结果",
+                  "segments": len(rest), "base": round(sum(r["base"] for r in rest), 2),
                   "current": round(sum(r["current"] for r in rest), 2), "change": round(others_change, 2),
                   "share_of_total_change": round(others_change / total_change, 4) if total_change else None}
     segment_sum = sum(seg["current"] - seg["base"] for seg in segments.values())

@@ -95,7 +95,8 @@ def test_drilldown_top_n_and_others(con) -> None:
     result = drilldown(con, "2011-W02", dimension="product", top_n=2)
     assert [(s["segment"], s["change"]) for s in result["segments"]] == [("10005", 60.0), ("10001", -35.0)]
     assert result["segments"][0]["description"] == "E"
-    assert result["others"] == {"segments": 3, "base": 80.0, "current": 60.0, "change": -20.0,
+    assert result["others"] == {"description": "前 2 名以外的 3 个分组合计；不等于只剔除某一个分组后的结果",
+                                "segments": 3, "base": 80.0, "current": 60.0, "change": -20.0,
                                 "share_of_total_change": -4.0}
 
 

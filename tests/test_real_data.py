@@ -4,6 +4,8 @@
 CI 里没有这份数据，测试会自动跳过。
 """
 
+import json
+
 import duckdb
 import pandas as pd
 import pytest
@@ -106,3 +108,7 @@ def test_ask_command_runs_on_real_data_with_fake_script(monkeypatch: pytest.Monk
     assert cli.main(["ask", "2011-W02 的 GMV 为什么变了？", "--llm", "fake", "--script", str(cli.DEMO_SCRIPT)]) == 0
     out = capsys.readouterr().out
     assert "状态：completed" in out and "decompose_gmv" in out
+    # 剧本里的数字属于示例数据，放到真实数据上就等于“编的”：核查必须抓到
+    checks = json.loads(next(tmp_path.glob("*/checks.json")).read_text(encoding="utf-8"))
+    caught = {m["text"] for m in checks["numbers"]["ungrounded"]}
+    assert {"145.0", "31.04", "-16.04", "60.0"} <= caught
