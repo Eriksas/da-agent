@@ -1,0 +1,315 @@
+{
+  "dataset": {
+    "source": "https://archive.ics.uci.edu/static/public/502/online+retail+ii.zip",
+    "source_sha256": "572e36277c2390fbfde10664750731e0a86f55e33470d91919085f0408e67bfb",
+    "raw_rows": 1067371,
+    "first_time": "2009-12-01 07:45:00",
+    "last_time": "2011-12-09 12:50:00",
+    "first_isodow": 2,
+    "last_isodow": 5,
+    "sheets": [
+      {
+        "source_sheet": "Year 2009-2010",
+        "rows": 525461,
+        "first_time": "2009-12-01 07:45:00",
+        "last_time": "2010-12-09 20:01:00"
+      },
+      {
+        "source_sheet": "Year 2010-2011",
+        "rows": 541910,
+        "first_time": "2010-12-01 08:26:00",
+        "last_time": "2011-12-09 12:50:00"
+      }
+    ]
+  },
+  "checks": {
+    "sheet_overlap": {
+      "overlap_rows": 22523,
+      "only_in_first": 0,
+      "only_in_second": 0,
+      "identical": true
+    }
+  },
+  "rules": [
+    {
+      "id": "R01",
+      "name": "两个工作表重叠期的记录",
+      "reason": "第 1 表的结束时间晚于第 2 表的开始时间，重叠期的记录两个表里都有；直接拼接会重复计算。",
+      "action": "删除第 1 表中的重叠记录，保留第 2 表的",
+      "excludes": true,
+      "rows": 22523,
+      "row_share": 0.021101378995681912,
+      "amount": 377488.45
+    },
+    {
+      "id": "R02",
+      "name": "坏账调整单（发票号 A 开头）",
+      "reason": "会计调账分录，不是买卖交易；金额很大，会扭曲 GMV。",
+      "action": "删除",
+      "excludes": true,
+      "rows": 6,
+      "row_share": 5.621288193139968e-06,
+      "amount": -147614.08
+    },
+    {
+      "id": "R03",
+      "name": "非商品编码（运费、手续费、人工调整、测试、礼品卡）",
+      "reason": "不是卖出的商品。礼品卡在售卡和用卡时各记一次，计入会重复。",
+      "action": "不计入商品 GMV，按类别单独汇总",
+      "excludes": false,
+      "rows": 5913,
+      "row_share": 0.005539779514339438,
+      "amount": -96374.46
+    },
+    {
+      "id": "R04",
+      "name": "取消/退货单（发票号 C 开头）",
+      "reason": "数量为负，代表订单被取消或退货。",
+      "action": "不计入 GMV（下单口径），单独计为取消金额",
+      "excludes": false,
+      "rows": 19494,
+      "row_share": 0.018263565339511754,
+      "amount": -1526667.86
+    },
+    {
+      "id": "R05",
+      "name": "非取消单但数量 ≤ 0",
+      "reason": "单价为 0，多为库存调整或损耗记录，不是交易。",
+      "action": "删除",
+      "excludes": true,
+      "rows": 3457,
+      "row_share": 0.0032387988806141443,
+      "amount": 0.0
+    },
+    {
+      "id": "R06",
+      "name": "单价 ≤ 0",
+      "reason": "赠品、缺描述的录入记录或调账，没有销售金额。",
+      "action": "删除",
+      "excludes": true,
+      "rows": 6207,
+      "row_share": 0.005815222635803296,
+      "amount": -158676.14
+    },
+    {
+      "id": "R07",
+      "name": "完全重复行",
+      "reason": "8 个业务字段完全相同。可能是重复录入，也可能是同一商品扫了两次，无法确定。",
+      "action": "默认删除（保留第一条）；报告写明影响金额，删错会让 GMV 偏低",
+      "excludes": true,
+      "rows": 11812,
+      "row_share": 0.01106644268956155,
+      "amount": 54228.42
+    },
+    {
+      "id": "R08",
+      "name": "缺少客户 ID",
+      "reason": "游客或未登记客户下单，交易真实，但无法识别是谁。",
+      "action": "计入 GMV 和订单数；不计入活跃客户、复购、人均订单",
+      "excludes": false,
+      "rows": 243007,
+      "row_share": 0.22766872999172733,
+      "amount": 2638958.18
+    },
+    {
+      "id": "R09",
+      "name": "极端大额行",
+      "reason": "单行金额绝对值 ≥ 10,000 英镑，可能是批发大单、误录或随后被取消的订单。",
+      "action": "仅标记，列入人工复核清单",
+      "excludes": false,
+      "rows": 38,
+      "row_share": 3.560149188988646e-05,
+      "amount": -267503.3
+    },
+    {
+      "id": "R10",
+      "name": "国家不明确",
+      "reason": "取值是 Unspecified 或 European Community，不是具体国家。",
+      "action": "仅标记；按国家分析时单独成组",
+      "excludes": false,
+      "rows": 817,
+      "row_share": 0.0007654320756325588,
+      "amount": 10979.07
+    }
+  ],
+  "excluded": {
+    "rows": 40355,
+    "amount": 284102.79
+  },
+  "clean": {
+    "sales_rows": 1003357,
+    "orders": 39516,
+    "customers": 5852,
+    "gmv": 19643861.64,
+    "cancelled_rows": 17915,
+    "cancelled_amount": 716462.57,
+    "net_sales": 18927399.07,
+    "gmv_missing_customer": 2575278.9,
+    "gmv_missing_customer_share": 0.13109840352143715,
+    "orders_missing_customer": 2922
+  },
+  "non_merchandise": [
+    {
+      "category": "运费与手续费",
+      "rows": 3923,
+      "amount": 168474.33
+    },
+    {
+      "category": "人工调整",
+      "rows": 1729,
+      "amount": -94615.73
+    },
+    {
+      "category": "礼品卡",
+      "rows": 78,
+      "amount": 1686.61
+    },
+    {
+      "category": "测试记录",
+      "rows": 14,
+      "amount": 203.5
+    }
+  ],
+  "line_amount_quantiles": {
+    "p50": 10.08,
+    "p99": 179.0,
+    "p999": 763.72,
+    "max": 168469.6
+  },
+  "extreme_lines": [
+    {
+      "invoice": "C581484",
+      "stock_code": "23843",
+      "description": "PAPER CRAFT , LITTLE BIRDIE",
+      "quantity": -80995,
+      "price": 2.08,
+      "amount": -168469.6,
+      "customer_id": "16446",
+      "invoice_date": "2011-12-09 09:27:00",
+      "is_valid": true,
+      "cancelled_within_1d": false,
+      "offset_by_manual_within_1d": false
+    },
+    {
+      "invoice": "581483",
+      "stock_code": "23843",
+      "description": "PAPER CRAFT , LITTLE BIRDIE",
+      "quantity": 80995,
+      "price": 2.08,
+      "amount": 168469.6,
+      "customer_id": "16446",
+      "invoice_date": "2011-12-09 09:15:00",
+      "is_valid": true,
+      "cancelled_within_1d": true,
+      "offset_by_manual_within_1d": false
+    },
+    {
+      "invoice": "541431",
+      "stock_code": "23166",
+      "description": "MEDIUM CERAMIC TOP STORAGE JAR",
+      "quantity": 74215,
+      "price": 1.04,
+      "amount": 77183.6,
+      "customer_id": "12346",
+      "invoice_date": "2011-01-18 10:01:00",
+      "is_valid": true,
+      "cancelled_within_1d": true,
+      "offset_by_manual_within_1d": false
+    },
+    {
+      "invoice": "C541433",
+      "stock_code": "23166",
+      "description": "MEDIUM CERAMIC TOP STORAGE JAR",
+      "quantity": -74215,
+      "price": 1.04,
+      "amount": -77183.6,
+      "customer_id": "12346",
+      "invoice_date": "2011-01-18 10:17:00",
+      "is_valid": true,
+      "cancelled_within_1d": false,
+      "offset_by_manual_within_1d": false
+    },
+    {
+      "invoice": "556444",
+      "stock_code": "22502",
+      "description": "PICNIC BASKET WICKER 60 PIECES",
+      "quantity": 60,
+      "price": 649.5,
+      "amount": 38970.0,
+      "customer_id": "15098",
+      "invoice_date": "2011-06-10 15:28:00",
+      "is_valid": true,
+      "cancelled_within_1d": false,
+      "offset_by_manual_within_1d": true
+    },
+    {
+      "invoice": "530715",
+      "stock_code": "84347",
+      "description": "ROTATING SILVER ANGELS T-LIGHT HLDR",
+      "quantity": 9360,
+      "price": 1.69,
+      "amount": 15818.4,
+      "customer_id": "15838",
+      "invoice_date": "2010-11-04 11:36:00",
+      "is_valid": true,
+      "cancelled_within_1d": false,
+      "offset_by_manual_within_1d": false
+    }
+  ],
+  "extreme_lines_other": {
+    "deleted": 10,
+    "non_merchandise": 22
+  },
+  "coverage": {
+    "weeks": 106,
+    "partial_weeks": [
+      "2009-W49",
+      "2011-W49"
+    ],
+    "low_trading_weeks": [
+      {
+        "week": "2009-W52",
+        "monday": "2009-12-21",
+        "trading_days": 3
+      },
+      {
+        "week": "2009-W53",
+        "monday": "2009-12-28",
+        "trading_days": 0
+      },
+      {
+        "week": "2010-W52",
+        "monday": "2010-12-27",
+        "trading_days": 0
+      }
+    ],
+    "saturday_trading_days": [
+      {
+        "day": "2009-12-05",
+        "rows": 400
+      }
+    ],
+    "closures": [
+      {
+        "last_open": "2009-12-23",
+        "reopen": "2010-01-04",
+        "gap_days": 12
+      },
+      {
+        "last_open": "2010-04-01",
+        "reopen": "2010-04-06",
+        "gap_days": 5
+      },
+      {
+        "last_open": "2010-12-23",
+        "reopen": "2011-01-04",
+        "gap_days": 12
+      },
+      {
+        "last_open": "2011-04-21",
+        "reopen": "2011-04-26",
+        "gap_days": 5
+      }
+    ]
+  }
+}
