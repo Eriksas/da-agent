@@ -1,41 +1,112 @@
 """命令行入口。
 
-- `da-agent doctor`：检查配置，不调用模型
-- `da-agent demo --llm fake`：用假模型跑示例
+- `da-agent doctor [--ping]`：检查配置；加 --ping 发 1 次真实请求测试连通性
+- `da-agent demo`：离线演示，用假模型剧本在内置小样例上走完整个 Agent 循环
 - `da-agent prepare-data`：下载并转换数据集
 - `da-agent quality`：生成数据质量报告（reports/data_quality.md 和 .json）
 - `da-agent week 2011-W48`：不经过模型，直接用分析工具输出某一周的指标、拆解和下钻
+- `da-agent ask "问题"`：用真实模型（或 --llm fake 加剧本）回答问题，运行记录存到 runs/
 
 过程日志用 logging；命令行给用户看的结果用 print。
 """
 
 import argparse
 import logging
+from pathlib import Path
+from typing import TYPE_CHECKING
 
-from .config import Settings
+from .config import MissingApiKeyError, Settings
 from .llm import FakeLLM
-from .paths import FIXTURES_DIR, REPORTS_DIR
+from .paths import FIXTURES_DIR, REPORTS_DIR, RUNS_DIR
 
-HELLO_FIXTURE = FIXTURES_DIR / "fake_llm/hello.json"
+if TYPE_CHECKING:
+    from .agent import AgentRun
+
+DEMO_DATA = FIXTURES_DIR / "demo/transactions.csv"
+DEMO_SCRIPT = FIXTURES_DIR / "fake_llm/demo_run.json"
+DEMO_QUESTION = "2011-W02 的 GMV 为什么变了？"
 
 
-def doctor(settings: Settings) -> int:
-    """打印配置状态。永远不打印密钥原文。"""
+def doctor(settings: Settings, ping_model: bool = False) -> int:
+    """打印配置状态；加 --ping 时发 1 次真实请求测试连通性。永远不打印密钥原文。"""
     print(f"模型地址：{settings.llm_base_url}")
     print(f"模型名称：{settings.llm_model}")
     print(f"API Key：{'已配置' if settings.has_api_key() else '未配置（只能使用 --llm fake）'}")
     print(f"单次运行工具调用上限：{settings.llm_max_tool_calls}")
+    if not ping_model:
+        return 0
+    from .llm import LLMError, ping
+
+    if not settings.has_api_key():
+        print("无法测试连通性：没有配置 API Key")
+        return 2
+    print("正在发送 1 次测试请求……")
+    try:
+        result = ping(settings)
+    except LLMError as exc:
+        print(f"连通性测试失败：{exc}")
+        return 2
+    print(f"连通性测试成功：用时 {result['seconds']} 秒，模型回复“{result['reply']}”，token 用量 {result['usage']}")
     return 0
+
+
+def _print_run(run: "AgentRun", run_dir: Path) -> None:
+    """打印一次 Agent 运行：每一步调了什么工具、最终答案、状态和用量。"""
+    import json
+
+    print(f"问题：{run.question}")
+    print()
+    print("## 工具调用")
+    for step in run.steps:
+        mark = "成功" if step["ok"] else f"失败：{step['error']}"
+        print(f"- 第 {step['round']} 轮 {step['tool']} {json.dumps(step['arguments'], ensure_ascii=False)} → {mark}（{step['ms']} 毫秒）")
+    if not run.steps:
+        print("- 无")
+    print()
+    print("## 回答")
+    print(run.answer or f"（没有答案：{run.error or run.status}）")
+    print()
+    usage = run.usage
+    print(f"状态：{run.status}；模型 {run.model}；调用模型 {usage['llm_calls']} 次，token {usage['prompt_tokens']} + "
+          f"{usage['completion_tokens']}；用时 {run.seconds} 秒" + ("；工具次数已用完" if run.budget_exhausted else ""))
+    print(f"运行记录：{run_dir}")
 
 
 def demo(llm_kind: str) -> int:
-    """M0 冒烟测试：用假模型走通一次“发消息 → 收回复”。Agent 循环在 M3 实现。"""
+    """离线演示：在内置的两周小样例上，用假模型剧本走完整个 Agent 循环。不需要密钥和真实数据。"""
     if llm_kind != "fake":
-        raise SystemExit("M0 只支持 --llm fake；真实模型在 M3 接入")
-    llm = FakeLLM.from_file(HELLO_FIXTURE)
-    reply = llm.chat([{"role": "user", "content": "你好，请确认你能工作。"}])
-    print(f"假模型回复：{reply.content}")
-    return 0
+        raise SystemExit("demo 只用假模型；真实模型请用 da-agent ask")
+    from .agent import run_agent, save_run
+    from .cleaning import connect_frame
+    from .dataset import read_normalized_csv
+
+    with connect_frame(read_normalized_csv(DEMO_DATA)) as con:
+        run = run_agent(DEMO_QUESTION, llm=FakeLLM.from_file(DEMO_SCRIPT), con=con,
+                        max_tool_calls=Settings().llm_max_tool_calls)
+    _print_run(run, save_run(run, RUNS_DIR))
+    return 0 if run.status == "completed" else 1
+
+
+def ask(question: str, llm_kind: str, script: Path | None) -> int:
+    """在真实数据上回答问题。默认调用真实模型；--llm fake 时按剧本回放（用于调试）。"""
+    from .agent import run_agent, save_run
+    from .cleaning import connect
+    from .dataset import PARQUET_PATH
+    from .llm import OpenAICompatibleLLM
+
+    if not PARQUET_PATH.exists():
+        raise SystemExit("还没有准备数据，请先运行：da-agent prepare-data")
+    settings = Settings()
+    if llm_kind == "fake":
+        if script is None:
+            raise SystemExit("--llm fake 需要用 --script 指定剧本文件")
+        llm = FakeLLM.from_file(script)
+    else:
+        llm = OpenAICompatibleLLM(settings)
+    with connect(PARQUET_PATH) as con:
+        run = run_agent(question, llm=llm, con=con, max_tool_calls=settings.llm_max_tool_calls)
+    _print_run(run, save_run(run, RUNS_DIR))
+    return 0 if run.status == "completed" else 1
 
 
 def prepare_data(force: bool) -> int:
@@ -135,9 +206,14 @@ def main(argv: list[str] | None = None) -> int:
     """解析子命令并执行。"""
     parser = argparse.ArgumentParser(prog="da-agent", description="运营周报与指标异动分析 Agent")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("doctor", help="检查配置，不调用模型")
-    demo_parser = commands.add_parser("demo", help="运行示例")
-    demo_parser.add_argument("--llm", choices=["fake"], default="fake", help="使用哪种模型；M0 只有 fake")
+    doctor_parser = commands.add_parser("doctor", help="检查配置；加 --ping 发 1 次真实请求测试连通性")
+    doctor_parser.add_argument("--ping", action="store_true", help="发 1 次真实请求，确认地址、模型和密钥可用")
+    demo_parser = commands.add_parser("demo", help="离线演示：假模型剧本 + 内置小样例，走完整个 Agent 循环")
+    demo_parser.add_argument("--llm", choices=["fake"], default="fake", help="演示只用假模型")
+    ask_parser = commands.add_parser("ask", help="用 Agent 回答一个数据问题，运行记录存到 runs/")
+    ask_parser.add_argument("question", help="例如：上周 GMV 为什么下降？")
+    ask_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 调用真实模型（默认）；fake 按剧本回放")
+    ask_parser.add_argument("--script", type=Path, help="--llm fake 时使用的剧本文件")
     prepare_parser = commands.add_parser("prepare-data", help="下载并转换 UCI Online Retail II 数据集")
     prepare_parser.add_argument("--force", action="store_true", help="即使已有 parquet 也重新转换")
     commands.add_parser("quality", help="生成数据质量报告")
@@ -146,17 +222,20 @@ def main(argv: list[str] | None = None) -> int:
     week_parser.add_argument("--compare", choices=["wow", "yoy"], default="wow", help="wow 环比（默认），yoy 同比")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    logging.getLogger("httpx2").setLevel(logging.WARNING)  # OpenAI SDK 的网络库每次请求都打一行日志，太吵
     try:
         if args.command == "doctor":
-            return doctor(Settings())
+            return doctor(Settings(), ping_model=args.ping)
         if args.command == "prepare-data":
             return prepare_data(args.force)
         if args.command == "quality":
             return quality()
         if args.command == "week":
             return week(args.week, args.compare)
+        if args.command == "ask":
+            return ask(args.question, args.llm, args.script)
         return demo(args.llm)
-    except ValueError as exc:  # 输入不合法（如周写错）：给出原因，不打印报错堆栈
+    except (ValueError, MissingApiKeyError) as exc:  # 输入不合法或缺少密钥：给出原因，不打印报错堆栈
         print(f"错误：{exc}")
         return 2
 

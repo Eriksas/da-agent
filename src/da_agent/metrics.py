@@ -11,7 +11,7 @@ from typing import Any
 import duckdb
 
 from .cleaning import fetch_one, fetch_rows
-from .periods import COMPARE_LABELS, LOW_TRADING_DAYS, base_week, week_monday, week_of
+from .periods import COMPARE_LABELS, LOW_TRADING_DAYS, base_week, previous_week, week_monday, week_of
 
 CENSOR_WEEKS = 52  # 距数据起点不足这么多周时，新老客划分偏向“新客”（左删失）
 MIN_ORDERS = 30  # 分组订单数低于这个值，视为样本不足
@@ -146,6 +146,15 @@ def week_warnings(con: duckdb.DuckDBPyConnection, week: str, *, role: str = "当
                 else "，被人工调整冲销（GMV 和净销售额都含它，净销售额偏高）" if line["offset_by_manual_within_1d"] else "")
         warnings.append(f"{role} {week} 含极端大额行：发票 {line['invoice']}（{line['description']}）金额 {line['amount']:,.2f}{note}。")
     return warnings
+
+
+def data_range(con: duckdb.DuckDBPyConnection) -> dict[str, str]:
+    """数据覆盖的周范围，以及最近的完整周（用户说“上周”时指这一周）。"""
+    _ensure(con)
+    bounds = fetch_one(con, "SELECT min(week) AS first_week, max(week) AS last_week FROM weekly")
+    last_time: datetime = fetch_one(con, "SELECT max(invoice_date) AS t FROM sales")["t"]
+    latest_full = bounds["last_week"] if last_time.isoweekday() == 7 else previous_week(bounds["last_week"])
+    return {**bounds, "last_time": f"{last_time:%Y-%m-%d %H:%M}", "latest_full_week": latest_full}
 
 
 def compare_periods(week: str, compare: str) -> dict[str, str]:

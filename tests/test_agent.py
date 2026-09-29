@@ -1,0 +1,126 @@
+"""Agent 循环：正常流程，以及各种“不按剧本走”的情况。全部用假模型，不联网。"""
+
+import json
+from pathlib import Path
+
+import pytest
+
+from da_agent.agent import BUDGET_NOTICE, AgentRun, run_agent, save_run
+from da_agent.cleaning import connect_frame
+from da_agent.llm import FakeLLM, LLMError, LLMReply, ToolCall
+from helpers import make_frame
+from test_metrics import ROWS
+
+QUESTION = "2011-W02 的 GMV 为什么变了？"
+
+
+def call(n: int, name: str, **arguments: object) -> ToolCall:
+    return ToolCall(id=f"call_{n}", name=name, arguments=dict(arguments))
+
+
+def tools(*calls: ToolCall) -> LLMReply:
+    return LLMReply(content="", tool_calls=calls)
+
+
+def run_with(replies: list[LLMReply], max_tool_calls: int = 5, llm: FakeLLM | None = None) -> tuple[AgentRun, FakeLLM]:
+    llm = llm or FakeLLM(replies=replies)
+    with connect_frame(make_frame(ROWS)) as con:
+        return run_agent(QUESTION, llm=llm, con=con, max_tool_calls=max_tool_calls), llm
+
+
+def assert_every_tool_call_answered(run: AgentRun) -> None:
+    """接口要求：模型发出的每个工具请求都必须有一条对应的 tool 回复。"""
+    requested = [c["id"] for m in run.messages if m["role"] == "assistant" for c in m.get("tool_calls", [])]
+    answered = [m["tool_call_id"] for m in run.messages if m["role"] == "tool"]
+    assert requested == answered
+
+
+def test_happy_path() -> None:
+    run, llm = run_with([
+        tools(call(1, "metric_summary", week="2011-W02")),
+        tools(call(2, "decompose_gmv", week="2011-W02"), call(3, "drilldown", week="2011-W02", dimension="country")),
+        LLMReply(content="结论：GMV 为 145.0。"),
+    ])
+    assert (run.status, run.answer) == ("completed", "结论：GMV 为 145.0。")
+    assert [(s["round"], s["tool"], s["ok"]) for s in run.steps] == [
+        (1, "metric_summary", True), (2, "decompose_gmv", True), (2, "drilldown", True)]
+    assert run.usage["llm_calls"] == 3
+    assert_every_tool_call_answered(run)
+    first_result = json.loads(next(m for m in run.messages if m["role"] == "tool")["content"])
+    assert first_result["tool"] == "metric_summary"
+    assert llm.received[0]["tools"] is not None  # 每轮都把工具说明书发给模型
+
+
+def test_system_prompt_has_data_range_and_latest_full_week() -> None:
+    run, _ = run_with([LLMReply(content="好")], max_tool_calls=7)
+    system = run.messages[0]["content"]
+    assert "2011-W01 至 2011-W02" in system
+    assert "指 2011-W01（最近的完整周）" in system  # W02 不完整，所以“上周”指 W01
+    assert "最多调用 7 次工具" in system
+
+
+def test_model_recovers_from_bad_arguments() -> None:
+    run, _ = run_with([
+        tools(call(1, "metric_summary", week="2011-W99")),
+        tools(call(2, "metric_summary", week="2011-W02")),
+        LLMReply(content="已改正参数后完成分析。"),
+    ])
+    assert run.status == "completed"
+    assert run.steps[0]["ok"] is False and "没有第 99 周" in run.steps[0]["error"]
+    assert run.steps[1]["ok"] is True
+
+
+def test_unknown_tool_is_refused_not_crashed() -> None:
+    run, _ = run_with([tools(call(1, "delete_everything")), LLMReply(content="没有这个工具。")])
+    assert run.status == "completed"
+    assert "没有名为 delete_everything 的工具" in run.steps[0]["error"]
+
+
+def test_tool_budget_is_enforced() -> None:
+    run, _ = run_with([
+        tools(call(1, "metric_summary", week="2011-W02"), call(2, "decompose_gmv", week="2011-W02"),
+              call(3, "drilldown", week="2011-W02")),
+        LLMReply(content="根据已有结果作答。"),
+    ], max_tool_calls=2)
+    assert run.status == "completed" and run.budget_exhausted
+    assert [s["ok"] for s in run.steps] == [True, True, False]
+    assert "工具调用次数已用完" in run.steps[2]["error"]
+    assert any(m["role"] == "user" and m["content"] == BUDGET_NOTICE for m in run.messages)
+    assert_every_tool_call_answered(run)
+
+
+def test_model_that_never_stops_is_cut_off() -> None:
+    replies = [tools(call(n, "metric_summary", week="2011-W02")) for n in range(1, 10)]
+    run, llm = run_with(replies, max_tool_calls=1)
+    assert run.status == "max_rounds"
+    assert len(llm.received) == 1 + 2  # 上限 1 次工具，最多 3 轮
+    assert_every_tool_call_answered(run)
+
+
+def test_llm_failure_is_recorded() -> None:
+    class FailingSecondCall(FakeLLM):
+        def chat(self, messages, tools=None):  # type: ignore[override]
+            if self.received:
+                raise LLMError("RateLimitError: 限流")
+            return super().chat(messages, tools)
+
+    llm = FailingSecondCall(replies=[tools(call(1, "metric_summary", week="2011-W02"))])
+    run, _ = run_with([], llm=llm)
+    assert run.status == "llm_error" and "限流" in run.error
+    assert len(run.steps) == 1  # 失败前的步骤保留
+
+
+def test_empty_answer_is_not_completed() -> None:
+    run, _ = run_with([LLMReply(content="")])
+    assert run.status == "empty_answer"
+
+
+def test_saved_run_has_no_secret(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_key = "sk-test-3333333333333333333333"  # secret-scan: allow
+    monkeypatch.setenv("LLM_API_KEY", fake_key)
+    run, _ = run_with([tools(call(1, "metric_summary", week="2011-W02")), LLMReply(content="好")])
+    run_dir = save_run(run, tmp_path)
+    text = (run_dir / "run.json").read_text(encoding="utf-8")
+    assert json.loads(text)["status"] == "completed"
+    assert fake_key not in text
+    assert (run_dir / "answer.md").read_text(encoding="utf-8").strip() == "好"
