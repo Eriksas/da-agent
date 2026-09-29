@@ -111,6 +111,41 @@ def flagged_phrases(text: str) -> list[dict[str, str]]:
     return found
 
 
+DANGER_CHANGE = 0.5  # 核心指标变化超过 50%：先确认是不是数据问题，再解读业务
+
+
+def _tool_results(run: dict[str, Any]) -> list[dict[str, Any]]:
+    return [json.loads(m["content"]) for m in run["messages"] if m["role"] == "tool"]
+
+
+def process_check(run: dict[str, Any]) -> dict[str, Any]:
+    """加载了分析流程后，流程要求的必做工具是否都成功调用了。"""
+    loaded = [r for r in _tool_results(run) if r.get("tool") == "load_skill"]
+    called = {step["tool"] for step in run.get("steps", []) if step["ok"]}
+    skills = [{"name": r["name"], "required": r["required_tools"],
+               "missing": [tool for tool in r["required_tools"] if tool not in called]} for r in loaded]
+    if not skills:
+        summary = "流程检查：本次没有加载分析流程"
+    else:
+        missing = sorted({tool for skill in skills for tool in skill["missing"]})
+        names = "、".join(skill["name"] for skill in skills)
+        summary = f"流程检查：已加载 {names}，" + (f"缺少必做步骤 {'、'.join(missing)}" if missing else "必做步骤全部完成")
+    return {"skills": skills, "summary": summary}
+
+
+def danger_signals(run: dict[str, Any]) -> list[str]:
+    """核心指标变化超过 50% 的提醒。比率类指标只看百分点变化，不在此列。"""
+    signals = []
+    for result in _tool_results(run):
+        if result.get("tool") != "metric_summary":
+            continue
+        for row in result["metrics"]:
+            if row["unit"] != "rate" and row["change_pct"] is not None and abs(row["change_pct"]) > DANGER_CHANGE:
+                signals.append(f"{result['period']['current']} {row['label']}变化 {row['change_pct']:+.2%}，超过 50%："
+                               "请确认报告已先排查数据问题（极端大额行、不完整周等），再解读业务")
+    return list(dict.fromkeys(signals))
+
+
 def check_run(run: dict[str, Any]) -> dict[str, Any]:
     """核查一次运行的答案。run 是 run.json 的内容。"""
     pool = source_numbers(run["messages"])
@@ -122,6 +157,8 @@ def check_run(run: dict[str, Any]) -> dict[str, Any]:
         "numbers": {"checked": len(mentions), "grounded": len(mentions) - len(ungrounded),
                     "ungrounded": [asdict(m) for m in ungrounded], "skipped_small_integers": skipped},
         "phrases": phrases,
+        "process": process_check(run),
+        "danger_signals": danger_signals(run),
         "summary": (f"数字核查：{len(mentions) - len(ungrounded)}/{len(mentions)} 个能在工具输出中找到出处"
                     f"（另有 {skipped} 个 ≤ {SMALL_INTEGER} 的整数未核查）；需人工复核的表述 {len(phrases)} 处"),
     }

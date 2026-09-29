@@ -16,6 +16,7 @@ def test_demo_runs_full_agent_loop_offline(monkeypatch: pytest.MonkeyPatch, tmp_
     assert "metric_summary" in out and "decompose_gmv" in out and "drilldown" in out
     assert len(list(tmp_path.glob("*/run.json"))) == 1
     assert "数字核查：12/12 个能在工具输出中找到出处" in out  # 演示剧本的数字全部来自工具输出
+    assert "流程检查：已加载 ecommerce-metric-diagnosis，必做步骤全部完成" in out
     assert len(list(tmp_path.glob("*/report.md"))) == 1
 
 

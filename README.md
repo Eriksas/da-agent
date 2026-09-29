@@ -2,7 +2,7 @@
 
 **运营周报与指标异动分析 Agent。** 给一份运营数据和一个业务问题（如“上周 GMV 为什么下降？”），模型负责选择分析工具，Python 负责计算每一个数字，最终报告里的数字都能回查到工具输出。
 
-> 当前进度：**M4 报告与核查**已完成。评测（M5）和自动周报（M6）尚未实现，完整规划见 [PROJECT_BRIEF.md](PROJECT_BRIEF.md)。**真实运行样例**见 [examples/real_runs](examples/real_runs/README.md)。
+> 当前进度：**M5 电商分析流程**已完成。评测（M6）和自动周报（M7）尚未实现，完整规划见 [PROJECT_BRIEF.md](PROJECT_BRIEF.md)。**真实运行样例**见 [examples/real_runs](examples/real_runs/README.md)。
 
 ## 进度
 
@@ -14,8 +14,11 @@
 | M3 | Agent 循环（工具调用） | ✅ |
 | M3b | 用 LangGraph 重写同一循环做对照（可选） | 未开始 |
 | M4 | 报告与数字核查 | ✅ |
-| M5 | 评测集与基线对比 | 未开始 |
-| M6 | GitHub Actions 自动周报 | 未开始 |
+| M5 | 电商分析流程（Skill，按需加载 + 流程检查） | ✅ |
+| M6 | 评测集与基线对比（含“无流程 / 有流程”对比） | 未开始 |
+| M7 | GitHub Actions 自动周报 | 未开始 |
+| M8 | 面试材料 | 未开始 |
+| 之后 | 上市公司财报分析流程（可选） | 未开始 |
 
 ## 本地运行
 
@@ -94,6 +97,17 @@ Agent 就是一个循环：把问题和工具说明书发给模型 → 模型回
 - 只要某个数在工具输出里出现过就算“有出处”，所以查不出“数字被安在了错误的指标上”。反向检验中，把示例数据的剧本放到真实数据上回放，12 个编造的数字抓到 7 个，其余 5 个是 0.0、5.0、30 这类常见数字，碰巧在工具输出里也出现过。
 - ≤ 10 的整数（如“5 天”）不核查，单独计数。
 - 推理是否成立无法自动判断。样例中最严重的一处错误（把“前 5 名以外”当成“剔除大单后”，结论方向相反）没有被任何规则标出。
+
+## 分析流程（M5 产出）
+
+把资深数据分析师的做法写成流程手册，模型按需加载、照着执行，程序检查它有没有照做。流程见 [skills/ecommerce-metric-diagnosis/SKILL.md](skills/ecommerce-metric-diagnosis/SKILL.md)，代码见 [skills.py](src/da_agent/skills.py)。
+
+- **格式**：遵循 [Agent Skills 规范](https://agentskills.io/specification)，一个文件夹一个 `SKILL.md`，开头写名字和“何时使用、何时不用”。
+- **按需加载**：系统提示词里只放一行目录；模型判断需要时调用 `load_skill` 取回正文。流程再多也不会把上下文塞满，改流程不用改代码。
+- **内容来自真实失误**：陷阱清单里的每一条（不完整周期比较、极端值、忽略抵消项、口径偷换……）都配有“在这份数据里的样子”，大多来自首批真实运行中模型犯过的错。结论要求区分数据事实、推断和待验证假设，并给出可信度自评。
+- **程序检查**：报告附录列出加载了哪个流程、必做步骤是否完成；核心指标变化超过 50% 时提示复核者先排查数据问题。
+
+设计参考了 Anthropic 开源的分析类技能（均为 Apache-2.0）：[knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins) 的 `analyze`（问题分级）、`validate-data`（陷阱清单、危险信号、可信度三级评定）、`variance-analysis`（驱动因素写法与反模式），以及 [financial-services](https://github.com/anthropics/financial-services) 的 `earnings-analysis`、`comps-analysis`（出处标注、指标选择）。流程内容为本项目自行编写，并有意没有照搬两点：不要求模型解释因果（我们的数据只能说明发生了什么），不做估值与投资判断。
 
 ## 配置模型（可选）
 

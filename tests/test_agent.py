@@ -57,6 +57,8 @@ def test_system_prompt_has_data_range_and_latest_full_week() -> None:
     assert "2011-W01 至 2011-W02" in system
     assert "指 2011-W01（最近的完整周）" in system  # W02 不完整，所以“上周”指 W01
     assert "最多调用 7 次工具" in system
+    assert "- `ecommerce-metric-diagnosis`：电商指标异动诊断" in system  # 只放流程目录
+    assert "陷阱清单" not in system  # 流程正文按需加载，不预先放进系统提示词
 
 
 def test_model_recovers_from_bad_arguments() -> None:

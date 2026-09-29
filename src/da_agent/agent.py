@@ -22,6 +22,7 @@ import duckdb
 from .llm import LLMClient, LLMError
 from .metrics import data_range
 from .paths import ROOT
+from .skills import catalog, load_skills
 from .tools import ToolOutcome, execute, tool_specs
 
 SYSTEM_PROMPT_PATH = ROOT / "prompts" / "agent_system.md"
@@ -48,9 +49,9 @@ class AgentRun:
 
 
 def build_system_prompt(con: duckdb.DuckDBPyConnection, max_tool_calls: int) -> str:
-    """把数据范围、最近完整周、工具上限填进系统提示词模板。"""
+    """把数据范围、最近完整周、工具上限、分析流程目录填进系统提示词模板。"""
     template = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
-    return template.format(**data_range(con), max_tool_calls=max_tool_calls)
+    return template.format(**data_range(con), max_tool_calls=max_tool_calls, skills_catalog=catalog(load_skills()))
 
 
 def run_agent(question: str, *, llm: LLMClient, con: duckdb.DuckDBPyConnection, max_tool_calls: int,
