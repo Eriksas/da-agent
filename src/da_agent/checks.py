@@ -17,13 +17,15 @@ from typing import Any
 # 不参与核查的文本：周、日期时间、单独的时间、列表序号
 IGNORED = [
     re.compile(r"\d{4}-W\d{2}"),
+    re.compile(r"\d{4}[ \t]*年[ \t]*(?:第[ \t]*)?\d{1,2}[ \t]*周"),  # 中文周写法：2011 年 45 周、2011 年第 45 周
+    re.compile(r"第[ \t]*\d{1,2}[ \t]*周"),
     re.compile(r"\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?"),
     re.compile(r"\b\d{1,2}:\d{2}\b"),
     re.compile(r"(?m)^[ \t]*(?:#+[ \t]*)?\d+[.、)][ \t]"),
 ]
 # 数字前面不能是英文字母、数字、下划线或小数点（排除 W49、R09、C581484 这类编号），但可以紧挨汉字
-NUMBER = re.compile(r"(?<![A-Za-z0-9_.])([+\-−]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)[ \t]*(%|个百分点|万|亿)?")
-SCALES = {"%": 0.01, "个百分点": 0.01, "万": 1e4, "亿": 1e8, None: 1.0}
+NUMBER = re.compile(r"(?<![A-Za-z0-9_.])([+\-−]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)[ \t]*(%|个百分点|pp|万|亿)?")
+SCALES = {"%": 0.01, "个百分点": 0.01, "pp": 0.01, "万": 1e4, "亿": 1e8, None: 1.0}  # pp：百分点的常见简写
 SMALL_INTEGER = 10  # 绝对值不超过它的整数（如“5 天”“前 3 名”）几乎总能碰巧对上，不核查，单独计数
 
 PHRASES: dict[str, tuple[str, ...]] = {
@@ -39,7 +41,7 @@ class NumberMention:
 
     text: str
     value: float  # 换算到工具输出的单位后的值（2.31% → 0.0231）
-    tolerance: float  # 按显示精度允许的误差
+    tolerance: float  # 按显示精度允许的误差：严格小于显示位数的 1 个单位
     context: str
 
 
@@ -65,7 +67,7 @@ def extract_numbers(text: str) -> tuple[list[NumberMention], int]:
             continue
         scale = SCALES[unit]
         mentions.append(NumberMention(text=match.group().strip(), value=abs(number) * scale,
-                                      tolerance=0.5 * 10 ** -decimals * scale,
+                                      tolerance=10 ** -decimals * scale,  # 小于显示位数的 1 个单位：四舍五入和直接截断都接受
                                       context=_context(text, match.start(), match.end())))
     return mentions, skipped
 
@@ -78,7 +80,10 @@ def _numbers_in(value: Any, pool: list[float]) -> None:
         pool.append(abs(float(value)))
     elif isinstance(value, str):
         for match in NUMBER.finditer(value):
-            pool.append(abs(float(match.group(1).replace(",", "").replace("−", "-"))))
+            number = abs(float(match.group(1).replace(",", "").replace("−", "-")))
+            pool.append(number)
+            if match.group(2):  # 文字里带单位的数（如“超过 50%”），同时存一份换算后的值（0.5），和报告里的写法对得上
+                pool.append(number * SCALES[match.group(2)])
     elif isinstance(value, dict):
         for item in value.values():
             _numbers_in(item, pool)
@@ -151,7 +156,7 @@ def check_run(run: dict[str, Any]) -> dict[str, Any]:
     pool = source_numbers(run["messages"])
     mentions, skipped = extract_numbers(run.get("answer") or "")
     ungrounded = [m for m in mentions
-                  if not any(abs(value - m.value) <= m.tolerance + 1e-9 for value in pool)]
+                  if not any(abs(value - m.value) < m.tolerance - 1e-12 for value in pool)]
     phrases = flagged_phrases(run.get("answer") or "")
     return {
         "numbers": {"checked": len(mentions), "grounded": len(mentions) - len(ungrounded),

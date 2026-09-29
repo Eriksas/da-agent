@@ -37,6 +37,7 @@ class AgentRun:
     question: str
     model: str
     max_tool_calls: int
+    use_skills: bool = True  # 评测对比用：False 时不提供分析流程
     status: str = "running"  # completed / empty_answer / llm_error / max_rounds
     answer: str = ""
     error: str | None = None
@@ -48,21 +49,23 @@ class AgentRun:
     messages: list[dict[str, Any]] = field(default_factory=list)
 
 
-def build_system_prompt(con: duckdb.DuckDBPyConnection, max_tool_calls: int) -> str:
+def build_system_prompt(con: duckdb.DuckDBPyConnection, max_tool_calls: int, use_skills: bool = True) -> str:
     """把数据范围、最近完整周、工具上限、分析流程目录填进系统提示词模板。"""
     template = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
-    return template.format(**data_range(con), max_tool_calls=max_tool_calls, skills_catalog=catalog(load_skills()))
+    skills = load_skills() if use_skills else {}
+    return template.format(**data_range(con), max_tool_calls=max_tool_calls, skills_catalog=catalog(skills))
 
 
 def run_agent(question: str, *, llm: LLMClient, con: duckdb.DuckDBPyConnection, max_tool_calls: int,
-              system_prompt: str | None = None) -> AgentRun:
+              system_prompt: str | None = None, use_skills: bool = True) -> AgentRun:
     """运行一次 Agent 循环，返回完整记录。任何失败都体现在 status 里，不向外抛异常。"""
     start = time.perf_counter()
     run = AgentRun(run_id=f"{datetime.now():%Y%m%dT%H%M%S}-{uuid4().hex[:6]}", question=question, model=llm.model,
-                   max_tool_calls=max_tool_calls, started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
-    run.messages = [{"role": "system", "content": system_prompt or build_system_prompt(con, max_tool_calls)},
+                   max_tool_calls=max_tool_calls, use_skills=use_skills,
+                   started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    run.messages = [{"role": "system", "content": system_prompt or build_system_prompt(con, max_tool_calls, use_skills)},
                     {"role": "user", "content": question}]
-    specs = tool_specs()
+    specs = [s for s in tool_specs() if use_skills or s["function"]["name"] != "load_skill"]
     used = 0
     run.status = "max_rounds"
     for round_no in range(1, max_tool_calls + 3):  # 正常情况下每轮至少用 1 次工具，所以这个轮数足够

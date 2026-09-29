@@ -7,6 +7,7 @@
 - `da-agent week 2011-W48`：不经过模型，直接用分析工具输出某一周的指标、拆解和下钻
 - `da-agent ask "问题"`：用真实模型（或 --llm fake 加剧本）回答问题，运行记录、核查结果和报告存到 runs/
 - `da-agent check runs/<运行编号>`：对已保存的运行补做核查，重新生成报告，不调用模型
+- `da-agent eval`：评测，同一批题目在多个对比组各跑一遍，程序打分，结果写到 eval/results/
 
 过程日志用 logging；命令行给用户看的结果用 print。
 """
@@ -137,6 +138,77 @@ def check(run_dir: Path) -> int:
     return 1 if checks["numbers"]["ungrounded"] else 0
 
 
+def evaluate(llm_kind: str, case_ids: str | None, conditions: str, repeats: int, name: str | None) -> int:
+    """运行评测并写出结果表。--llm fake 只用来检查流程是否跑得通，结果不代表模型表现。"""
+    import json
+    from datetime import datetime
+
+    from .dataset import PARQUET_PATH
+    from .evaluation import Connections, RESULTS_DIR, load_cases, render_summary, run_eval
+    from .llm import LLMReply, OpenAICompatibleLLM
+
+    if not PARQUET_PATH.exists():
+        raise SystemExit("还没有准备数据，请先运行：da-agent prepare-data")
+    cases = load_cases()
+    if case_ids:
+        wanted = [i.strip() for i in case_ids.split(",") if i.strip()]
+        unknown = sorted(set(wanted) - {case.id for case in cases})
+        if unknown:
+            raise ValueError(f"未知题目：{unknown}")
+        cases = [case for case in cases if case.id in wanted]
+    settings = Settings()
+    if llm_kind == "fake":
+        model = "fake"
+
+        def make_llm(*_: object) -> FakeLLM:
+            return FakeLLM(replies=[LLMReply(content="（假模型）这是检查评测流程用的固定回答，不代表任何真实结果。")])
+    else:
+        client = OpenAICompatibleLLM(settings)
+        model = client.model
+
+        def make_llm(*_: object) -> OpenAICompatibleLLM:
+            return client
+    name = name or f"{datetime.now():%Y%m%d-%H%M%S}-{llm_kind}"
+    out_dir = RESULTS_DIR / name
+    if out_dir.exists():
+        raise SystemExit(f"{out_dir} 已存在，请换一个 --name")
+    summary = run_eval(cases, [c.strip() for c in conditions.split(",")], repeats, make_llm, Connections(),
+                       out_dir, settings.llm_max_tool_calls)
+    meta = {"name": name, "model": model, "repeats": repeats, "finished_at": f"{datetime.now():%Y-%m-%d %H:%M}"}
+    (out_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    markdown = render_summary(summary, meta)
+    (out_dir / "summary.md").write_text(markdown, encoding="utf-8")
+    print()
+    print(markdown.split("## 未通过的运行")[0].strip())
+    print(f"完整结果：{out_dir / 'summary.md'}")
+    return 0
+
+
+def rescore_eval(out_dir: Path) -> int:
+    """用当前规则给已保存的评测重新打分（不调用模型）；第一次重评时保留原结果表为 summary.original.md。"""
+    import json
+    import shutil
+    from datetime import datetime
+
+    from .evaluation import Connections, load_cases, render_summary, rescore
+
+    meta_path = out_dir / "meta.json"
+    if not meta_path.exists():
+        raise SystemExit(f"{out_dir} 下没有 meta.json，不是评测结果目录")
+    original = out_dir / "summary.original.md"
+    if (out_dir / "summary.md").exists() and not original.exists():
+        shutil.copy(out_dir / "summary.md", original)
+    summary = rescore(out_dir, load_cases(), Connections())
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["rescored_at"] = f"{datetime.now():%Y-%m-%d %H:%M}"
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    markdown = render_summary(summary, meta)
+    (out_dir / "summary.md").write_text(markdown, encoding="utf-8")
+    print(markdown.split("## 未通过的运行")[0].strip())
+    print(f"完整结果：{out_dir / 'summary.md'}（重评前的结果：{original.name}）")
+    return 0
+
+
 def prepare_data(force: bool) -> int:
     """下载、校验并转换数据集。"""
     from .dataset import prepare
@@ -242,6 +314,14 @@ def main(argv: list[str] | None = None) -> int:
     ask_parser.add_argument("question", help="例如：上周 GMV 为什么下降？")
     ask_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 调用真实模型（默认）；fake 按剧本回放")
     ask_parser.add_argument("--script", type=Path, help="--llm fake 时使用的剧本文件")
+    eval_parser = commands.add_parser("eval", help="评测：同一批题目在多个对比组各跑一遍，程序打分并汇总")
+    eval_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 真实模型；fake 只检查流程")
+    eval_parser.add_argument("--cases", help="只跑这些题目，逗号分隔，例如 w48-why,w49-trap")
+    eval_parser.add_argument("--conditions", default="baseline,agent,agent_skill", help="对比组，逗号分隔")
+    eval_parser.add_argument("--repeats", type=int, default=2, help="Agent 组每题重复次数（直接问模型组固定 1 次）")
+    eval_parser.add_argument("--name", help="结果目录名，默认用时间")
+    rescore_parser = commands.add_parser("eval-rescore", help="用当前规则给已保存的评测重新打分，不调用模型")
+    rescore_parser.add_argument("out_dir", type=Path, help="评测结果目录，例如 eval/results/trial-3cases")
     check_parser = commands.add_parser("check", help="对已保存的运行补做核查并重新生成报告，不调用模型")
     check_parser.add_argument("run_dir", type=Path, help="运行目录，例如 runs/20260929T144747-a7db30")
     prepare_parser = commands.add_parser("prepare-data", help="下载并转换 UCI Online Retail II 数据集")
@@ -266,6 +346,10 @@ def main(argv: list[str] | None = None) -> int:
             return ask(args.question, args.llm, args.script)
         if args.command == "check":
             return check(args.run_dir)
+        if args.command == "eval-rescore":
+            return rescore_eval(args.out_dir)
+        if args.command == "eval":
+            return evaluate(args.llm, args.cases, args.conditions, args.repeats, args.name)
         return demo(args.llm)
     except (ValueError, MissingApiKeyError) as exc:  # 输入不合法或缺少密钥：给出原因，不打印报错堆栈
         print(f"错误：{exc}")
