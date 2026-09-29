@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr | None = None
     llm_model: str = "MiniMax-M3"
     llm_max_tool_calls: int = Field(default=12, ge=1, le=50)
+    llm_temperature: float | None = Field(default=None, ge=0, le=2)  # 不填使用模型默认值
+    llm_timeout_seconds: float = Field(default=120, gt=0, le=600)
 
     def has_api_key(self) -> bool:
         """是否配置了真实密钥（占位值不算）。"""

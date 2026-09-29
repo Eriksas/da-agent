@@ -264,7 +264,7 @@ README 必须写明这是模拟上线，不是实时业务数据。
 
 ### 待验证
 
-- **Token Plan 订阅 Key（`sk-cp-` 开头）能否直接调用 OpenAI 兼容接口。** 官方 FAQ 只说订阅 Key 与按量计费 Key “相互独立，不能混用”，没说明能否在自己的程序里调用；GitHub 上有用户反馈用它调 Anthropic 兼容接口时报 invalid api key。M3 第一次真实调用时，用 1 次请求验证。
+- ~~Token Plan 订阅 Key 能否直接调用 OpenAI 兼容接口~~ **已验证可以**（2026-09-29，`da-agent doctor --ping` 发 1 次请求：`MiniMax-M3.1-Flash-Preview`，用时 1.26 秒，216 + 16 个 token）。
 - Token Plan 额度受“5 小时固定窗口和周窗口”限制。评测一次跑 20 题时要控制并发和节奏。
 
 ### 仍待决定

@@ -156,3 +156,24 @@ def prepare(*, force: bool = False) -> Path:
     frame = normalize(read_workbook(xlsx_path))
     LOGGER.info("共 %d 行，写入 %s", len(frame), PARQUET_PATH.name)
     return write_parquet(frame, PARQUET_PATH)
+
+
+NORMALIZED_COLUMNS = ["source_sheet", "source_row", "invoice", "stock_code", "description", "quantity",
+                      "invoice_date", "price", "customer_id", "country"]
+
+
+def read_normalized_csv(path: Path) -> pd.DataFrame:
+    """读取已是统一格式的小样例 CSV（演示和测试用），类型与 normalize 的输出一致。"""
+    frame = pd.read_csv(path, encoding="utf-8-sig", dtype=str, keep_default_na=False)
+    if list(frame.columns) != NORMALIZED_COLUMNS:
+        raise DataIntegrityError(f"{path.name} 的列应为 {NORMALIZED_COLUMNS}")
+    return pd.DataFrame({
+        "invoice": frame["invoice"], "stock_code": frame["stock_code"],
+        "description": frame["description"].astype("string"),
+        "quantity": frame["quantity"].astype("int64"),
+        "invoice_date": pd.to_datetime(frame["invoice_date"]),
+        "price": frame["price"].astype("float64"),
+        "customer_id": frame["customer_id"].replace("", None).astype("string"),
+        "country": frame["country"].astype("string"),
+        "source_sheet": frame["source_sheet"], "source_row": frame["source_row"].astype("int64"),
+    })

@@ -95,3 +95,14 @@ def test_every_week_decomposition_and_drilldown_add_up() -> None:
             for week in ("2010-W48", "2011-W23", "2011-W49"):
                 assert drilldown(con, week, dimension=dimension)["check"]["segments_sum_to_total"], (week, dimension)
     assert checked >= 100
+
+
+def test_ask_command_runs_on_real_data_with_fake_script(monkeypatch: pytest.MonkeyPatch, tmp_path,
+                                                        capsys: pytest.CaptureFixture[str]) -> None:
+    """真实数据 + Agent 循环的完整路径（剧本回放，不调用真实模型）。"""
+    from da_agent import cli
+
+    monkeypatch.setattr(cli, "RUNS_DIR", tmp_path)
+    assert cli.main(["ask", "2011-W02 的 GMV 为什么变了？", "--llm", "fake", "--script", str(cli.DEMO_SCRIPT)]) == 0
+    out = capsys.readouterr().out
+    assert "状态：completed" in out and "decompose_gmv" in out

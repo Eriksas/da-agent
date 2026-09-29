@@ -1,0 +1,74 @@
+"""工具层：说明书格式正确；参数错误、工具拒绝、未知工具都变成给模型看的错误说明。"""
+
+import json
+
+import pytest
+
+from da_agent.cleaning import connect_frame
+from da_agent.llm import INVALID_JSON_KEY
+from da_agent.tools import TOOLS, execute, tool_specs
+from helpers import make_frame
+from test_metrics import ROWS
+
+
+@pytest.fixture(scope="module")
+def con():
+    connection = connect_frame(make_frame(ROWS))
+    yield connection
+    connection.close()
+
+
+def test_specs_are_valid_function_definitions() -> None:
+    specs = tool_specs()
+    assert [s["function"]["name"] for s in specs] == list(TOOLS)
+    for spec in specs:
+        assert spec["type"] == "function"
+        assert spec["function"]["description"]
+        assert spec["function"]["parameters"]["type"] == "object"
+        assert '"title"' not in json.dumps(spec)  # 自动生成的 title 已去掉
+
+
+def test_successful_call(con) -> None:
+    outcome = execute(con, "metric_summary", {"week": "2011-W02"})
+    assert outcome.ok and outcome.content["tool"] == "metric_summary"
+    json.loads(outcome.to_json())
+
+
+@pytest.mark.parametrize("name, arguments, message", [
+    ("delete_everything", {}, "没有名为 delete_everything 的工具"),
+    ("metric_summary", {"week": "2011-48"}, "参数不合法：week"),
+    ("metric_summary", {"week": "2011-W02", "region": "UK"}, "参数不合法：region"),
+    ("drilldown", {"week": "2011-W02", "dimension": "city"}, "参数不合法：dimension"),
+    ("metric_summary", {"week": "2011-W10"}, "不在数据范围内"),
+    ("metric_summary", {INVALID_JSON_KEY: '{"week": '}, "不是合法的 JSON"),
+])
+def test_failures_become_error_messages(con, name: str, arguments: dict, message: str) -> None:
+    outcome = execute(con, name, arguments)
+    assert outcome.ok is False
+    assert message in outcome.content["error"]
+
+
+def test_internal_error_does_not_crash(con, monkeypatch: pytest.MonkeyPatch) -> None:
+    from da_agent import tools
+
+    def boom(*_: object) -> dict:
+        raise KeyError("oops")
+
+    monkeypatch.setitem(tools.TOOLS, "metric_summary", tools.Tool("metric_summary", "x", tools.MetricSummaryArgs, boom))
+    outcome = execute(con, "metric_summary", {"week": "2011-W02"})
+    assert outcome.ok is False and "工具内部错误（KeyError）" in outcome.content["error"]
+
+
+def test_ab_tool_runs_srm_check_first(con) -> None:
+    outcome = execute(con, "ab_proportion_test", {"control_success": 200, "control_total": 2000,
+                                                  "treatment_success": 250, "treatment_total": 2000})
+    assert outcome.ok
+    assert outcome.content["srm"]["sample_ratio_mismatch"] is False
+    assert outcome.content["test"]["significant"] is True
+
+
+def test_quality_overview_is_compact_and_serializable(con) -> None:
+    outcome = execute(con, "data_quality_overview", {})
+    assert outcome.ok
+    assert {"clean_totals", "rules", "coverage", "extreme_lines"} <= set(outcome.content)
+    json.loads(outcome.to_json())
