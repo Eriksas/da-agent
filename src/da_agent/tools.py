@@ -117,7 +117,8 @@ TOOLS: dict[str, Tool] = {tool.name: tool for tool in (
          lambda con, a: decompose_gmv(con, a.week, a.compare)),
     Tool("drilldown",
          "把 GMV、净销售额或取消金额的变化按维度拆开（国家、新老客、商品），返回变化最大的前 N 个分组"
-         "及其占总变化的比例。用于回答“变化来自哪里”。分组订单少于 30 时会标记样本不足。",
+         "及其占总变化的比例。用于回答“变化来自哪里”。分组订单少于 30 时会标记样本不足。"
+         "返回的 others 是前 N 名以外所有分组的合计，不等于只剔除某一个分组后的结果。",
          DrilldownArgs,
          lambda con, a: drilldown(con, a.week, a.compare, a.metric, a.dimension, a.top_n)),
     Tool("data_quality_overview",

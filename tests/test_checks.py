@@ -1,0 +1,85 @@
+"""报告核查：数字提取、出处匹配、措辞标记、报告渲染。"""
+
+import json
+from pathlib import Path
+
+import pytest
+
+from da_agent.checks import check_run, extract_numbers, flagged_phrases
+from da_agent.report import render_report, write_review
+
+
+def texts(answer: str) -> list[str]:
+    return [m.text for m in extract_numbers(answer)[0]]
+
+
+def test_extracts_common_formats() -> None:
+    answer = "GMV 309,381.73，环比 +6,989.51（+2.31%），取消率 -1.31 个百分点，约 30.9 万，占比13.11%，贡献 −13,088.20"
+    assert texts(answer) == ["309,381.73", "+6,989.51", "+2.31%", "-1.31 个百分点", "30.9 万", "13.11%", "−13,088.20"]
+
+
+def test_ignores_weeks_dates_codes_and_list_markers() -> None:
+    answer = "1. 分析 2011-W48，数据截止 2011-12-09 12:50，规则 R09，发票 C581484\n## 2. 结论"
+    assert texts(answer) == []
+
+
+def test_small_integers_are_counted_not_checked() -> None:
+    mentions, skipped = extract_numbers("交易天数 5 天对 6 天，订单 663 单")
+    assert [m.text for m in mentions] == ["663"]
+    assert skipped == 2
+
+
+def run_with(answer: str, tool_result: dict, question: str = "问题") -> dict:
+    return {"answer": answer, "messages": [
+        {"role": "system", "content": "数据范围 2009-W49 至 2011-W49"},
+        {"role": "user", "content": question},
+        {"role": "tool", "tool_call_id": "c1", "content": json.dumps(tool_result, ensure_ascii=False)}]}
+
+
+TOOL = {"gmv": 309381.73, "change_pct": 0.0231, "cancel_rate_change": -0.0131,
+        "warnings": ["部分分组订单数少于 30"]}
+
+
+@pytest.mark.parametrize("answer", [
+    "GMV 309,381.73", "增长 2.31%", "增长 2.3%", "下降 1.31 个百分点", "约 30.9 万", "订单少于 30 的分组"])
+def test_grounded_numbers(answer: str) -> None:
+    assert check_run(run_with(answer, TOOL))["numbers"]["ungrounded"] == []
+
+
+@pytest.mark.parametrize("answer", ["GMV 309,381.37", "增长 2.41%", "约 31.9 万"])
+def test_fabricated_or_miscopied_numbers_are_caught(answer: str) -> None:
+    ungrounded = check_run(run_with(answer, TOOL))["numbers"]["ungrounded"]
+    assert len(ungrounded) == 1 and ungrounded[0]["context"] == answer
+
+
+def test_numbers_from_user_question_count_as_source() -> None:
+    """AB 实验这类场景，数字由用户提供，引用它们不算编造。"""
+    run = run_with("对照组 2000 人中 200 人转化", {}, question="对照组 2000 人、200 人转化，实验组呢？")
+    assert check_run(run)["numbers"]["ungrounded"] == []
+
+
+def test_model_own_words_are_not_a_source() -> None:
+    run = run_with("GMV 123.45", TOOL)
+    run["messages"].append({"role": "assistant", "content": "我算出来是 123.45"})
+    assert len(check_run(run)["numbers"]["ungrounded"]) == 1
+
+
+def test_flagged_phrases() -> None:
+    found = flagged_phrases("增长全靠老客。取消率下降导致净销售额上升。分子分母不一定是同一批订单。")
+    assert [(p["phrase"], p["category"]) for p in found] == [("导致", "因果表述"), ("全靠", "绝对化或无依据的推测")]
+
+
+def test_report_has_draft_label_and_appendices(tmp_path: Path) -> None:
+    run = {**run_with("GMV 309,381.73，编造的 12.34%。增长全靠老客。", TOOL),
+           "run_id": "r1", "question": "为什么？", "status": "completed", "model": "fake", "max_tool_calls": 5,
+           "budget_exhausted": False, "seconds": 0.1, "usage": {"llm_calls": 2, "prompt_tokens": 0, "completion_tokens": 0},
+           "steps": [{"round": 1, "tool": "metric_summary", "arguments": {"week": "2011-W48"}, "ok": True, "error": None, "ms": 5}]}
+    checks = check_run(run)
+    report = render_report(run, checks)
+    assert report.startswith("> **AI 初稿，待人工复核。**")
+    assert "| 12.34% |" in report                 # 找不到出处的数字
+    assert "| 绝对化或无依据的推测 | 全靠 |" in report
+    assert "部分分组订单数少于 30" in report       # 警告汇总
+    (tmp_path / "run.json").write_text(json.dumps(run, ensure_ascii=False), encoding="utf-8")
+    assert write_review(tmp_path)["numbers"]["checked"] == 2
+    assert (tmp_path / "report.md").exists() and (tmp_path / "checks.json").exists()
