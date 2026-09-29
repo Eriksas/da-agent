@@ -124,3 +124,9 @@ def test_danger_signals_for_big_changes_only() -> None:
         {"label": "老客数", "unit": "count", "change_pct": None}]}
     signals = danger_signals(run_steps(tool_results=[summary]))
     assert len(signals) == 1 and signals[0].startswith("2011-W49 GMV变化 +56.35%，超过 50%")
+
+
+def test_percent_inside_tool_text_counts_as_source() -> None:
+    """真实运行发现的 bug：流程原文里写着“超过 50%”，报告引用“超过 50% 的阈值”却被判为找不到出处。"""
+    run = run_with("客单价已超过 50% 的危险阈值", {"content": "任一核心指标变化超过 50%，先排查数据问题"})
+    assert check_run(run)["numbers"]["ungrounded"] == []

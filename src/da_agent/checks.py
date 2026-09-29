@@ -78,7 +78,10 @@ def _numbers_in(value: Any, pool: list[float]) -> None:
         pool.append(abs(float(value)))
     elif isinstance(value, str):
         for match in NUMBER.finditer(value):
-            pool.append(abs(float(match.group(1).replace(",", "").replace("−", "-"))))
+            number = abs(float(match.group(1).replace(",", "").replace("−", "-")))
+            pool.append(number)
+            if match.group(2):  # 文字里带单位的数（如“超过 50%”），同时存一份换算后的值（0.5），和报告里的写法对得上
+                pool.append(number * SCALES[match.group(2)])
     elif isinstance(value, dict):
         for item in value.values():
             _numbers_in(item, pool)
