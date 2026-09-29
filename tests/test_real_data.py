@@ -60,3 +60,38 @@ def test_row_total_matches_uci_page() -> None:
     """UCI 页面写明 1,067,371 条记录；这个总数包含两个工作表的重叠部分。"""
     count = duckdb.sql(f"SELECT count(*) FROM read_parquet('{PARQUET_PATH.as_posix()}')").fetchone()[0]
     assert count == 1_067_371
+
+
+def test_weekly_totals_add_up_to_report_totals() -> None:
+    """恒等式：各周 GMV 和取消金额相加，等于质量报告里的总数。"""
+    from da_agent.metrics import weekly_row
+
+    with connect(PARQUET_PATH) as con:
+        report = build_report(con)
+        weekly_row(con, "2011-W01")  # 触发建表
+        totals = con.execute("SELECT sum(gmv), sum(cancelled_amount), count(*) FROM weekly").fetchone()
+    assert totals[0] == pytest.approx(report["clean"]["gmv"])
+    assert totals[1] == pytest.approx(report["clean"]["cancelled_amount"])
+    assert totals[2] == report["coverage"]["weeks"]
+
+
+def test_every_week_decomposition_and_drilldown_add_up() -> None:
+    """恒等式：每一周的拆解贡献之和、每种下钻的分组之和，都等于总变化。"""
+    from da_agent.decompose import decompose_gmv
+    from da_agent.metrics import drilldown
+
+    with connect(PARQUET_PATH) as con:
+        drilldown(con, "2011-W48")  # 触发建表
+        weeks = [row[0] for row in con.execute("SELECT week FROM weekly ORDER BY monday").fetchall()]
+        checked = 0
+        for week in weeks[1:]:
+            try:
+                result = decompose_gmv(con, week)
+            except ValueError:  # 当期或基期停业，工具拒绝拆解
+                continue
+            assert result["check"]["contributions_sum_to_total"], week
+            checked += 1
+        for dimension in ("country", "customer_type", "product"):
+            for week in ("2010-W48", "2011-W23", "2011-W49"):
+                assert drilldown(con, week, dimension=dimension)["check"]["segments_sum_to_total"], (week, dimension)
+    assert checked >= 100

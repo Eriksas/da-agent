@@ -8,6 +8,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import duckdb
 import pandas as pd
@@ -127,6 +128,38 @@ def _build_tables(con: duckdb.DuckDBPyConnection, source_sql: str) -> None:
         CREATE OR REPLACE VIEW cancellations AS
         SELECT * FROM flagged WHERE is_valid AND r04_cancellation AND NOT r03_non_merchandise
     """)
+    # 人工复核清单：会影响商品指标的极端大额行，并检查 24 小时内是否被同一客户冲销。两种冲销方式：
+    # 1) 等量取消：同商品、同数量、同单价的 C 单；2) 人工调整冲销：金额相等的 M（Manual）C 单。
+    # 第 2 种按 R03 属于非商品，不会从商品净销售额里扣除，所以要单独标出来。
+    con.execute("""
+        CREATE OR REPLACE VIEW extreme_review AS
+        SELECT f.*,
+               (f.quantity > 0 AND EXISTS (
+                    SELECT 1 FROM flagged c
+                    WHERE c.r04_cancellation AND c.is_valid AND c.customer_id = f.customer_id AND c.stock_code = f.stock_code
+                      AND c.quantity = -f.quantity AND c.price = f.price
+                      AND c.invoice_date BETWEEN f.invoice_date AND f.invoice_date + INTERVAL 1 DAY
+               )) AS cancelled_within_1d,
+               (f.quantity > 0 AND EXISTS (
+                    SELECT 1 FROM flagged c
+                    WHERE c.r04_cancellation AND c.is_valid AND c.stock_code IN ('M', 'm') AND c.customer_id = f.customer_id
+                      AND abs(c.amount + f.amount) < 0.005
+                      AND c.invoice_date BETWEEN f.invoice_date AND f.invoice_date + INTERVAL 1 DAY
+               )) AS offset_by_manual_within_1d
+        FROM flagged f WHERE f.r09_extreme_line AND f.is_valid AND NOT f.r03_non_merchandise
+    """)
+
+
+def fetch_rows(con: duckdb.DuckDBPyConnection, sql: str, params: list[Any] | None = None) -> list[dict[str, Any]]:
+    """执行 SQL，返回字典列表。参数用 ? 占位传入，不拼进 SQL 字符串。"""
+    cursor = con.execute(sql, params or [])
+    names = [column[0] for column in cursor.description]
+    return [dict(zip(names, row)) for row in cursor.fetchall()]
+
+
+def fetch_one(con: duckdb.DuckDBPyConnection, sql: str, params: list[Any] | None = None) -> dict[str, Any]:
+    """执行只返回一行的 SQL。"""
+    return fetch_rows(con, sql, params)[0]
 
 
 def connect(parquet_path: Path) -> duckdb.DuckDBPyConnection:

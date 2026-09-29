@@ -9,23 +9,14 @@ from typing import Any
 
 import duckdb
 
-from .cleaning import BUSINESS_COLUMNS, EXTREME_LINE_AMOUNT, GIFT_VOUCHER_PREFIX, NON_MERCHANDISE, RULES
+from .cleaning import (
+    BUSINESS_COLUMNS, EXTREME_LINE_AMOUNT, GIFT_VOUCHER_PREFIX, NON_MERCHANDISE, RULES,
+    fetch_one as _one, fetch_rows as _rows,
+)
 from .dataset import DATA_URL, EXPECTED_SHA256
+from .periods import LOW_TRADING_DAYS
 
-LOW_TRADING_DAYS = 4  # 一周交易天数少于这个值，视为节假日周
 CLOSURE_GAP_DAYS = 3  # 相邻两个交易日相隔超过这个天数，视为停业（周六不营业，正常周末间隔是 2 天）
-
-
-def _rows(con: duckdb.DuckDBPyConnection, sql: str) -> list[dict[str, Any]]:
-    """执行 SQL，返回字典列表。"""
-    cursor = con.execute(sql)
-    names = [column[0] for column in cursor.description]
-    return [dict(zip(names, row)) for row in cursor.fetchall()]
-
-
-def _one(con: duckdb.DuckDBPyConnection, sql: str) -> dict[str, Any]:
-    """执行只返回一行的 SQL。"""
-    return _rows(con, sql)[0]
 
 
 def _category_case() -> str:
@@ -87,26 +78,11 @@ def build_report(con: duckdb.DuckDBPyConnection) -> dict[str, Any]:
         SELECT round(quantile_cont(amount, 0.5), 2) AS p50, round(quantile_cont(amount, 0.99), 2) AS p99,
                round(quantile_cont(amount, 0.999), 2) AS p999, round(max(amount), 2) AS max FROM sales""")
 
-    # 人工复核清单：极端大额行，并检查 24 小时内是否被同一客户冲销。两种冲销方式：
-    # 1) 等量取消：同商品、同数量、同单价的 C 单；2) 人工调整冲销：金额相等的 M（Manual）C 单。
-    # 第 2 种按 R03 属于非商品，不会从商品净销售额里扣除，所以要单独标出来。
+    # 人工复核清单（定义见 cleaning.py 的 extreme_review 视图）
     extreme = _rows(con, """
-        SELECT f.invoice, f.stock_code, f.description, f.quantity, f.price, round(f.amount, 2) AS amount,
-               f.customer_id, f.invoice_date, f.is_valid,
-               (f.quantity > 0 AND EXISTS (
-                    SELECT 1 FROM flagged c
-                    WHERE c.r04_cancellation AND c.is_valid AND c.customer_id = f.customer_id AND c.stock_code = f.stock_code
-                      AND c.quantity = -f.quantity AND c.price = f.price
-                      AND c.invoice_date BETWEEN f.invoice_date AND f.invoice_date + INTERVAL 1 DAY
-               )) AS cancelled_within_1d,
-               (f.quantity > 0 AND EXISTS (
-                    SELECT 1 FROM flagged c
-                    WHERE c.r04_cancellation AND c.is_valid AND c.stock_code IN ('M', 'm') AND c.customer_id = f.customer_id
-                      AND abs(c.amount + f.amount) < 0.005
-                      AND c.invoice_date BETWEEN f.invoice_date AND f.invoice_date + INTERVAL 1 DAY
-               )) AS offset_by_manual_within_1d
-        FROM flagged f WHERE r09_extreme_line AND is_valid AND NOT r03_non_merchandise
-        ORDER BY abs(f.amount) DESC""")
+        SELECT invoice, stock_code, description, quantity, price, round(amount, 2) AS amount, customer_id,
+               invoice_date, is_valid, cancelled_within_1d, offset_by_manual_within_1d
+        FROM extreme_review ORDER BY abs(amount) DESC""")
     # 其余极端行：已被规则删除，或属于非商品编码，都不影响商品指标，只报数量
     extreme_other = _one(con, """
         SELECT count(*) FILTER (WHERE NOT is_valid) AS deleted, count(*) FILTER (WHERE is_valid AND r03_non_merchandise) AS non_merchandise

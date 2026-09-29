@@ -3,15 +3,12 @@
 样例共 18 行，每行的预期结果写在行尾注释里。
 """
 
-import pandas as pd
 import pytest
 
 from da_agent.cleaning import connect_frame
-from da_agent.dataset import FIRST_SHEET, SECOND_SHEET
 from da_agent.quality import build_report, render_markdown
+from helpers import S1, S2, UK, make_frame
 
-S1, S2 = FIRST_SHEET, SECOND_SHEET
-UK = "United Kingdom"
 ROWS = [
     # 工作表, 行号, 发票, 编码, 描述, 数量, 时间, 单价, 客户, 国家
     (S1, 2, "100001", "10001", "A", 2, "2010-11-30 10:00", 5.0, "c1", UK),         # 销售 10
@@ -33,16 +30,6 @@ ROWS = [
     (S2, 15, "100022", "10008", "H", 1, "2010-12-07 09:00", 2.0, None, UK),        # 销售 2，缺客户（R08）
     (S2, 16, "100022", "10008", "H", 1, "2010-12-07 09:00", 2.0, None, UK),        # 缺客户的完全重复（R07 R08）
 ]
-
-
-def make_frame(rows: list[tuple]) -> pd.DataFrame:
-    """把样例行转成和 dataset.normalize 输出一致的 DataFrame。"""
-    columns = ["source_sheet", "source_row", "invoice", "stock_code", "description", "quantity",
-               "invoice_date", "price", "customer_id", "country"]
-    frame = pd.DataFrame(rows, columns=columns)
-    return frame.astype({"quantity": "int64", "price": "float64", "source_row": "int64",
-                         "description": "string", "customer_id": "string", "country": "string"}).assign(
-        invoice_date=pd.to_datetime(frame["invoice_date"]))
 
 
 @pytest.fixture(scope="module")
