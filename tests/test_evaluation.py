@@ -7,7 +7,7 @@ import pytest
 
 from da_agent.cleaning import connect_frame
 from da_agent.evaluation import (
-    Case, Connections, inject, load_cases, render_summary, run_eval, score, verify_injection,
+    Case, Connections, inject, load_cases, render_summary, rescore, run_eval, score, verify_injection,
 )
 from da_agent.llm import FakeLLM, LLMReply, ToolCall
 from helpers import make_frame
@@ -107,9 +107,20 @@ def test_run_eval_end_to_end(tmp_path: Path) -> None:
     assert summary["runs"] == 1 + 2 + 2  # 直接问模型固定 1 次，Agent 两组各 2 次
     assert stats["baseline"]["passed"] == 1 and stats["agent"]["passed"] == 2
     assert stats["agent_skill"]["process_complete_rate"] == 0.0  # 加载了流程，但没做拆解和下钻
+    assert stats["agent_skill"]["skill_use_correct_rate"] == 1.0  # 这道题应该用流程，也确实加载了
     assert stats["agent"]["avg_tool_calls"] == 1.0
     assert (tmp_path / "runs" / "c1" / "agent_skill-2" / "report.md").exists()
     saved = json.loads((tmp_path / "results.json").read_text(encoding="utf-8"))
     assert len(saved) == 5
     markdown = render_summary(summary, {"name": "t", "model": "fake", "repeats": 2, "finished_at": "now"})
     assert "| Agent 带流程 | 2 | 2 | 100% |" in markdown
+    rescored = rescore(tmp_path, [CASE], FixtureConnections())  # 规则没变时，离线重评结果应完全一致
+    assert rescored["by_condition"] == summary["by_condition"]
+
+
+def test_quick_lookup_without_skill_is_correct_use() -> None:
+    """查数题按流程文件的要求不加载流程：不能算成“流程没完成”。"""
+    case = Case(id="q", category="查数", question="订单数？", expects_skill=False)
+    result = score(case, fake_run("订单数为 634 单。"), CHECKS_OK, None)
+    assert result["skill_loaded"] is False and result["skill_expected"] is False
+    assert result["process_complete"] is None

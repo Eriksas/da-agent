@@ -17,6 +17,8 @@ from typing import Any
 # 不参与核查的文本：周、日期时间、单独的时间、列表序号
 IGNORED = [
     re.compile(r"\d{4}-W\d{2}"),
+    re.compile(r"\d{4}[ \t]*年[ \t]*(?:第[ \t]*)?\d{1,2}[ \t]*周"),  # 中文周写法：2011 年 45 周、2011 年第 45 周
+    re.compile(r"第[ \t]*\d{1,2}[ \t]*周"),
     re.compile(r"\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?"),
     re.compile(r"\b\d{1,2}:\d{2}\b"),
     re.compile(r"(?m)^[ \t]*(?:#+[ \t]*)?\d+[.、)][ \t]"),
@@ -39,7 +41,7 @@ class NumberMention:
 
     text: str
     value: float  # 换算到工具输出的单位后的值（2.31% → 0.0231）
-    tolerance: float  # 按显示精度允许的误差
+    tolerance: float  # 按显示精度允许的误差：严格小于显示位数的 1 个单位
     context: str
 
 
@@ -65,7 +67,7 @@ def extract_numbers(text: str) -> tuple[list[NumberMention], int]:
             continue
         scale = SCALES[unit]
         mentions.append(NumberMention(text=match.group().strip(), value=abs(number) * scale,
-                                      tolerance=0.5 * 10 ** -decimals * scale,
+                                      tolerance=10 ** -decimals * scale,  # 小于显示位数的 1 个单位：四舍五入和直接截断都接受
                                       context=_context(text, match.start(), match.end())))
     return mentions, skipped
 
@@ -154,7 +156,7 @@ def check_run(run: dict[str, Any]) -> dict[str, Any]:
     pool = source_numbers(run["messages"])
     mentions, skipped = extract_numbers(run.get("answer") or "")
     ungrounded = [m for m in mentions
-                  if not any(abs(value - m.value) <= m.tolerance + 1e-9 for value in pool)]
+                  if not any(abs(value - m.value) < m.tolerance - 1e-12 for value in pool)]
     phrases = flagged_phrases(run.get("answer") or "")
     return {
         "numbers": {"checked": len(mentions), "grounded": len(mentions) - len(ungrounded),

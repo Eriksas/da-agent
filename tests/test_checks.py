@@ -130,3 +130,20 @@ def test_percent_inside_tool_text_counts_as_source() -> None:
     """真实运行发现的 bug：流程原文里写着“超过 50%”，报告引用“超过 50% 的阈值”却被判为找不到出处。"""
     run = run_with("客单价已超过 50% 的危险阈值", {"content": "任一核心指标变化超过 50%，先排查数据问题"})
     assert check_run(run)["numbers"]["ungrounded"] == []
+
+
+def test_chinese_week_notation_is_not_a_number() -> None:
+    """评测试跑发现：答案写“2011 年 45 周”，其中的 45 被当成了没有出处的数字。"""
+    run = run_with("2011 年 45 周（第 45 周）的订单数为 634 单。", {"orders": 634})
+    assert check_run(run)["numbers"]["ungrounded"] == []
+
+
+@pytest.mark.parametrize("answer, grounded", [
+    ("与 21,616 量级相当", True),   # 四舍五入
+    ("与 21,615 量级相当", True),   # 直接截断：评测试跑中的真实写法
+    ("与 21,614 量级相当", False),  # 差了 1 个单位以上，算错
+    ("约 2.16 万", True),
+])
+def test_truncation_within_one_unit_is_accepted(answer: str, grounded: bool) -> None:
+    run = run_with(answer, {"change": -21615.74})
+    assert (check_run(run)["numbers"]["ungrounded"] == []) is grounded

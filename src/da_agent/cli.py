@@ -184,6 +184,31 @@ def evaluate(llm_kind: str, case_ids: str | None, conditions: str, repeats: int,
     return 0
 
 
+def rescore_eval(out_dir: Path) -> int:
+    """用当前规则给已保存的评测重新打分（不调用模型）；第一次重评时保留原结果表为 summary.original.md。"""
+    import json
+    import shutil
+    from datetime import datetime
+
+    from .evaluation import Connections, load_cases, render_summary, rescore
+
+    meta_path = out_dir / "meta.json"
+    if not meta_path.exists():
+        raise SystemExit(f"{out_dir} 下没有 meta.json，不是评测结果目录")
+    original = out_dir / "summary.original.md"
+    if (out_dir / "summary.md").exists() and not original.exists():
+        shutil.copy(out_dir / "summary.md", original)
+    summary = rescore(out_dir, load_cases(), Connections())
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["rescored_at"] = f"{datetime.now():%Y-%m-%d %H:%M}"
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    markdown = render_summary(summary, meta)
+    (out_dir / "summary.md").write_text(markdown, encoding="utf-8")
+    print(markdown.split("## 未通过的运行")[0].strip())
+    print(f"完整结果：{out_dir / 'summary.md'}（重评前的结果：{original.name}）")
+    return 0
+
+
 def prepare_data(force: bool) -> int:
     """下载、校验并转换数据集。"""
     from .dataset import prepare
@@ -295,6 +320,8 @@ def main(argv: list[str] | None = None) -> int:
     eval_parser.add_argument("--conditions", default="baseline,agent,agent_skill", help="对比组，逗号分隔")
     eval_parser.add_argument("--repeats", type=int, default=2, help="Agent 组每题重复次数（直接问模型组固定 1 次）")
     eval_parser.add_argument("--name", help="结果目录名，默认用时间")
+    rescore_parser = commands.add_parser("eval-rescore", help="用当前规则给已保存的评测重新打分，不调用模型")
+    rescore_parser.add_argument("out_dir", type=Path, help="评测结果目录，例如 eval/results/trial-3cases")
     check_parser = commands.add_parser("check", help="对已保存的运行补做核查并重新生成报告，不调用模型")
     check_parser.add_argument("run_dir", type=Path, help="运行目录，例如 runs/20260929T144747-a7db30")
     prepare_parser = commands.add_parser("prepare-data", help="下载并转换 UCI Online Retail II 数据集")
@@ -319,6 +346,8 @@ def main(argv: list[str] | None = None) -> int:
             return ask(args.question, args.llm, args.script)
         if args.command == "check":
             return check(args.run_dir)
+        if args.command == "eval-rescore":
+            return rescore_eval(args.out_dir)
         if args.command == "eval":
             return evaluate(args.llm, args.cases, args.conditions, args.repeats, args.name)
         return demo(args.llm)

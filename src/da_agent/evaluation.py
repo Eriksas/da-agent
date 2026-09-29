@@ -57,6 +57,7 @@ class Case:
     must_not: tuple[str, ...] = ()
     expect_value: dict[str, str] | None = None
     inject: dict[str, str] | None = None
+    expects_skill: bool = True
 
 
 def load_cases(path: Path = CASES_PATH) -> list[Case]:
@@ -65,7 +66,8 @@ def load_cases(path: Path = CASES_PATH) -> list[Case]:
     cases = [Case(id=item["id"], category=item["category"], question=item["question"],
                   must_mention=tuple(tuple(group) for group in item.get("must_mention") or []),
                   must_not=tuple(item.get("must_not") or []),
-                  expect_value=item.get("expect_value"), inject=item.get("inject"))
+                  expect_value=item.get("expect_value"), inject=item.get("inject"),
+                  expects_skill=bool(item.get("expects_skill", True)))
              for item in data["cases"]]
     ids = [case.id for case in cases]
     if len(ids) != len(set(ids)):
@@ -148,7 +150,7 @@ def score(case: Case, run: dict[str, Any], checks: dict[str, Any], expected: flo
     violations = [pattern for pattern in case.must_not if re.search(pattern, answer)]
     value_found = None
     if expected is not None:
-        value_found = any(abs(m.value - expected) <= m.tolerance for m in extract_numbers(answer)[0])
+        value_found = any(abs(m.value - expected) < m.tolerance - 1e-12 for m in extract_numbers(answer)[0])
     numbers = checks["numbers"]
     skills = checks["process"]["skills"]
     passed = (run["status"] == "completed" and all(m["hit"] for m in mentions) and not violations
@@ -157,7 +159,9 @@ def score(case: Case, run: dict[str, Any], checks: dict[str, Any], expected: flo
         "passed": passed, "status": run["status"], "mentions": mentions, "violations": violations,
         "expected_value": expected, "value_found": value_found,
         "numbers_checked": numbers["checked"], "numbers_ungrounded": len(numbers["ungrounded"]),
-        "skill_loaded": bool(skills), "process_complete": bool(skills) and not any(s["missing"] for s in skills),
+        "skill_expected": case.expects_skill, "skill_loaded": bool(skills),
+        # 只对应该使用流程的题统计“流程是否完成”；查数这类题按流程文件的要求本来就不加载流程
+        "process_complete": (bool(skills) and not any(s["missing"] for s in skills)) if case.expects_skill else None,
         "tool_calls": len(run["steps"]), "llm_calls": run["usage"]["llm_calls"],
         "tokens": run["usage"]["prompt_tokens"] + run["usage"]["completion_tokens"], "seconds": run["seconds"],
     }
@@ -244,7 +248,10 @@ def summarize(results: list[dict[str, Any]], cases: list[Case], conditions: list
             "violations": sum(len(r["violations"]) for r in rows),
             "grounded_rate": _ratio(sum(r["numbers_checked"] - r["numbers_ungrounded"] for r in rows),
                                     sum(r["numbers_checked"] for r in rows)),
-            "process_complete_rate": (_ratio(sum(r["process_complete"] for r in rows), len(rows))
+            "skill_use_correct_rate": (_ratio(sum(r["skill_loaded"] == r["skill_expected"] for r in rows), len(rows))
+                                       if condition == "agent_skill" else None),
+            "process_complete_rate": (_ratio(sum(r["process_complete"] is True for r in rows if r["skill_expected"]),
+                                             sum(1 for r in rows if r["skill_expected"]))
                                       if condition == "agent_skill" else None),
             "avg_tool_calls": _ratio(sum(r["tool_calls"] for r in rows), len(rows)),
             "avg_llm_calls": _ratio(sum(r["llm_calls"] for r in rows), len(rows)),
@@ -274,12 +281,13 @@ def render_summary(summary: dict[str, Any], meta: dict[str, Any]) -> str:
              f"Agent 组每题重复 {meta['repeats']} 次，直接问模型组每题 1 次",
              f"- 时间：{meta['finished_at']}；题集与评分规则见 [eval/cases.yaml](../../cases.yaml)", "",
              "## 按对比组", "",
-             "| 组别 | 运行 | 通过 | 通过率 | 要点命中率 | 违规 | 数字有出处率 | 流程完成率 | 平均工具调用 | 平均模型调用 | 平均 token | 平均用时（秒） |",
-             "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
+             "| 组别 | 运行 | 通过 | 通过率 | 要点命中率 | 违规 | 数字有出处率 | 流程使用正确率 | 流程完成率 | 平均工具调用 | 平均模型调用 | 平均 token | 平均用时（秒） |",
+             "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for stats in summary["by_condition"].values():
         lines.append(f"| {stats['label']} | {stats['runs']} | {stats['passed']} | {_pct(stats['pass_rate'])} | "
                      f"{_pct(stats['mention_hit_rate'])} | {stats['violations']} | {_pct(stats['grounded_rate'])} | "
-                     f"{_pct(stats['process_complete_rate'])} | {stats['avg_tool_calls']} | {stats['avg_llm_calls']} | "
+                     f"{_pct(stats['skill_use_correct_rate'])} | {_pct(stats['process_complete_rate'])} | "
+                     f"{stats['avg_tool_calls']} | {stats['avg_llm_calls']} | "
                      f"{stats['avg_tokens']:.0f} | {stats['avg_seconds']} |")
     labels = [CONDITIONS[c] for c in summary["conditions"]]
     lines += ["", "## 按题目（通过次数 / 运行次数）", "",
@@ -304,7 +312,38 @@ def render_summary(summary: dict[str, Any], meta: dict[str, Any]) -> str:
                      f"（[记录](runs/{f['case']}/{f['condition']}-{f['repeat']}/report.md)）")
     lines += ["", "## 说明与局限", "",
               "- 通过需要同时满足：正常结束、要点全部提到、没有违规说法、数字全部有出处、正确数值出现在答案里。",
+              "- 流程使用正确率：该用流程的题加载了流程、不该用的题（查数、实验、拒答）没有加载的比例；流程完成率只统计应该使用流程的题。",
               "- “直接问模型”组可以自己计算，它算出的数字在指标表里找不到，所以数字有出处率低是预期的；这一列衡量的是“数字能不能被核对”，不是“算得对不对”。",
               "- 关键词评分是近似的：同义表述可能漏判，否定句可能误判，需要抽样人工复核。",
               "- 模型输出有随机性，题目数量也有限，结论只适用于这批题目。", ""]
     return "\n".join(lines)
+
+
+def rescore(out_dir: Path, cases: list[Case], connections: Connections) -> dict[str, Any]:
+    """用当前的核查和评分规则，给已保存的运行重新打分，不调用模型。
+
+    评分规则修改后（例如试跑发现误判），用它把旧运行重新评一遍，保证所有结果使用同一套规则。
+    """
+    case_map = {case.id: case for case in cases}
+    order = {case.id: i for i, case in enumerate(cases)}
+    condition_order = list(CONDITIONS)
+    results = []
+    for run_path in (out_dir / "runs").glob("*/*/run.json"):
+        case = case_map[run_path.parent.parent.name]
+        condition, repeat = run_path.parent.name.rsplit("-", 1)
+        run = json.loads(run_path.read_text(encoding="utf-8"))
+        checks = check_run(run)
+        expected = expected_value(connections.get(case), case) if case.expect_value else None
+        result = score(case, run, checks, expected)
+        _save(run_path.parent, run, checks, result)
+        results.append({"case": case.id, "category": case.category, "condition": condition, "repeat": int(repeat),
+                        **result})
+    results.sort(key=lambda r: (order[r["case"]], condition_order.index(r["condition"]), r["repeat"]))
+    used_cases = [case for case in cases if any(r["case"] == case.id for r in results)]
+    conditions = [c for c in condition_order if any(r["condition"] == c for r in results)]
+    summary = summarize(results, used_cases, conditions)
+    (out_dir / "results.json").write_text(json.dumps(results, ensure_ascii=False, indent=2) + chr(10),
+                                          encoding="utf-8", newline=chr(10))
+    (out_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + chr(10),
+                                          encoding="utf-8", newline=chr(10))
+    return summary
