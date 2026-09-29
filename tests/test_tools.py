@@ -72,3 +72,12 @@ def test_quality_overview_is_compact_and_serializable(con) -> None:
     assert outcome.ok
     assert {"clean_totals", "rules", "coverage", "extreme_lines"} <= set(outcome.content)
     json.loads(outcome.to_json())
+
+
+def test_load_skill_returns_body_and_required_tools(con) -> None:
+    outcome = execute(con, "load_skill", {"name": "ecommerce-metric-diagnosis"})
+    assert outcome.ok
+    assert outcome.content["required_tools"] == ["metric_summary", "decompose_gmv", "drilldown"]
+    assert "陷阱清单" in outcome.content["content"]
+    missing = execute(con, "load_skill", {"name": "no-such-skill"})
+    assert missing.ok is False and "没有名为 no-such-skill 的分析流程" in missing.content["error"]

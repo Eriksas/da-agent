@@ -83,3 +83,44 @@ def test_report_has_draft_label_and_appendices(tmp_path: Path) -> None:
     (tmp_path / "run.json").write_text(json.dumps(run, ensure_ascii=False), encoding="utf-8")
     assert write_review(tmp_path)["numbers"]["checked"] == 2
     assert (tmp_path / "report.md").exists() and (tmp_path / "checks.json").exists()
+
+
+def run_steps(*tools: tuple[str, bool], tool_results: list[dict] | None = None) -> dict:
+    messages = [{"role": "tool", "tool_call_id": f"c{i}", "content": json.dumps(r, ensure_ascii=False)}
+                for i, r in enumerate(tool_results or [])]
+    return {"answer": "", "messages": messages,
+            "steps": [{"tool": name, "ok": ok} for name, ok in tools]}
+
+
+LOADED = {"tool": "load_skill", "name": "ecommerce-metric-diagnosis",
+          "required_tools": ["metric_summary", "decompose_gmv", "drilldown"], "content": "…"}
+
+
+def test_process_check_lists_missing_required_steps() -> None:
+    from da_agent.checks import process_check
+
+    run = run_steps(("load_skill", True), ("metric_summary", True), ("decompose_gmv", False), tool_results=[LOADED])
+    result = process_check(run)
+    assert result["skills"][0]["missing"] == ["decompose_gmv", "drilldown"]  # 失败的调用不算完成
+    assert "缺少必做步骤 decompose_gmv、drilldown" in result["summary"]
+
+
+def test_process_check_passes_and_reports_no_skill() -> None:
+    from da_agent.checks import process_check
+
+    done = run_steps(("load_skill", True), ("metric_summary", True), ("decompose_gmv", True), ("drilldown", True),
+                     tool_results=[LOADED])
+    assert process_check(done)["summary"].endswith("必做步骤全部完成")
+    assert process_check(run_steps(("metric_summary", True)))["summary"] == "流程检查：本次没有加载分析流程"
+
+
+def test_danger_signals_for_big_changes_only() -> None:
+    from da_agent.checks import danger_signals
+
+    summary = {"tool": "metric_summary", "period": {"current": "2011-W49"}, "metrics": [
+        {"label": "GMV", "unit": "money", "change_pct": 0.5635},
+        {"label": "订单数", "unit": "count", "change_pct": -0.2323},
+        {"label": "取消率", "unit": "rate", "change_pct": None},
+        {"label": "老客数", "unit": "count", "change_pct": None}]}
+    signals = danger_signals(run_steps(tool_results=[summary]))
+    assert len(signals) == 1 and signals[0].startswith("2011-W49 GMV变化 +56.35%，超过 50%")

@@ -20,6 +20,7 @@ from .decompose import decompose_gmv
 from .llm import INVALID_JSON_KEY
 from .metrics import METRICS, drilldown, metric_summary
 from .quality import build_report
+from .skills import load_skills
 
 LOGGER = logging.getLogger(__name__)
 MAX_RESULT_CHARS = 30_000  # 单个工具结果的长度上限，防止把超大结果塞进对话
@@ -49,6 +50,10 @@ class DrilldownArgs(WeekArgs):
 
 class NoArgs(_Args):
     pass
+
+
+class LoadSkillArgs(_Args):
+    name: str = Field(description="要加载的分析流程名字，见系统提示中的流程目录")
 
 
 class ProportionTestArgs(_Args):
@@ -83,6 +88,16 @@ def _quality_overview(con: duckdb.DuckDBPyConnection, _: NoArgs) -> dict[str, An
                                                      "cancelled_within_1d", "offset_by_manual_within_1d")}
                           for row in report["extreme_lines"]],
     }
+
+
+def _load_skill(_: duckdb.DuckDBPyConnection, args: LoadSkillArgs) -> dict[str, Any]:
+    """按需加载流程全文（progressive disclosure）。"""
+    skills = load_skills()
+    skill = skills.get(args.name)
+    if skill is None:
+        raise ValueError(f"没有名为 {args.name} 的分析流程；可用：{list(skills)}")
+    return {"tool": "load_skill", "name": skill.name, "required_tools": list(skill.required_tools),
+            "content": skill.body}
 
 
 def _ab_test(_: duckdb.DuckDBPyConnection, args: ProportionTestArgs) -> dict[str, Any]:
@@ -125,6 +140,9 @@ TOOLS: dict[str, Tool] = {tool.name: tool for tool in (
          "查看数据质量与口径：清洗规则、指标定义、不完整或停业的周、需要人工复核的极端大额订单。"
          "需要解释数据口径或异常时调用。",
          NoArgs, _quality_overview),
+    Tool("load_skill",
+         "加载一个分析流程的完整步骤。遇到流程目录中对应的问题时，先调用它，再按流程执行。",
+         LoadSkillArgs, _load_skill),
     Tool("ab_proportion_test",
          "AB 实验转化率检验：输入对照组和实验组的转化人数与总人数，返回差异、置信区间、p 值、是否显著，"
          "并先做样本比例失衡（SRM）检查。数字必须来自用户提供的实验数据，不能自己编。",

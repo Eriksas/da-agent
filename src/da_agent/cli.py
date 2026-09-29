@@ -79,6 +79,9 @@ def _review(run_dir: Path) -> dict:
 
     checks = write_review(run_dir)
     print(checks["summary"])
+    print(checks["process"]["summary"])
+    for signal in checks["danger_signals"]:
+        print(f"  危险信号：{signal}")
     for mention in checks["numbers"]["ungrounded"]:
         print(f"  找不到出处：{mention['text']}（{mention['context']}）")
     print(f"报告：{run_dir / 'report.md'}")
