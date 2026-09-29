@@ -8,6 +8,7 @@
 - `da-agent ask "问题"`：用真实模型（或 --llm fake 加剧本）回答问题，运行记录、核查结果和报告存到 runs/
 - `da-agent check runs/<运行编号>`：对已保存的运行补做核查，重新生成报告，不调用模型
 - `da-agent eval`：评测，同一批题目在多个对比组各跑一遍，程序打分，结果写到 eval/results/
+- `da-agent weekly --advance`：按回放游标生成下一周的周报（GitHub Actions 每周运行），写到 reports/weekly/
 
 过程日志用 logging；命令行给用户看的结果用 print。
 """
@@ -209,6 +210,45 @@ def rescore_eval(out_dir: Path) -> int:
     return 0
 
 
+def weekly_report(week: str | None, llm_kind: str, advance: bool) -> int:
+    """生成一周的周报。默认分析游标指向的周；--advance 在成功后把游标推进一周。"""
+    import os
+
+    from .cleaning import connect
+    from .dataset import PARQUET_PATH
+    from .llm import LLMReply, OpenAICompatibleLLM
+    from .weekly import WEEKLY_DIR, generate_weekly, next_replay_week, read_cursor, write_cursor
+
+    if llm_kind == "fake" and advance:
+        raise ValueError("假模型生成的周报只用来检查流程，不能推进回放游标")
+    if not PARQUET_PATH.exists():
+        raise SystemExit("还没有准备数据，请先运行：da-agent prepare-data")
+    target = week or read_cursor()
+    if target is None:
+        print("回放已结束：数据中没有更多的周。")
+        return 0
+    settings = Settings()
+    if llm_kind == "real":
+        llm, out_dir = OpenAICompatibleLLM(settings), WEEKLY_DIR
+    else:  # 假模型只检查流程：输出写到不提交的 runs/ 下，不污染正式周报目录
+        llm = FakeLLM(replies=[LLMReply(content="（假模型）检查周报流程用的固定回答，不代表任何真实分析。")])
+        out_dir = RUNS_DIR / "weekly-fake"
+    with connect(PARQUET_PATH) as con:
+        result = generate_weekly(con, target, llm, settings.llm_max_tool_calls, out_dir)
+        following = next_replay_week(con, target)
+    if advance:
+        write_cursor(following)
+    print(f"周报：{result['report']}")
+    print(f"AI 解读：{result['ai_status']}；数字有出处 {result['numbers_grounded']}/{result['numbers_checked']}")
+    if advance:
+        print(f"游标已推进到：{following or '（回放结束）'}")
+    github_output = os.environ.get("GITHUB_OUTPUT")
+    if github_output:  # 在 GitHub Actions 里，把周次交给后续的提交步骤
+        with open(github_output, "a", encoding="utf-8") as fh:
+            print(f"week={target}", file=fh)
+    return 0
+
+
 def prepare_data(force: bool) -> int:
     """下载、校验并转换数据集。"""
     from .dataset import prepare
@@ -235,24 +275,12 @@ def quality() -> int:
     return 0
 
 
-def _fmt(value: float | int | None, unit: str) -> str:
-    if value is None:
-        return "—"
-    if unit == "money":
-        return f"{value:,.2f}"
-    if unit == "rate":
-        return f"{value:.2%}"
-    if unit == "count":
-        return f"{value:,}"
-    return f"{value:.4f}"
-
-
 def week(week_label: str, compare: str) -> int:
     """输出某一周的确定性分析：指标对比、GMV 拆解、按国家和商品下钻、警告。"""
     from .cleaning import connect
     from .dataset import PARQUET_PATH
     from .decompose import decompose_gmv
-    from .metrics import drilldown, metric_summary
+    from .metrics import drilldown, format_value as _fmt, metric_summary
 
     if not PARQUET_PATH.exists():
         raise SystemExit("还没有准备数据，请先运行：da-agent prepare-data")
@@ -314,6 +342,10 @@ def main(argv: list[str] | None = None) -> int:
     ask_parser.add_argument("question", help="例如：上周 GMV 为什么下降？")
     ask_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 调用真实模型（默认）；fake 按剧本回放")
     ask_parser.add_argument("--script", type=Path, help="--llm fake 时使用的剧本文件")
+    weekly_parser = commands.add_parser("weekly", help="生成一周的周报（默认按回放游标）")
+    weekly_parser.add_argument("--week", help="指定周，例如 2010-W02；不填则用回放游标")
+    weekly_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 真实模型；fake 只检查流程")
+    weekly_parser.add_argument("--advance", action="store_true", help="生成成功后把回放游标推进一周")
     eval_parser = commands.add_parser("eval", help="评测：同一批题目在多个对比组各跑一遍，程序打分并汇总")
     eval_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 真实模型；fake 只检查流程")
     eval_parser.add_argument("--cases", help="只跑这些题目，逗号分隔，例如 w48-why,w49-trap")
@@ -346,6 +378,8 @@ def main(argv: list[str] | None = None) -> int:
             return ask(args.question, args.llm, args.script)
         if args.command == "check":
             return check(args.run_dir)
+        if args.command == "weekly":
+            return weekly_report(args.week, args.llm, args.advance)
         if args.command == "eval-rescore":
             return rescore_eval(args.out_dir)
         if args.command == "eval":

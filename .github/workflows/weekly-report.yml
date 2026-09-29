@@ -1,0 +1,87 @@
+# 每周一自动生成一份运营周报，提交到 reports/weekly/（历史数据回放，不是实时业务数据）。
+# 首次使用前：在仓库 Settings → Secrets and variables → Actions 里添加 Secret `LLM_API_KEY`。
+# 可选的 Variables：`LLM_MODEL`、`LLM_BASE_URL`（不设置则使用代码里的默认值）。
+name: Weekly report
+
+on:
+  schedule:
+    - cron: "0 1 * * 1"   # 每周一 01:00 UTC，即北京时间 09:00；GitHub 的定时任务在高峰期可能延迟
+  workflow_dispatch:
+    inputs:
+      llm:
+        description: "real：用真实模型生成并提交周报；fake：只检查流程，不提交"
+        type: choice
+        options: [real, fake]
+        default: real
+
+permissions:
+  contents: write   # 需要把周报提交回仓库
+
+concurrency:
+  group: weekly-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.2.0  # 该项目只发布完整版本号标签，没有 v10 这种浮动标签
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Restore prepared data
+        uses: actions/cache@v6
+        with:
+          path: data/processed/transactions.parquet
+          # 数据处理代码（含文件指纹）一改，缓存自动失效
+          key: parquet-${{ hashFiles('src/da_agent/dataset.py') }}
+
+      - name: Prepare data (downloads and converts only when the cache misses, about 3 minutes)
+        run: uv run da-agent prepare-data
+
+      - name: Generate weekly report
+        id: report
+        env:
+          LLM_MODE: ${{ inputs.llm }}   # 通过环境变量传入，不直接拼进脚本，避免注入
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
+        run: |
+          if [ "$LLM_MODE" = "fake" ]; then
+            uv run da-agent weekly --llm fake
+          else
+            uv run da-agent weekly --llm real --advance
+          fi
+
+      - name: Commit report
+        if: inputs.llm != 'fake'
+        env:
+          WEEK: ${{ steps.report.outputs.week }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add reports/weekly state/replay_cursor.json
+          if git diff --cached --quiet; then
+            echo "没有新的周报（回放可能已经结束）"
+            exit 0
+          fi
+          git commit -m "chore(weekly): report $WEEK"
+          git pull --rebase origin main
+          git push
+
+      - name: Upload report
+        uses: actions/upload-artifact@v7
+        with:
+          name: weekly-report-${{ steps.report.outputs.week || 'none' }}
+          path: |
+            reports/weekly/${{ steps.report.outputs.week }}.md
+            reports/weekly/runs/${{ steps.report.outputs.week }}
+            runs/weekly-fake
+          if-no-files-found: ignore

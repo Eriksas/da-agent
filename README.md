@@ -16,7 +16,7 @@
 | M4 | 报告与数字核查 | ✅ |
 | M5 | 电商分析流程（Skill，按需加载 + 流程检查） | ✅ |
 | M6 | 评测集与基线对比（含“无流程 / 有流程”对比） | ✅ |
-| M7 | GitHub Actions 自动周报 | 未开始 |
+| M7 | GitHub Actions 自动周报 | 进行中（待首次云端运行） |
 | M8 | 面试材料 | 未开始 |
 | 之后 | 上市公司财报分析流程（可选） | 未开始 |
 
@@ -39,6 +39,7 @@ uv run da-agent ask "上周 GMV 为什么变化？"  # 用真实模型回答，�
 uv run da-agent check runs/<运行编号>        # 对已保存的运行补做核查、重新生成报告，不调用模型
 uv run da-agent eval --repeats 2              # 评测：10 道题 × 3 个对比组，程序打分（约 200 次模型调用）
 uv run da-agent eval-rescore eval/results/<名称>  # 评分规则修改后，离线重新打分，不调用模型
+uv run da-agent weekly --llm fake --week 2010-W02 # 用假模型检查周报流程（输出在 runs/，不提交）
 ```
 
 ## 数据质量（M1 产出）
@@ -142,10 +143,26 @@ Agent 就是一个循环：把问题和工具说明书发给模型 → 模型回
 
 下一步候选（有评测依据）：工具提供日均指标（针对 W49 类错误）；提供确定性计算工具，让推导出的数字也有出处。两项都可以用同一题集重跑，对比改进前后。
 
-## 部署到 GitHub Actions
+## 部署到 GitHub Actions（M7）
 
 - **CI**（[ci.yml](.github/workflows/ci.yml)）：每次 push 自动运行测试和假模型示例，不需要密钥。
-- **自动周报**：M6 实现，届时补充 Secrets 配置、手动触发和查看产物的步骤。
+- **自动周报**（[weekly-report.yml](.github/workflows/weekly-report.yml)）：每周一北京时间 09:00 运行，准备数据（有缓存）→ 按回放游标生成下一周的周报 → 提交到 [reports/weekly](reports/weekly/) 并把游标推进一周。
+
+周报分两部分：第一部分（指标、GMV 拆解、下钻、警告）由程序直接计算；第二部分是 AI 解读，开头附自动核查结果，标注“待人工复核”。模型调用失败时，第一部分照常发布。
+
+**启用步骤：**
+
+1. 仓库 Settings → Secrets and variables → Actions → New repository secret，名称 `LLM_API_KEY`，值为自己的模型 API Key。密钥只保存在 GitHub Secrets 中，不进入代码和日志。
+2. 可选：在同一页的 Variables 中设置 `LLM_MODEL`、`LLM_BASE_URL`；不设置则使用默认值（MiniMax 国内站、`MiniMax-M3`）。
+3. Actions → Weekly report → Run workflow：先选 `fake` 检查流程（不提交），再选 `real` 生成第一份周报。
+4. 查看结果：[reports/weekly/README.md](reports/weekly/README.md) 是索引，每周一份报告，完整运行记录在 `reports/weekly/runs/<周>/`。
+
+**说明：**
+
+- 回放：[state/replay_cursor.json](state/replay_cursor.json) 记录下一次要分析的周，从 2010-W02 开始，跑完数据的最后一周（2011-W49）后自动停止。这是历史数据的模拟上线。
+- 用量：每次运行调用模型几次。M6 评测中“Agent 带流程”组平均每题调用模型 3.6 次、约 2.1 万 token，可作参考。
+- 停用：Actions 页面对该工作流选择 Disable workflow。
+- 注意：定时任务按 UTC 计时，高峰期可能延迟；公开仓库 60 天没有活动时，GitHub 会自动停用定时任务。来自 fork 的 PR 读不到 Secrets，这是 GitHub 的安全设计。
 
 ## 数据与致谢
 
