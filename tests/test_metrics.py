@@ -136,3 +136,17 @@ def test_results_are_json_serializable(con) -> None:
     json.dumps(metric_summary(con, "2011-W02"), ensure_ascii=False)
     json.dumps(drilldown(con, "2011-W02", dimension="product"), ensure_ascii=False)
     json.dumps(decompose_gmv(con, "2011-W02"), ensure_ascii=False)
+
+
+def test_rate_metric_reports_point_change_not_percent() -> None:
+    """取消率 2% → 4%：应报告 +2 个百分点，而不是“上升 100%”。
+    （变异测试发现：原样例的基期取消率是 0，这条规则从未被真正检验。）"""
+    rows = [(S2, 2, "500001", "10001", "A", 100, "2011-01-03 10:00", 1.0, "c1", UK),
+            (S2, 3, "C500002", "10001", "A", -2, "2011-01-03 11:00", 1.0, "c1", UK),
+            (S2, 4, "500003", "10001", "A", 100, "2011-01-10 10:00", 1.0, "c1", UK),
+            (S2, 5, "C500004", "10001", "A", -4, "2011-01-10 11:00", 1.0, "c1", UK)]
+    with connect_frame(make_frame(rows)) as con:
+        row = metric_summary(con, "2011-W02", metrics=["cancel_rate"])["metrics"][0]
+    assert (row["base"], row["current"]) == (0.02, 0.04)
+    assert row["change"] == 0.02
+    assert row["change_pct"] is None
