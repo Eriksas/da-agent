@@ -1,0 +1,306 @@
+{
+  "run_id": "20260929T173228-bc4dcb",
+  "question": "2011-W01 的 GMV 环比变化怎么看？",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "max_tool_calls": 15,
+  "use_skills": true,
+  "status": "completed",
+  "answer": "## 结论（先说口径：本次分析的是 2011-W01，基期 2010-W52）\n\n**2011-W01 的 GMV 环比不可直接比较。** 基期 2010-W52 整周没有交易（`metric_summary` 警告：“基期 2010-W52 整周没有交易（停业），各项指标为 0”），GMV 从 0 变成 130,274.65，工具返回的环比变化百分比为 `null`（分母为 0，工具未提供）。`data_quality_overview` 显示这是一次年末停业：最后营业日 2010-12-23，重开日 2011-01-04，间隔 12 天。所以这个“环比 +100%”只是**停业周之后的恢复开张**，不是业务增长。\n\n要真正读懂 2011-W01 发生了什么，只能换基期。同比 2010-W01 才是可比口径：GMV 130,274.65 vs 166,010.79，**-35,736.14（-21.53%）**。\n\n## 主要驱动（同比口径，按 Shapley 值排序，来自 `decompose_gmv` yoy）\n\n| 因子 | Shapley 贡献 | 事实依据 |\n|---|---|---|\n| 可识别客户客单价 | **-77,797.41**（占总变化 2.177） | 884.59 → 506.58 |\n| 活跃客户数 | **+31,551.30**（占比 -0.8829） | 166 → 207 人 |\n| 缺客户 ID 的 GMV | **+16,209.97**（占比 -0.4536） | 591.63 → 16,801.6 |\n| 人均订单数 | **-5,700.00**（占比 0.1595） | 1.1265 → 1.0821 |\n\n- **数据事实**：这周是“**人多了、但每人买得少**”——活跃客户 +41 人、订单 200→242（+21%）、客单价 830.05→538.33（-35.15%），GMV 仍跌 21.53%。GMV 口径包含之后被取消的订单，净销售额同期 164,721.85→125,510.62（-23.8%），方向一致。\n- **数据事实（新老客，`drilldown` yoy）**：新客 34,620.97→6,133.72（-28,487.25，订单 68→14）、老客 130,798.19→107,339.33（-23,458.86，订单 119→210）、未知客群 591.63→16,801.6（+16,209.97）。三项同向不抵消：新客和老客同时下滑，“未知”客群是**正向抵消项**，不能只谈最大的一项。\n- **数据事实（国家，`drilldown` yoy）**：United Kingdom 112,570.2→113,862.46（+1,292.26，190→224 单，样本充足），是本周几乎唯一持平的大盘来源；EIRE -47,422.88（占比 1.327）**但只有 3 单→1 单，样本不足，不单独下结论**；Germany、Australia、France 均为小样本，波动不可解读。\n- **推断**：GMV 的下滑集中在可识别客户的客单价上，而不是订单量或客户数上；英国盘是唯一样本充足且未下滑的分组，说明压力集中在非英国的小盘/长尾部分——但这一句的证据强度受小样本限制。\n- **待验证假设**：新客骤减（67→14 人）可能与年末停业后获客节奏、或基期客单价统计口径有关，**待业务确认**；没有任何对照实验，不能写成“导致”。\n\n## 需要注意\n\n1. **环比不可比（首要）**：2010-W52 停业，环比数字无业务含义；同理 2010-W53 数据起点附近的 2009-W52、2009-W53 也是低交易周，不要拿来做环比。\n2. **交易天数不同**：2011-W01 为 5 天，2010-W01 为 6 天（`metric_summary`），总量对比本身带有 1 天结构性差距。\n3. **左删失警告**：`metric_summary` yoy 提示“基期 2010-W01 距数据起点不足 52 周，起点之前的购买看不到，部分老客会被算成新客”——因此新客 67→14 的同比降幅**只能作为线索，不能定量采信**。\n4. **小样本**：新老客中的新客（14 单）、未知（18 单），国家维度除英国外全部订单数 < 30，工具已标记 `small_sample`，不对其单独下结论。\n5. **贡献占比 >100% / 为负**：因分项正负抵消，drilldown 与 decompose 的占比会出现超过 100% 或负数，勿直接当百分比读。\n6. **拆解顺序敏感性**：`decompose_gmv` 的 chain 值与 Shapley 有差异（如活跃客户数 40,856.54 vs 31,551.30），但 `range_across_orders` 显示每个因子的符号在 6 种顺序下保持一致（客单价、订单数恒为负，客户数、未知 GMV 恒为正），**方向稳健，量级敏感**。\n7. **极端大额订单不影响本周**：`data_quality_overview` 的复核清单中，77,183.60 的 MEDIUM CERAMIC TOP STORAGE JAR（2011-01-18）落在 2011-W03，168,469.60 的 PAPER CRAFT（2011-12-09）落在 2011-W49，均不在 W01 区间内。\n\n## 建议下一步\n\n- 想看“开张恢复”的真实水平：对比 2011-W01 与 2010-W48/2010-W49 这类正常营业周，而不是与停业周比。\n- 想定位客单价下滑：按商品维度 `drilldown`（gmv，同比，metric=gmv）看是否集中在某几个高价 SKU 被替换；同时核对 2010-W01 是否含大额高价订单抬高基数。\n- 向业务确认：12 天停业前后的采购/备货安排、2011-01-04 重开后的促销与投放节奏，以及新客 67→14 是否与获客渠道投放有关。\n- 若要判断“客单价下降是否可接受”，需要 A/B 或分群对照，当前数据只能给相关关系。\n\n## 可信度自评\n\n**说明局限后分享。** 核心结论（环比不可比、同比 -21.53%、客单价是最大拖累）数字直接来自工具且拆解方向稳健；但代理由新老客/国家小样本与左删失共同削弱，只能作为线索，不宜对外发布为定论。",
+  "error": null,
+  "budget_exhausted": false,
+  "steps": [
+    {
+      "round": 1,
+      "tool": "load_skill",
+      "arguments": {
+        "name": "ecommerce-metric-diagnosis"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 0
+    },
+    {
+      "round": 2,
+      "tool": "metric_summary",
+      "arguments": {
+        "week": "2011-W01",
+        "compare": "wow",
+        "metrics": [
+          "gmv",
+          "net_sales",
+          "cancelled_amount",
+          "cancel_rate",
+          "orders",
+          "aov",
+          "active_customers",
+          "new_customers",
+          "returning_customers",
+          "orders_per_customer",
+          "trading_days"
+        ]
+      },
+      "ok": true,
+      "error": null,
+      "ms": 24
+    },
+    {
+      "round": 3,
+      "tool": "data_quality_overview",
+      "arguments": {},
+      "ok": true,
+      "error": null,
+      "ms": 267
+    },
+    {
+      "round": 3,
+      "tool": "decompose_gmv",
+      "arguments": {
+        "week": "2011-W01",
+        "compare": "wow"
+      },
+      "ok": false,
+      "error": "基期 2010-W52 没有可识别客户的订单，无法按客户数 × 人均订单 × 客单价拆解",
+      "ms": 2
+    },
+    {
+      "round": 4,
+      "tool": "metric_summary",
+      "arguments": {
+        "compare": "yoy",
+        "metrics": [
+          "gmv",
+          "net_sales",
+          "orders",
+          "aov",
+          "active_customers",
+          "new_customers",
+          "returning_customers",
+          "orders_per_customer",
+          "trading_days"
+        ],
+        "week": "2011-W01"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 24
+    },
+    {
+      "round": 4,
+      "tool": "decompose_gmv",
+      "arguments": {
+        "compare": "yoy",
+        "week": "2011-W01"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 23
+    },
+    {
+      "round": 5,
+      "tool": "drilldown",
+      "arguments": {
+        "compare": "yoy",
+        "dimension": "country",
+        "metric": "gmv",
+        "top_n": 5,
+        "week": "2011-W01"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 67
+    },
+    {
+      "round": 5,
+      "tool": "drilldown",
+      "arguments": {
+        "compare": "yoy",
+        "dimension": "customer_type",
+        "metric": "gmv",
+        "top_n": 5,
+        "week": "2011-W01"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 57
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 35166,
+    "completion_tokens": 4198,
+    "llm_calls": 6
+  },
+  "started_at": "2026-09-29T09:32:28+00:00",
+  "seconds": 62.89,
+  "messages": [
+    {
+      "role": "system",
+      "content": "你是一名电商运营数据分析助手，帮助运营同学回答业务问题，例如“上周 GMV 为什么下降”。\n\n## 工作方式\n\n你只能通过工具获取数据。所有计算都由工具完成，你负责：选择工具、组织分析思路、解读结果、写结论。\n\n## 分析流程\n\n下面是可用的分析流程，只列出名字和用途。遇到对应的问题时，先调用 load_skill 加载完整流程，再按流程执行：\n\n- `ecommerce-metric-diagnosis`：电商指标异动诊断。回答“某周 GMV、订单、客单价为什么变了，变化来自哪里，能不能下结论”，适用于周度环比、同比分析和写周报。不适用于：只查一个数字（直接调用 metric_summary），AB 实验结果判断（直接调用 ab_proportion_test）。\n\n## 必须遵守\n\n1. 回答中的每个数字都必须来自工具返回的结果，原样引用；不要自己做任何计算（包括求和、相减、算百分比）。工具没有提供的数字，就写“工具未提供”。\n2. 工具结果里的 warnings（警告）必须在回答中说明，例如不完整周、停业、极端大额订单、样本不足。\n3. 没有对照实验时，不能下因果结论：写“与……同时发生”“可能的原因”，不要写“导致”“因为”。\n4. 工具报错时，根据错误信息修正参数再试；无法修正就在回答中说明。\n5. 数据范围：2009-W49 至 2011-W49（最后一条销售记录在 2011-12-09 12:50）。用户说“上周”“最近一周”时，指 2011-W48（最近的完整周），并在回答开头写明分析的是哪一周。\n6. 最多调用 15 次工具，信息够用就停。\n\n## 回答格式（中文 Markdown）\n\n1. **结论**：一两句话说清发生了什么。\n2. **主要原因**：按贡献大小列出，每条带数字，并注明来自哪个工具。\n3. **需要注意**：数据口径和警告。\n4. **建议下一步**：还需要看什么、验证什么。\n"
+    },
+    {
+      "role": "user",
+      "content": "2011-W01 的 GMV 环比变化怎么看？"
+    },
+    {
+      "content": "我先加载指标异动诊断流程，然后按流程分析 2011-W01 的环比变化。",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_function_68oklzm5d2le_1",
+          "function": {
+            "arguments": "{\"name\": \"ecommerce-metric-diagnosis\"}",
+            "name": "load_skill"
+          },
+          "type": "function",
+          "index": 0
+        }
+      ],
+      "name": "MiniMax AI",
+      "audio_content": "",
+      "reasoning_content": "The user asks about 2011-W01 GMV week-over-week change. Let me load the skill first.\n\nNote: 2011-W01 compared to previous week = 2010-W52. Let me load the skill."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_function_68oklzm5d2le_1",
+      "content": "{\"tool\": \"load_skill\", \"name\": \"ecommerce-metric-diagnosis\", \"required_tools\": [\"metric_summary\", \"decompose_gmv\", \"drilldown\"], \"content\": \"# 电商指标异动诊断\\n\\n## 1. 先判断问题属于哪一档\\n\\n- **查一个数**（如“上周订单数是多少”）：调用 `metric_summary`，直接回答，不走下面的完整流程。\\n- **异动诊断**（默认）：按第 2 节全部步骤执行。\\n- **周报**：按第 2 节全部步骤执行，并使用第 5 节的输出格式。\\n\\n## 2. 步骤（按顺序执行）\\n\\n1. **确定分析周和基期**：调用 `metric_summary`。用户说“上周”时，用系统提示中给出的最近完整周。\\n2. **可比性检查**：逐条阅读 `metric_summary` 返回的 warnings（不完整周、交易天数不同、节假日、极端大额行）。\\n   - **危险信号**：任一核心指标变化超过 50%，先排查数据问题（极端大额行、不完整周；需要时调用 `data_quality_overview`），再解读业务。\\n   - 当期与基期不可直接比较时，结论第一句必须说明“不可直接比较”及原因，后续结论都要带上这个保留。\\n3. **拆解**：调用 `decompose_gmv`，看活跃客户数、人均订单数、客单价、缺客户 ID 部分各贡献多少。以 Shapley 值为准；默认顺序与 Shapley 相差较大时，说明结论对拆解顺序敏感。\\n4. **下钻**：调用 `drilldown`，至少看国家和新老客两个维度，需要时再看商品。\\n   - 贡献不足总变化 10% 的分组不单独展开。\\n   - `others` 是前 N 名以外的合计，不等于剔除某一项后的结果。\\n   - 订单少于 30 的分组标记为样本不足，不对它单独下结论。\\n5. **写结论**：先对照第 3 节的陷阱清单逐条检查，再按第 4 节的写法组织。\\n\\n## 3. 陷阱清单（写结论前逐条对照）\\n\\n| 陷阱 | 在本数据里的样子 | 怎么避免 |\\n|---|---|---|\\n| 不完整周期比较 | 数据最后一周只到周五中午；节假日周只有几个交易日 | 交易天数不同时，不直接比较总量，结论写明保留 |\\n| 极端值 | 一笔 8 万件的订单当天被全额取消，GMV 虚高 | GMV 与净销售额一起看；引用极端大额行警告 |\\n| 忽略抵消项 | 只说“增长全靠老客”，忽略“未知”客群的正贡献 | 列出所有正负贡献，不只谈最大的一项 |\\n| 口径偷换 | 把“前 N 名以外的合计”当成“剔除某一项后的结果” | 只使用工具明确给出的口径，不自行换算 |\\n| 分母口径 | 取消率的分子（当周取消）和分母（当周 GMV）不一定是同一批订单 | 引用工具给出的口径说明 |\\n| 左删失 | 靠近数据起点的周，部分老客会被算成新客 | 引用新客相关警告，新老客结论从严 |\\n| 小样本 | 订单只有几单的国家“归零”或“翻倍” | 不对样本不足的分组下结论 |\\n| 相关当因果 | 没有对照实验却写“导致”“因为” | 用“同时发生”“可能的原因（待验证）” |\\n\\n## 4. 结论写法\\n\\n每个驱动因素写一行，标明它属于哪一类：\\n\\n- **数据事实**：工具直接给出的数字和结构，注明来自哪个工具。\\n- **推断**：由事实推出的判断，必须写出依据；没有依据就不写。\\n- **待验证假设**：业务原因（为什么会这样），必须注明“待业务确认”或“需要实验验证”。\\n\\n避免：循环解释（“GMV 上升是因为销售额上升”）、笼统表述（“多种因素共同作用”）、只谈最大的一项而忽略抵消项。\\n\\n## 5. 输出格式\\n\\n1. **结论**：一两句话；不可比时第一句先说明。\\n2. **主要驱动**：按贡献大小排序（Shapley 值），每条带数字和出处。\\n3. **需要注意**：警告与陷阱清单中命中的项。\\n4. **建议下一步**：还需要看什么数据、向业务确认什么、是否需要实验。\\n5. **可信度自评**：可直接分享 / 说明局限后分享 / 需修改后再分享，并写一句理由。\\n\\n## 6. 边界\\n\\n- 所有数字来自工具返回的结果，不自己计算。\\n- 不下因果结论，不做预测。\"}"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_function_oi9fd4xs597k_1",
+          "function": {
+            "arguments": "{\"week\": \"2011-W01\", \"compare\": \"wow\", \"metrics\": [\"gmv\", \"net_sales\", \"cancelled_amount\", \"cancel_rate\", \"orders\", \"aov\", \"active_customers\", \"new_customers\", \"returning_customers\", \"orders_per_customer\", \"trading_days\"]}",
+            "name": "metric_summary"
+          },
+          "type": "function",
+          "index": 0
+        }
+      ],
+      "name": "MiniMax AI",
+      "audio_content": "",
+      "reasoning_content": "Let me start with metric_summary for 2011-W01 with wow compare.\n\nNote: 2011-W01 compared to 2010-W52. 2010-W52 is a holiday week (Christmas/New Year). Let me call the tools.\n\nFirst: metric_summary."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_function_oi9fd4xs597k_1",
+      "content": "{\"tool\": \"metric_summary\", \"period\": {\"current\": \"2011-W01\", \"base\": \"2010-W52\", \"compare\": \"wow\", \"compare_label\": \"环比（上一周）\"}, \"metrics\": [{\"metric\": \"gmv\", \"label\": \"GMV\", \"unit\": \"money\", \"current\": 130274.65, \"base\": 0.0, \"change\": 130274.65, \"change_pct\": null}, {\"metric\": \"net_sales\", \"label\": \"净销售额\", \"unit\": \"money\", \"current\": 125510.62, \"base\": 0.0, \"change\": 125510.62, \"change_pct\": null}, {\"metric\": \"cancelled_amount\", \"label\": \"取消金额\", \"unit\": \"money\", \"current\": 4764.03, \"base\": 0.0, \"change\": 4764.03, \"change_pct\": null}, {\"metric\": \"cancel_rate\", \"label\": \"取消率\", \"unit\": \"rate\", \"current\": 0.0366, \"base\": null, \"change\": null, \"change_pct\": null}, {\"metric\": \"orders\", \"label\": \"订单数\", \"unit\": \"count\", \"current\": 242, \"base\": 0, \"change\": 242, \"change_pct\": null}, {\"metric\": \"aov\", \"label\": \"客单价\", \"unit\": \"money\", \"current\": 538.33, \"base\": null, \"change\": null, \"change_pct\": null}, {\"metric\": \"active_customers\", \"label\": \"活跃客户数\", \"unit\": \"count\", \"current\": 207, \"base\": 0, \"change\": 207, \"change_pct\": null}, {\"metric\": \"new_customers\", \"label\": \"新客数\", \"unit\": \"count\", \"current\": 14, \"base\": 0, \"change\": 14, \"change_pct\": null}, {\"metric\": \"returning_customers\", \"label\": \"老客数\", \"unit\": \"count\", \"current\": 193, \"base\": 0, \"change\": 193, \"change_pct\": null}, {\"metric\": \"orders_per_customer\", \"label\": \"人均订单数\", \"unit\": \"number\", \"current\": 1.0821, \"base\": null, \"change\": null, \"change_pct\": null}, {\"metric\": \"trading_days\", \"label\": \"交易天数\", \"unit\": \"count\", \"current\": 5, \"base\": 0, \"change\": 5, \"change_pct\": null}], \"definitions\": {\"gmv\": \"商品销售额（下单口径）：数量 × 单价之和，含之后被取消的订单\", \"net_sales\": \"GMV − 取消金额\", \"cancelled_amount\": \"当周 C 开头发票中的商品行金额（取正）；可能对应更早下的订单\", \"cancel_rate\": \"取消金额 ÷ GMV；分子分母不一定是同一批订单\", \"orders\": \"不同发票号个数\", \"aov\": \"GMV ÷ 订单数\", \"active_customers\": \"当周有购买的可识别客户数（不含缺失客户 ID）\", \"new_customers\": \"首次购买落在当周的客户；越靠近数据起点，越可能把老客算成新客\", \"returning_customers\": \"活跃客户数 − 新客数\", \"orders_per_customer\": \"可识别客户的订单数 ÷ 活跃客户数\", \"trading_days\": \"当周有销售的日期数\"}, \"notes\": [\"rate 类指标的 change 是百分点变化（0.01 = 1 个百分点），不计算变化百分比。\"], \"sample_size\": {\"current_orders\": 242, \"base_orders\": 0}, \"warnings\": [\"基期 2010-W52 整周没有交易（停业），各项指标为 0。\"]}"
+    },
+    {
+      "content": "基期 2010-W52 的指标全为 0（整周停业），先做数据质量核查，同时看拆解工具如何处理这个基期。",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_function_jwmirj21opdj_1",
+          "function": {
+            "arguments": "{}",
+            "name": "data_quality_overview"
+          },
+          "type": "function",
+          "index": 0
+        },
+        {
+          "id": "call_function_jwmirj21opdj_2",
+          "function": {
+            "arguments": "{\"week\": \"2011-W01\", \"compare\": \"wow\"}",
+            "name": "decompose_gmv"
+          },
+          "type": "function",
+          "index": 1
+        }
+      ],
+      "name": "MiniMax AI",
+      "audio_content": "",
+      "reasoning_content": "The base week 2010-W52 has zero trading. So this is a停业周. This is a big warning. GMV changed 100% (from 0 to 130,274.65), which exceeds 50% threshold → data quality check needed.\n\nLet me call data_quality_overview and decompose_gmv... Actually decompose_gmv with base=0 may be meaningless (dividing by zero). Let's try. Also drilldown may be meaningless.\n\nPer the skill: 危险信号: any core metric change > 50% → check data quality first. Let me call data_quality_overview. And also, since base is 0, decompose_gmv likely errors or is meaningless. Let me still try to see what the tool says, but careful about tool call budget (max 15). Let me do data_quality_overview first plus decompose_gmv in parallel? They're independent. Yes, call both in same block.\n\nActually, decompose might produce garbage (division by zero). But the tool presumably handles it and returns warnings. Let's try it — it's informative to see how it handles it. I'll call both in parallel."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_function_jwmirj21opdj_1",
+      "content": "{\"tool\": \"data_quality_overview\", \"data_range\": {\"first\": \"2009-12-01 07:45:00\", \"last\": \"2011-12-09 12:50:00\"}, \"clean_totals\": {\"sales_rows\": 1003357, \"orders\": 39516, \"customers\": 5852, \"gmv\": 19643861.64, \"cancelled_rows\": 17915, \"cancelled_amount\": 716462.57, \"net_sales\": 18927399.07, \"gmv_missing_customer\": 2575278.9, \"gmv_missing_customer_share\": 0.13109840352143715, \"orders_missing_customer\": 2922}, \"definitions\": {\"gmv\": \"商品销售额（下单口径）：数量 × 单价之和，含之后被取消的订单\", \"net_sales\": \"GMV − 取消金额\", \"cancelled_amount\": \"当周 C 开头发票中的商品行金额（取正）；可能对应更早下的订单\", \"aov\": \"GMV ÷ 订单数\", \"active_customers\": \"当周有购买的可识别客户数（不含缺失客户 ID）\", \"new_customers\": \"首次购买落在当周的客户；越靠近数据起点，越可能把老客算成新客\"}, \"rules\": [{\"id\": \"R01\", \"name\": \"两个工作表重叠期的记录\", \"action\": \"删除第 1 表中的重叠记录，保留第 2 表的\", \"rows\": 22523}, {\"id\": \"R02\", \"name\": \"坏账调整单（发票号 A 开头）\", \"action\": \"删除\", \"rows\": 6}, {\"id\": \"R03\", \"name\": \"非商品编码（运费、手续费、人工调整、测试、礼品卡）\", \"action\": \"不计入商品 GMV，按类别单独汇总\", \"rows\": 5913}, {\"id\": \"R04\", \"name\": \"取消/退货单（发票号 C 开头）\", \"action\": \"不计入 GMV（下单口径），单独计为取消金额\", \"rows\": 19494}, {\"id\": \"R05\", \"name\": \"非取消单但数量 ≤ 0\", \"action\": \"删除\", \"rows\": 3457}, {\"id\": \"R06\", \"name\": \"单价 ≤ 0\", \"action\": \"删除\", \"rows\": 6207}, {\"id\": \"R07\", \"name\": \"完全重复行\", \"action\": \"默认删除（保留第一条）；报告写明影响金额，删错会让 GMV 偏低\", \"rows\": 11812}, {\"id\": \"R08\", \"name\": \"缺少客户 ID\", \"action\": \"计入 GMV 和订单数；不计入活跃客户、复购、人均订单\", \"rows\": 243007}, {\"id\": \"R09\", \"name\": \"极端大额行\", \"action\": \"仅标记，列入人工复核清单\", \"rows\": 38}, {\"id\": \"R10\", \"name\": \"国家不明确\", \"action\": \"仅标记；按国家分析时单独成组\", \"rows\": 817}], \"sheet_overlap_identical\": true, \"coverage\": {\"weeks\": 106, \"partial_weeks\": [\"2009-W49\", \"2011-W49\"], \"low_trading_weeks\": [{\"week\": \"2009-W52\", \"monday\": \"2009-12-21\", \"trading_days\": 3}, {\"week\": \"2009-W53\", \"monday\": \"2009-12-28\", \"trading_days\": 0}, {\"week\": \"2010-W52\", \"monday\": \"2010-12-27\", \"trading_days\": 0}], \"closures\": [{\"last_open\": \"2009-12-23\", \"reopen\": \"2010-01-04\", \"gap_days\": 12}, {\"last_open\": \"2010-04-01\", \"reopen\": \"2010-04-06\", \"gap_days\": 5}, {\"last_open\": \"2010-12-23\", \"reopen\": \"2011-01-04\", \"gap_days\": 12}, {\"last_open\": \"2011-04-21\", \"reopen\": \"2011-04-26\", \"gap_days\": 5}]}, \"extreme_lines\": [{\"invoice\": \"C581484\", \"description\": \"PAPER CRAFT , LITTLE BIRDIE\", \"amount\": -168469.6, \"invoice_date\": \"2011-12-09 09:27:00\", \"cancelled_within_1d\": false, \"offset_by_manual_within_1d\": false}, {\"invoice\": \"581483\", \"description\": \"PAPER CRAFT , LITTLE BIRDIE\", \"amount\": 168469.6, \"invoice_date\": \"2011-12-09 09:15:00\", \"cancelled_within_1d\": true, \"offset_by_manual_within_1d\": false}, {\"invoice\": \"541431\", \"description\": \"MEDIUM CERAMIC TOP STORAGE JAR\", \"amount\": 77183.6, \"invoice_date\": \"2011-01-18 10:01:00\", \"cancelled_within_1d\": true, \"offset_by_manual_within_1d\": false}, {\"invoice\": \"C541433\", \"description\": \"MEDIUM CERAMIC TOP STORAGE JAR\", \"amount\": -77183.6, \"invoice_date\": \"2011-01-18 10:17:00\", \"cancelled_within_1d\": false, \"offset_by_manual_within_1d\": false}, {\"invoice\": \"556444\", \"description\": \"PICNIC BASKET WICKER 60 PIECES\", \"amount\": 38970.0, \"invoice_date\": \"2011-06-10 15:28:00\", \"cancelled_within_1d\": false, \"offset_by_manual_within_1d\": true}, {\"invoice\": \"530715\", \"description\": \"ROTATING SILVER ANGELS T-LIGHT HLDR\", \"amount\": 15818.4, \"invoice_date\": \"2010-11-04 11:36:00\", \"cancelled_within_1d\": false, \"offset_by_manual_within_1d\": false}]}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_function_jwmirj21opdj_2",
+      "content": "{\"error\": \"基期 2010-W52 没有可识别客户的订单，无法按客户数 × 人均订单 × 客单价拆解\"}"
+    },
+    {
+      "content": "基期 2010-W52 是停业周，环比拆解无法计算。我改用同比口径做一次可比的解读。",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_function_vzbkt6dgnjwc_1",
+          "function": {
+            "arguments": "{\"compare\": \"yoy\", \"metrics\": [\"gmv\", \"net_sales\", \"orders\", \"aov\", \"active_customers\", \"new_customers\", \"returning_customers\", \"orders_per_customer\", \"trading_days\"], \"week\": \"2011-W01\"}",
+            "name": "metric_summary"
+          },
+          "type": "function",
+          "index": 0
+        },
+        {
+          "id": "call_function_vzbkt6dgnjwc_2",
+          "function": {
+            "arguments": "{\"compare\": \"yoy\", \"week\": \"2011-W01\"}",
+            "name": "decompose_gmv"
+          },
+          "type": "function",
+          "index": 1
+        }
+      ],
+      "name": "MiniMax AI",
+      "audio_content": "",
+      "reasoning_content": "decompose fails. Now, the base week is a closure week (2010-12-23 last open, 2011-01-04 reopen, 12 days gap). So the WoW comparison is meaningless.\n\nWhat should I do? The key answer: 环比不可比 — 基期停业，GMV 从 0 变成 130,274.65，环比 +100% 只是\"从无到有\"，不是业务增长。\n\nShould I do drilldown? Drilldown against a zero base is also meaningless, but might still be useful to describe the current week's composition. Actually the skill says step 4 drilldown. But comparing to base=0 is meaningless. Let me consider a more useful alternative: compare 2011-W01 to a comparable week — e.g., the week before the previous closure, 2010-W51 (2010-12-20 week), or the corresponding prior-year week 2010-W01 (yoy). Hmm, but the user asked about 环比.\n\nA reasonable approach: answer the WoW question directly (it's not comparable), and additionally provide a more meaningful baseline for interpretation. I could do:\n- metric_summary 2011-W01 vs yoy (2010-W01) — but note 2009-W52/2009-W53 also had closures; 2010-W01 might be fine.\n- metric_summary 2011-W01 vs 2010-W51? Not directly supported (only wow/yoy).\n\nThe tool only supports wow and yoy. So the alternative comparison is yoy.\n\nLet me try drilldown with wow — it would probably show all groups as +full. It might be somewhat useless. Given tool budget (15, used 4), I can do a couple more useful calls.\n\nI think best: \n1. Confirm the closure fact (done).\n2. Provide yoy view of 2011-W01 to give a meaningful read (metric_summary yoy + decompose yoy) — this gives the \"real\" story of what happened in 2011-W01.\n3. Maybe drilldown for the current week composition — but with base=0 it's degenerate. Instead drilldown yoy.\n\nLet me be careful not to over-answer; the user asked \"2011-W01 的 GMV 环比变化怎么看？\" The right answer is \"环比不可比，基期停业\". Then offer the yoy as a substitute. I'll do yoy metric_summary + decompose yoy in parallel, then possibly drilldown yoy country & customer_type.\n\nThat's 4 more calls → total 8. Fine.\n\nActually, should I do a drilldown on wow at all? It would show \"all groups went from 0 to X\" — pure artifact. I'll skip wow drilldown and do yoy drilldown instead, clearly labeled.\n\nLet me call metric_summary(yoy) and decompose_gmv(yoy) in parallel."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_function_vzbkt6dgnjwc_1",
+      "content": "{\"tool\": \"metric_summary\", \"period\": {\"current\": \"2011-W01\", \"base\": \"2010-W01\", \"compare\": \"yoy\", \"compare_label\": \"同比（去年同一周）\"}, \"metrics\": [{\"metric\": \"gmv\", \"label\": \"GMV\", \"unit\": \"money\", \"current\": 130274.65, \"base\": 166010.79, \"change\": -35736.14, \"change_pct\": -0.2153}, {\"metric\": \"net_sales\", \"label\": \"净销售额\", \"unit\": \"money\", \"current\": 125510.62, \"base\": 164721.85, \"change\": -39211.23, \"change_pct\": -0.238}, {\"metric\": \"orders\", \"label\": \"订单数\", \"unit\": \"count\", \"current\": 242, \"base\": 200, \"change\": 42, \"change_pct\": 0.21}, {\"metric\": \"aov\", \"label\": \"客单价\", \"unit\": \"money\", \"current\": 538.33, \"base\": 830.05, \"change\": -291.73, \"change_pct\": -0.3515}, {\"metric\": \"active_customers\", \"label\": \"活跃客户数\", \"unit\": \"count\", \"current\": 207, \"base\": 166, \"change\": 41, \"change_pct\": 0.247}, {\"metric\": \"new_customers\", \"label\": \"新客数\", \"unit\": \"count\", \"current\": 14, \"base\": 67, \"change\": -53, \"change_pct\": -0.791}, {\"metric\": \"returning_customers\", \"label\": \"老客数\", \"unit\": \"count\", \"current\": 193, \"base\": 99, \"change\": 94, \"change_pct\": 0.9495}, {\"metric\": \"orders_per_customer\", \"label\": \"人均订单数\", \"unit\": \"number\", \"current\": 1.0821, \"base\": 1.1265, \"change\": -0.0444, \"change_pct\": -0.0394}, {\"metric\": \"trading_days\", \"label\": \"交易天数\", \"unit\": \"count\", \"current\": 5, \"base\": 6, \"change\": -1, \"change_pct\": -0.1667}], \"definitions\": {\"gmv\": \"商品销售额（下单口径）：数量 × 单价之和，含之后被取消的订单\", \"net_sales\": \"GMV − 取消金额\", \"orders\": \"不同发票号个数\", \"aov\": \"GMV ÷ 订单数\", \"active_customers\": \"当周有购买的可识别客户数（不含缺失客户 ID）\", \"new_customers\": \"首次购买落在当周的客户；越靠近数据起点，越可能把老客算成新客\", \"returning_customers\": \"活跃客户数 − 新客数\", \"orders_per_customer\": \"可识别客户的订单数 ÷ 活跃客户数\", \"trading_days\": \"当周有销售的日期数\"}, \"notes\": [\"rate 类指标的 change 是百分点变化（0.01 = 1 个百分点），不计算变化百分比。\"], \"sample_size\": {\"current_orders\": 242, \"base_orders\": 200}, \"warnings\": [\"基期 2010-W01 距数据起点不足 52 周：起点之前的购买看不到，部分老客会被算成新客。\"]}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_function_vzbkt6dgnjwc_2",
+      "content": "{\"tool\": \"decompose_gmv\", \"period\": {\"current\": \"2011-W01\", \"base\": \"2010-W01\", \"compare\": \"yoy\", \"compare_label\": \"同比（去年同一周）\"}, \"identity\": \"GMV = 活跃客户数 × 人均订单数 × 可识别客户客单价 + 缺客户 ID 的 GMV\", \"method\": \"连环替代法，默认顺序：活跃客户数 → 人均订单数 → 客单价\", \"base\": {\"active_customers\": 166, \"orders_per_customer\": 1.1265, \"identified_aov\": 884.59, \"unidentified_gmv\": 591.63, \"gmv\": 166010.79}, \"current\": {\"active_customers\": 207, \"orders_per_customer\": 1.0821, \"identified_aov\": 506.58, \"unidentified_gmv\": 16801.6, \"gmv\": 130274.65}, \"total_change\": -35736.14, \"contributions\": [{\"factor\": \"active_customers\", \"label\": \"活跃客户数\", \"chain\": 40856.54, \"shapley\": 31551.3, \"range_across_orders\": [22475.34, 40856.54], \"share_of_total_change\": -0.8829}, {\"factor\": \"orders_per_customer\", \"label\": \"人均订单数\", \"chain\": -8126.55, \"shapley\": -5700.0, \"range_across_orders\": [-8126.55, -3732.02], \"share_of_total_change\": 0.1595}, {\"factor\": \"identified_aov\", \"label\": \"可识别客户客单价\", \"chain\": -84676.1, \"shapley\": -77797.41, \"range_across_orders\": [-88148.86, -67904.51], \"share_of_total_change\": 2.177}, {\"factor\": \"unidentified_gmv\", \"label\": \"缺客户 ID 的 GMV\", \"chain\": 16209.97, \"shapley\": 16209.97, \"range_across_orders\": [16209.97, 16209.97], \"share_of_total_change\": -0.4536}], \"check\": {\"contributions_sum_to_total\": true}, \"notes\": [\"chain 是默认顺序下的贡献；shapley 是 6 种顺序的平均，与顺序无关；两者相差大时，说明结论对顺序敏感。\", \"share_of_total_change 按 shapley 计算；因子反向变化时占比可能超过 100% 或为负。\"], \"warnings\": []}"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_function_7mtg43pti14r_1",
+          "function": {
+            "arguments": "{\"compare\": \"yoy\", \"dimension\": \"country\", \"metric\": \"gmv\", \"top_n\": 5, \"week\": \"2011-W01\"}",
+            "name": "drilldown"
+          },
+          "type": "function",
+          "index": 0
+        },
+        {
+          "id": "call_function_7mtg43pti14r_2",
+          "function": {
+            "arguments": "{\"compare\": \"yoy\", \"dimension\": \"customer_type\", \"metric\": \"gmv\", \"top_n\": 5, \"week\": \"2011-W01\"}",
+            "name": "drilldown"
+          },
+          "type": "function",
+          "index": 1
+        }
+      ],
+      "name": "MiniMax AI",
+      "audio_content": "",
+      "reasoning_content": "Now drilldown yoy for country and customer_type to see where GMV fell. Note 2011-W01 had a big extreme line: invoice 541431, MEDIUM CERAMIC TOP STORAGE JAR, 77183.6, 2011-01-18 — wait, 2011-01-18 is in 2011-W03, not W01. So not in W01. But there is also the cancelled one in the same day. W01 is 2011-01-03 to 2011-01-09 (Monday Jan 3). The extreme order is Jan 18 — not in W01. So the extreme line doesn't affect W01. Good, but the identified_aov dropped a lot — 884.59 → 506.58. Hmm.\n\nLet me do drilldown yoy for country and customer_type."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_function_7mtg43pti14r_1",
+      "content": "{\"tool\": \"drilldown\", \"period\": {\"current\": \"2011-W01\", \"base\": \"2010-W01\", \"compare\": \"yoy\", \"compare_label\": \"同比（去年同一周）\"}, \"metric\": \"gmv\", \"metric_label\": \"GMV\", \"dimension\": \"country\", \"dimension_label\": \"国家\", \"definition\": \"商品销售额（下单口径）：数量 × 单价之和，含之后被取消的订单\", \"total\": {\"base\": 166010.79, \"current\": 130274.65, \"change\": -35736.14}, \"segments\": [{\"segment\": \"EIRE\", \"base\": 47630.88, \"current\": 208.0, \"change\": -47422.88, \"change_pct\": -0.9956, \"share_of_total_change\": 1.327, \"base_orders\": 3, \"current_orders\": 1, \"small_sample\": true}, {\"segment\": \"Australia\", \"base\": 0.0, \"current\": 7154.38, \"change\": 7154.38, \"change_pct\": null, \"share_of_total_change\": -0.2002, \"base_orders\": 0, \"current_orders\": 2, \"small_sample\": true}, {\"segment\": \"Germany\", \"base\": 204.75, \"current\": 3652.13, \"change\": 3447.38, \"change_pct\": 16.837, \"share_of_total_change\": -0.0965, \"base_orders\": 1, \"current_orders\": 4, \"small_sample\": true}, {\"segment\": \"France\", \"base\": 4589.12, \"current\": 3063.29, \"change\": -1525.83, \"change_pct\": -0.3325, \"share_of_total_change\": 0.0427, \"base_orders\": 3, \"current_orders\": 7, \"small_sample\": true}, {\"segment\": \"United Kingdom\", \"base\": 112570.2, \"current\": 113862.46, \"change\": 1292.26, \"change_pct\": 0.0115, \"share_of_total_change\": -0.0362, \"base_orders\": 190, \"current_orders\": 224, \"small_sample\": false}], \"others\": {\"description\": \"前 5 名以外的 7 个分组合计；不等于只剔除某一个分组后的结果\", \"segments\": 7, \"base\": 1015.84, \"current\": 2334.39, \"change\": 1318.55, \"share_of_total_change\": -0.0369}, \"segment_count\": 12, \"check\": {\"segments_sum_to_total\": true}, \"warnings\": [\"有分组反向变化，相互抵消后总变化较小，所以单个分组的贡献占比会超过 100% 或为负。\", \"部分分组订单数少于 30，变化可能是偶然波动，不宜单独下结论。\"]}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_function_7mtg43pti14r_2",
+      "content": "{\"tool\": \"drilldown\", \"period\": {\"current\": \"2011-W01\", \"base\": \"2010-W01\", \"compare\": \"yoy\", \"compare_label\": \"同比（去年同一周）\"}, \"metric\": \"gmv\", \"metric_label\": \"GMV\", \"dimension\": \"customer_type\", \"dimension_label\": \"新老客\", \"definition\": \"商品销售额（下单口径）：数量 × 单价之和，含之后被取消的订单\", \"total\": {\"base\": 166010.79, \"current\": 130274.65, \"change\": -35736.14}, \"segments\": [{\"segment\": \"新客\", \"base\": 34620.97, \"current\": 6133.72, \"change\": -28487.25, \"change_pct\": -0.8228, \"share_of_total_change\": 0.7972, \"base_orders\": 68, \"current_orders\": 14, \"small_sample\": true}, {\"segment\": \"老客\", \"base\": 130798.19, \"current\": 107339.33, \"change\": -23458.86, \"change_pct\": -0.1794, \"share_of_total_change\": 0.6564, \"base_orders\": 119, \"current_orders\": 210, \"small_sample\": false}, {\"segment\": \"未知\", \"base\": 591.63, \"current\": 16801.6, \"change\": 16209.97, \"change_pct\": 27.3988, \"share_of_total_change\": -0.4536, \"base_orders\": 13, \"current_orders\": 18, \"small_sample\": true}], \"others\": null, \"segment_count\": 3, \"check\": {\"segments_sum_to_total\": true}, \"warnings\": [\"基期 2010-W01 距数据起点不足 52 周：起点之前的购买看不到，部分老客会被算成新客。\", \"部分分组订单数少于 30，变化可能是偶然波动，不宜单独下结论。\"]}"
+    },
+    {
+      "content": "## 结论（先说口径：本次分析的是 2011-W01，基期 2010-W52）\n\n**2011-W01 的 GMV 环比不可直接比较。** 基期 2010-W52 整周没有交易（`metric_summary` 警告：“基期 2010-W52 整周没有交易（停业），各项指标为 0”），GMV 从 0 变成 130,274.65，工具返回的环比变化百分比为 `null`（分母为 0，工具未提供）。`data_quality_overview` 显示这是一次年末停业：最后营业日 2010-12-23，重开日 2011-01-04，间隔 12 天。所以这个“环比 +100%”只是**停业周之后的恢复开张**，不是业务增长。\n\n要真正读懂 2011-W01 发生了什么，只能换基期。同比 2010-W01 才是可比口径：GMV 130,274.65 vs 166,010.79，**-35,736.14（-21.53%）**。\n\n## 主要驱动（同比口径，按 Shapley 值排序，来自 `decompose_gmv` yoy）\n\n| 因子 | Shapley 贡献 | 事实依据 |\n|---|---|---|\n| 可识别客户客单价 | **-77,797.41**（占总变化 2.177） | 884.59 → 506.58 |\n| 活跃客户数 | **+31,551.30**（占比 -0.8829） | 166 → 207 人 |\n| 缺客户 ID 的 GMV | **+16,209.97**（占比 -0.4536） | 591.63 → 16,801.6 |\n| 人均订单数 | **-5,700.00**（占比 0.1595） | 1.1265 → 1.0821 |\n\n- **数据事实**：这周是“**人多了、但每人买得少**”——活跃客户 +41 人、订单 200→242（+21%）、客单价 830.05→538.33（-35.15%），GMV 仍跌 21.53%。GMV 口径包含之后被取消的订单，净销售额同期 164,721.85→125,510.62（-23.8%），方向一致。\n- **数据事实（新老客，`drilldown` yoy）**：新客 34,620.97→6,133.72（-28,487.25，订单 68→14）、老客 130,798.19→107,339.33（-23,458.86，订单 119→210）、未知客群 591.63→16,801.6（+16,209.97）。三项同向不抵消：新客和老客同时下滑，“未知”客群是**正向抵消项**，不能只谈最大的一项。\n- **数据事实（国家，`drilldown` yoy）**：United Kingdom 112,570.2→113,862.46（+1,292.26，190→224 单，样本充足），是本周几乎唯一持平的大盘来源；EIRE -47,422.88（占比 1.327）**但只有 3 单→1 单，样本不足，不单独下结论**；Germany、Australia、France 均为小样本，波动不可解读。\n- **推断**：GMV 的下滑集中在可识别客户的客单价上，而不是订单量或客户数上；英国盘是唯一样本充足且未下滑的分组，说明压力集中在非英国的小盘/长尾部分——但这一句的证据强度受小样本限制。\n- **待验证假设**：新客骤减（67→14 人）可能与年末停业后获客节奏、或基期客单价统计口径有关，**待业务确认**；没有任何对照实验，不能写成“导致”。\n\n## 需要注意\n\n1. **环比不可比（首要）**：2010-W52 停业，环比数字无业务含义；同理 2010-W53 数据起点附近的 2009-W52、2009-W53 也是低交易周，不要拿来做环比。\n2. **交易天数不同**：2011-W01 为 5 天，2010-W01 为 6 天（`metric_summary`），总量对比本身带有 1 天结构性差距。\n3. **左删失警告**：`metric_summary` yoy 提示“基期 2010-W01 距数据起点不足 52 周，起点之前的购买看不到，部分老客会被算成新客”——因此新客 67→14 的同比降幅**只能作为线索，不能定量采信**。\n4. **小样本**：新老客中的新客（14 单）、未知（18 单），国家维度除英国外全部订单数 < 30，工具已标记 `small_sample`，不对其单独下结论。\n5. **贡献占比 >100% / 为负**：因分项正负抵消，drilldown 与 decompose 的占比会出现超过 100% 或负数，勿直接当百分比读。\n6. **拆解顺序敏感性**：`decompose_gmv` 的 chain 值与 Shapley 有差异（如活跃客户数 40,856.54 vs 31,551.30），但 `range_across_orders` 显示每个因子的符号在 6 种顺序下保持一致（客单价、订单数恒为负，客户数、未知 GMV 恒为正），**方向稳健，量级敏感**。\n7. **极端大额订单不影响本周**：`data_quality_overview` 的复核清单中，77,183.60 的 MEDIUM CERAMIC TOP STORAGE JAR（2011-01-18）落在 2011-W03，168,469.60 的 PAPER CRAFT（2011-12-09）落在 2011-W49，均不在 W01 区间内。\n\n## 建议下一步\n\n- 想看“开张恢复”的真实水平：对比 2011-W01 与 2010-W48/2010-W49 这类正常营业周，而不是与停业周比。\n- 想定位客单价下滑：按商品维度 `drilldown`（gmv，同比，metric=gmv）看是否集中在某几个高价 SKU 被替换；同时核对 2010-W01 是否含大额高价订单抬高基数。\n- 向业务确认：12 天停业前后的采购/备货安排、2011-01-04 重开后的促销与投放节奏，以及新客 67→14 是否与获客渠道投放有关。\n- 若要判断“客单价下降是否可接受”，需要 A/B 或分群对照，当前数据只能给相关关系。\n\n## 可信度自评\n\n**说明局限后分享。** 核心结论（环比不可比、同比 -21.53%、客单价是最大拖累）数字直接来自工具且拆解方向稳健；但代理由新老客/国家小样本与左删失共同削弱，只能作为线索，不宜对外发布为定论。",
+      "role": "assistant",
+      "name": "MiniMax AI",
+      "audio_content": "",
+      "reasoning_content": "I have enough. Let me also consider: 2011-W01 trading days 5 vs 6 in 2010-W01 — 2011-01-03 to 2011-01-09. Why only 5 trading days? 2011-01-03 is a UK bank holiday (the other Christmas/New Year closures ended 2011-01-04 reopen). So one fewer trading day — the closure covers to 2011-01-04. So W01 has 5 trading days. That's a caveat.\n\nNow, key question: the user asked about 环比. Answer: 环比 +100%（从 0 到 130,274.65）不可用，因为基期 2010-W52 整周停业（2010-12-23 关门，2011-01-04 重开，gap 12 天）。这是圣诞/新年停业，不是业务增长。\n\nThen offer yoy as the meaningful read: GMV 130,274.65 vs 166,010.79，-21.53%。Drivers by Shapley:\n- identified_aov: -77,797.41 (share 2.177)\n- active_customers: +31,551.30 (share -0.8829)\n- unidentified_gmv: +16,209.97 (share -0.4536)\n- orders_per_customer: -5,700.00 (share 0.1595)\n\nDrilldown country: EIRE -47,422.88 but only 3→1 orders, small sample → 不单独下结论。UK +1,292.26 (190→224 orders, 样本足)。So the story: 大盘几乎全部由 UK 支撑。\n\ncustomer_type: 新客 -28,487.25 (68→14 orders, small sample flag on current 14 orders), 老客 -23,458.86 (119→210 orders, 样本足), 未知 +16,209.97 (13→18 orders, small sample).\n\nNote trading days 5 vs 6.\n\nWarnings to mention:\n- 基期 2010-W01 距数据起点不足 52 周 → 新客被高估/老客被算成新客的问题（对新客结论从严）\n- 部分分组订单 < 30\n- 极端大额订单：数据质量清单里的 77,183.6 MEDIUM CERAMIC TOP STORAGE JAR 是 2011-01-18（属于 2011-W03），不在 W01；581483/C581484 是 2011-12-09。所以 W01 未被这些极端行影响 — but I should be careful: I can state the dates of these extreme lines as facts, and note they fall outside W01. 2011-01-18 is in 2011-W03. Actually let me verify: 2011-01-18 is a Tuesday; ISO week of 2011-01-18: Jan 17 = Monday, so it's 2011-W03. Yes.\n- decompose warnings: chain vs shapley 差异大 → 结论对顺序敏感。E.g., active_customers chain 40,856.54 vs shapley 31,551.30; identified_aov chain -84,676.1 vs shapley -77,797.41. Range across orders for identified_aov: [-88,148.86, -67,904.51] — all negative, sign stable. For orders_per_customer: [-8126.55, -3732.02] all negative. For active_customers: [22475.34, 40856.54] all positive. For unidentified: positive. So signs are stable across orders → 结论方向稳健. Good, I can say that.\n\nShare >100% / negative because of offsetting.\n\nNow write the answer. Keep it structured. Don't compute anything myself. All numbers from tools.\n\nLet me be careful: \"环比 GMV 130,274.65，基期 0，变化 +130,274.65，change_pct 为 null（工具没有给百分比，因为分母为 0）\". Actually the tool returned change_pct: null for gmv in wow. So I should say 工具未提供环比变化百分比（基期为 0）。\n\nTool calls used: load_skill, metric_summary, data_quality_overview, decompose_gmv(fail), metric_summary yoy, decompose yoy, drilldown×2 = 8. Good.\n\nWrite answer."
+    }
+  ]
+}

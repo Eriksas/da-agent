@@ -124,3 +124,20 @@ def test_quick_lookup_without_skill_is_correct_use() -> None:
     result = score(case, fake_run("订单数为 634 单。"), CHECKS_OK, None)
     assert result["skill_loaded"] is False and result["skill_expected"] is False
     assert result["process_complete"] is None
+
+
+def test_compare_with_human_counts_both_views() -> None:
+    from da_agent.evaluation import compare_with_human
+
+    results = [
+        {"case": "c", "condition": "agent", "repeat": 1, "status": "completed", "passed": False,
+         "mentions": [{"hit": True}], "violations": []},   # 要点都对，但有自己算的数字：自动判失败
+        {"case": "c", "condition": "agent", "repeat": 2, "status": "completed", "passed": True,
+         "mentions": [{"hit": True}], "violations": []},   # 自动通过，人工发现推理错误
+    ]
+    review = {"reviewer": "r", "method": "m", "labels": [
+        {"case": "c", "condition": "agent", "repeat": 1, "blind": True, "human_pass": True, "reason": "对"},
+        {"case": "c", "condition": "agent", "repeat": 2, "blind": False, "human_pass": False, "reason": "推理错"}]}
+    result = compare_with_human(results, review)
+    assert (result["agree_substance"], result["agree_passed"], result["blind"]) == (1, 0, 1)
+    assert result["by_condition"] == {"agent": {"human_passed": 1, "reviewed": 2}}

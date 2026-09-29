@@ -270,6 +270,31 @@ def summarize(results: list[dict[str, Any]], cases: list[Case], conditions: list
             "by_condition": by_condition, "by_case": by_case, "failures": failures}
 
 
+def compare_with_human(results: list[dict[str, Any]], review: dict[str, Any]) -> dict[str, Any]:
+    """人工复核与自动评分的一致程度，分两种口径：
+
+    - 完整口径：自动评分的“通过”（含数字出处等全部条件）
+    - 要点口径：只看要点和禁止说法，和人工复核的判断标准一致
+    """
+    index = {(r["case"], r["condition"], r["repeat"]): r for r in results}
+    rows = []
+    for label in review["labels"]:
+        r = index[(label["case"], label["condition"], label["repeat"])]
+        substance = r["status"] == "completed" and all(m["hit"] for m in r["mentions"]) and not r["violations"]
+        rows.append({"case": label["case"], "condition": label["condition"], "repeat": label["repeat"],
+                     "blind": label["blind"], "human": label["human_pass"], "auto_passed": r["passed"],
+                     "auto_substance": substance, "reason": label["reason"]})
+    by_condition = {}
+    for row in rows:
+        stats = by_condition.setdefault(row["condition"], {"human_passed": 0, "reviewed": 0})
+        stats["reviewed"] += 1
+        stats["human_passed"] += row["human"]
+    return {"reviewer": review["reviewer"], "method": review["method"], "reviewed": len(rows),
+            "agree_passed": sum(row["human"] == row["auto_passed"] for row in rows),
+            "agree_substance": sum(row["human"] == row["auto_substance"] for row in rows),
+            "blind": sum(row["blind"] for row in rows), "by_condition": by_condition, "rows": rows}
+
+
 def _pct(value: float | None) -> str:
     return "—" if value is None else f"{value:.0%}"
 
@@ -310,6 +335,20 @@ def render_summary(summary: dict[str, Any], meta: dict[str, Any]) -> str:
             reasons.append("没有给出正确数值")
         lines.append(f"- `{f['case']}` {CONDITIONS[f['condition']]} 第 {f['repeat']} 次：{'；'.join(reasons)}"
                      f"（[记录](runs/{f['case']}/{f['condition']}-{f['repeat']}/report.md)）")
+    human = summary.get("human_review")
+    if human:
+        n = human["reviewed"]
+        lines += ["", "## 人工复核（陷阱题）", "", f"- 复核人：{human['reviewer']}。{human['method']}",
+                  "- 人工判断通过：" + "；".join(f"{CONDITIONS[c]} {s['human_passed']}/{s['reviewed']}"
+                                         for c, s in human["by_condition"].items()),
+                  f"- 自动评分与人工一致：只看要点和禁止说法（与人工标准相同）{human['agree_substance']}/{n}；"
+                  f"按自动“通过”（还要求数字全部来自工具）{human['agree_passed']}/{n}。{human['blind']}/{n} 份为盲评。", "",
+                  "| 题目 | 组别 | 次 | 人工 | 自动（要点口径） | 自动（通过） | 人工理由 |", "|---|---|---:|---|---|---|---|"]
+        for row in human["rows"]:
+            if row["human"] != row["auto_substance"] or row["human"] != row["auto_passed"]:
+                mark = {True: "通过", False: "不通过"}
+                lines.append(f"| {row['case']} | {CONDITIONS[row['condition']]} | {row['repeat']} | {mark[row['human']]} | "
+                             f"{mark[row['auto_substance']]} | {mark[row['auto_passed']]} | {row['reason']} |")
     lines += ["", "## 说明与局限", "",
               "- 通过需要同时满足：正常结束、要点全部提到、没有违规说法、数字全部有出处、正确数值出现在答案里。",
               "- 流程使用正确率：该用流程的题加载了流程、不该用的题（查数、实验、拒答）没有加载的比例；流程完成率只统计应该使用流程的题。",
@@ -342,6 +381,9 @@ def rescore(out_dir: Path, cases: list[Case], connections: Connections) -> dict[
     used_cases = [case for case in cases if any(r["case"] == case.id for r in results)]
     conditions = [c for c in condition_order if any(r["condition"] == c for r in results)]
     summary = summarize(results, used_cases, conditions)
+    review_path = out_dir / "human_review.json"
+    if review_path.exists():  # 有人工复核记录时，一并计算与自动评分的一致程度
+        summary["human_review"] = compare_with_human(results, json.loads(review_path.read_text(encoding="utf-8")))
     (out_dir / "results.json").write_text(json.dumps(results, ensure_ascii=False, indent=2) + chr(10),
                                           encoding="utf-8", newline=chr(10))
     (out_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + chr(10),

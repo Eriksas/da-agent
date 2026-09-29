@@ -147,3 +147,10 @@ def test_chinese_week_notation_is_not_a_number() -> None:
 def test_truncation_within_one_unit_is_accepted(answer: str, grounded: bool) -> None:
     run = run_with(answer, {"change": -21615.74})
     assert (check_run(run)["numbers"]["ungrounded"] == []) is grounded
+
+
+@pytest.mark.parametrize("answer", ["绝对差 +1.2pp", "置信区间 [-0.48pp, +1.62pp]", "提升 1.2 pp"])
+def test_pp_is_percentage_points(answer: str) -> None:
+    """正式评测发现：模型常用 pp 表示百分点，原来只认“个百分点”，把正确的数判成了没有出处。"""
+    run = run_with(answer, {"difference": 0.012, "confidence_interval": [-0.004788, 0.016217]})
+    assert check_run(run)["numbers"]["ungrounded"] == []
