@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from da_agent.agent import BUDGET_NOTICE, AgentRun, run_agent, save_run
+from da_agent.agent import BUDGET_NOTICE, FORMAT_NOTICE, AgentRun, run_agent, save_run
 from da_agent.checks import check_run
 from da_agent.cleaning import connect_frame
 from da_agent.llm import FakeLLM, LLMError, LLMReply, ToolCall
@@ -179,3 +179,20 @@ def test_repair_gets_its_own_small_tool_budget() -> None:
     assert run.answer == "GMV 为 145.0。"
     assert [m["content"] for m in run.messages if m["role"] == "user"].count(BUDGET_NOTICE) == 2
     assert_every_tool_call_answered(run)
+
+
+GARBLED = ']<]minimax[>[<tool_call>\n]<]minimax[>[ invoke name="load_skill">]<]minimax[>[</invoke>'  # 评测中出现过的样子（节选）
+
+
+def test_tool_call_written_as_text_is_retried_once() -> None:
+    run, llm = run_with([LLMReply(content=GARBLED), tools(call(1, "metric_summary", week="2011-W02")),
+                         LLMReply(content="GMV 为 145.0。")])
+    assert (run.status, run.answer, run.malformed_replies) == ("completed", "GMV 为 145.0。", 1)
+    assert llm.received[1]["messages"][-1]["content"] == FORMAT_NOTICE
+
+
+def test_tool_call_written_as_text_twice_is_not_an_answer() -> None:
+    """以前这段乱码会被当成最终答案，在周报里作为“AI 解读”发布。"""
+    run, _ = run_with([LLMReply(content=GARBLED), LLMReply(content=GARBLED)])
+    assert (run.status, run.answer) == ("malformed_answer", "")
+    assert "连续两次" in run.error

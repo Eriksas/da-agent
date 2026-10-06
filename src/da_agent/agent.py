@@ -11,9 +11,14 @@
 核查后退回修正（M7b）：模型交出答案后，程序先用和事后核查相同的规则查一遍数字出处。
 有找不到出处的数字，就把它们连同所在句子退回给模型，要求改成原数、用 calculate 计算或删掉，最多退回 1 次。
 修正这一步出了问题（模型报错、空回答、轮数用完）时保留修正前的答案：核查只能让答案变好，不能把答案弄丢。
+
+格式错误的工具调用（M7b 评测发现）：模型偶尔把工具调用写成一段文字（带 <tool_call>、<invoke> 之类的标记），
+而不是按接口格式发出。程序以前会把这段乱码当成最终答案。现在识别出来后提示模型重发一次；再错就以 malformed_answer 结束，
+不把乱码当答案发布。
 """
 
 import json
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -32,6 +37,9 @@ from .tools import ToolOutcome, execute, tool_specs
 
 SYSTEM_PROMPT_PATH = ROOT / "prompts" / "agent_system.md"
 BUDGET_NOTICE = "（系统提示）工具调用次数已用完。请不要再调用工具，直接根据已有的工具结果给出最终回答。"
+FORMAT_NOTICE = ("（系统提示）上一条回复里有工具调用的文字标记，但没有按函数调用的格式发出，程序无法执行。"
+                 "需要工具时请直接发起工具调用；不需要时请给出文字回答。")
+TOOL_CALL_TEXT = re.compile(r"<tool_call>|</?invoke\b|minimax\[>")  # 2026-10-07 评测中出现过的写法
 REPAIR_TOOL_CALLS = 3  # 修正时最多再调用几次工具（通常是 calculate）
 REPAIR_NOTICE = """（系统核查）回答里有 {count} 个数字在工具结果中找不到出处：
 {items}
@@ -48,11 +56,12 @@ class AgentRun:
     model: str
     max_tool_calls: int
     use_skills: bool = True  # 评测对比用：False 时不提供分析流程
-    status: str = "running"  # completed / empty_answer / llm_error / max_rounds
+    status: str = "running"  # completed / empty_answer / llm_error / max_rounds / malformed_answer
     answer: str = ""
     error: str | None = None
     budget_exhausted: bool = False
     repair: dict[str, Any] | None = None  # 被退回修正时：初稿、退回的数字、初稿在对话中的位置；没退回为 None
+    malformed_replies: int = 0  # 把工具调用写成文字的次数
     steps: list[dict[str, Any]] = field(default_factory=list)
     usage: dict[str, int] = field(default_factory=lambda: {"prompt_tokens": 0, "completion_tokens": 0, "llm_calls": 0})
     started_at: str = ""
@@ -97,6 +106,13 @@ def run_agent(question: str, *, llm: LLMClient, con: duckdb.DuckDBPyConnection, 
         for key in ("prompt_tokens", "completion_tokens"):
             run.usage[key] += (reply.usage or {}).get(key, 0)
         run.messages.append(reply.as_message())
+        if not reply.tool_calls and TOOL_CALL_TEXT.search(reply.content or ""):
+            run.malformed_replies += 1
+            if run.malformed_replies == 1:  # 提示重发一次
+                run.messages.append({"role": "user", "content": FORMAT_NOTICE})
+                continue
+            run.status, run.error = "malformed_answer", "模型连续两次把工具调用写成文字，没有按接口格式发出"
+            break
         if not reply.tool_calls:
             if repair and run.repair is None and reply.content:
                 ungrounded = number_check(reply.content, run.messages)["ungrounded"]
