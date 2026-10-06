@@ -8,6 +8,7 @@
 - `da-agent ask "问题"`：用真实模型（或 --llm fake 加剧本）回答问题，运行记录、核查结果和报告存到 runs/
 - `da-agent check runs/<运行编号>`：对已保存的运行补做核查，重新生成报告，不调用模型
 - `da-agent eval`：评测，同一批题目在多个对比组各跑一遍，程序打分，结果写到 eval/results/
+- `da-agent eval-compare 改进前目录 改进后目录`：对比两次评测，不调用模型
 - `da-agent weekly --advance`：按回放游标生成下一周的周报（GitHub Actions 每周运行），写到 reports/weekly/
 
 过程日志用 logging；命令行给用户看的结果用 print。
@@ -217,6 +218,24 @@ def rescore_eval(out_dir: Path) -> int:
     return 0
 
 
+def compare_eval(before_dir: Path, after_dir: Path) -> int:
+    """打印两次评测的对比表（读取两边的 summary.json，不调用模型）。"""
+    import json
+
+    from .evaluation import render_comparison
+
+    summaries = []
+    for out_dir in (before_dir, after_dir):
+        path = out_dir / "summary.json"
+        if not path.exists():
+            raise SystemExit(f"{out_dir} 下没有 summary.json，不是评测结果目录")
+        summaries.append(json.loads(path.read_text(encoding="utf-8")))
+    print(f"改进前：{before_dir.as_posix()}；改进后：{after_dir.as_posix()}")
+    print()
+    print(render_comparison(*summaries))
+    return 0
+
+
 def weekly_report(week: str | None, llm_kind: str, advance: bool) -> int:
     """生成一周的周报。默认分析游标指向的周；--advance 在成功后把游标推进一周。"""
     import os
@@ -362,6 +381,9 @@ def main(argv: list[str] | None = None) -> int:
     eval_parser.add_argument("--name", help="结果目录名，默认用时间")
     rescore_parser = commands.add_parser("eval-rescore", help="用当前规则给已保存的评测重新打分，不调用模型")
     rescore_parser.add_argument("out_dir", type=Path, help="评测结果目录，例如 eval/results/trial-3cases")
+    compare_parser = commands.add_parser("eval-compare", help="对比两次评测（改进前、改进后），不调用模型")
+    compare_parser.add_argument("before_dir", type=Path, help="改进前的评测结果目录")
+    compare_parser.add_argument("after_dir", type=Path, help="改进后的评测结果目录")
     check_parser = commands.add_parser("check", help="对已保存的运行补做核查并重新生成报告，不调用模型")
     check_parser.add_argument("run_dir", type=Path, help="运行目录，例如 runs/20260929T144747-a7db30")
     prepare_parser = commands.add_parser("prepare-data", help="下载并转换 UCI Online Retail II 数据集")
@@ -390,6 +412,8 @@ def main(argv: list[str] | None = None) -> int:
             return weekly_report(args.week, args.llm, args.advance)
         if args.command == "eval-rescore":
             return rescore_eval(args.out_dir)
+        if args.command == "eval-compare":
+            return compare_eval(args.before_dir, args.after_dir)
         if args.command == "eval":
             return evaluate(args.llm, args.cases, args.conditions, args.repeats, args.name, args.case_file)
         return demo(args.llm)

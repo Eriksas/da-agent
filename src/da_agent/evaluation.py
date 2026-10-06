@@ -392,6 +392,31 @@ def render_summary(summary: dict[str, Any], meta: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_comparison(before: dict[str, Any], after: dict[str, Any]) -> str:
+    """两次评测的对比表（同一批题、同一套评分规则）。只排版，所有数字来自两次的 summary.json。
+
+    只比较两次都有的对比组和题目。“不靠退回修正”是改进后的运行里，初稿本身就能通过的次数。
+    """
+    conditions = [c for c in after["conditions"] if c in before["conditions"]]
+    lines = ["| 组别 | 通过：改进前 → 改进后 | 其中不靠退回修正 | 数字有出处率 | 平均模型调用 | 平均 token | 平均用时（秒） |",
+             "|---|---:|---:|---:|---:|---:|---:|"]
+    for condition in conditions:
+        b, a = before["by_condition"][condition], after["by_condition"][condition]
+        lines.append(
+            f"| {a['label']} | {b['passed']}/{b['runs']} → {a['passed']}/{a['runs']} | "
+            f"{a.get('passed_without_repair', a['passed'])}/{a['runs']} | "
+            f"{_pct(b['grounded_rate'])} → {_pct(a['grounded_rate'])} | {b['avg_llm_calls']} → {a['avg_llm_calls']} | "
+            f"{b['avg_tokens']:.0f} → {a['avg_tokens']:.0f} | {b['avg_seconds']} → {a['avg_seconds']} |")
+    lines += ["", "| 题目 | 类别 | " + " | ".join(CONDITIONS[c] for c in conditions) + " |",
+              "|---|---|" + "---:|" * len(conditions)]
+    for case_id, row in after["by_case"].items():
+        if case_id in before["by_case"]:
+            cells = " | ".join(f"{before['by_case'][case_id][c]['passed']}/{before['by_case'][case_id][c]['runs']} → "
+                               f"{row[c]['passed']}/{row[c]['runs']}" for c in conditions)
+            lines.append(f"| {case_id} | {row['category']} | {cells} |")
+    return "\n".join(lines)
+
+
 def rescore(out_dir: Path, cases: list[Case], connections: Connections) -> dict[str, Any]:
     """用当前的核查和评分规则，给已保存的运行重新打分，不调用模型。
 

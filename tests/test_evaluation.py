@@ -11,7 +11,8 @@ from da_agent.agent import AgentRun, run_agent
 from da_agent.checks import check_run
 from da_agent.cleaning import connect_frame
 from da_agent.evaluation import (
-    HOLDOUT_PATH, Case, Connections, inject, load_cases, render_summary, rescore, run_eval, score, score_run,
+    HOLDOUT_PATH, Case, Connections, inject, load_cases, render_comparison, render_summary, rescore, run_eval, score,
+    score_run,
     verify_injection,
 )
 from da_agent.llm import FakeLLM, LLMReply, ToolCall
@@ -197,3 +198,21 @@ def test_draft_is_checked_only_against_what_existed_before_repair() -> None:
         run = asdict(run_agent(CASE.question, llm=llm, con=con, max_tool_calls=5))
     result = score_run(CASE, run, check_run(run), None)
     assert (result["repaired"], result["passed_without_repair"], result["passed"]) == (True, False, True)
+
+
+def test_comparison_table(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def evaluate_with(answer: str, out_dir: Path) -> dict:
+        def make_llm(case: Case, condition: str, i: int) -> FakeLLM:
+            return FakeLLM(replies=[LLMReply(content="", tool_calls=(
+                ToolCall(id="m", name="metric_summary", arguments={"week": "2011-W02"}),)), LLMReply(content=answer)])
+
+        return run_eval([CASE], ["agent"], 1, make_llm, FixtureConnections(), out_dir, max_tool_calls=5,
+                        progress=lambda _: None)
+
+    before = evaluate_with("2011-W02 的 GMV 上升。", tmp_path / "before")  # 没提到客单价：不通过
+    after = evaluate_with("2011-W02 的客单价下降。", tmp_path / "after")
+    table = render_comparison(before, after)
+    assert "| Agent 不带流程 | 0/1 → 1/1 | 1/1 |" in table
+    assert "| c1 | 测试 | 0/1 → 1/1 |" in table
+    assert cli.main(["eval-compare", str(tmp_path / "before"), str(tmp_path / "after")]) == 0
+    assert "0/1 → 1/1" in capsys.readouterr().out
