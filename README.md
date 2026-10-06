@@ -2,7 +2,7 @@
 
 **运营周报与指标异动分析 Agent。** 给一份运营数据和一个业务问题（如“上周 GMV 为什么下降？”），模型负责选择分析工具，Python 负责计算每一个数字，最终报告里的数字都能回查到工具输出。
 
-> 当前进度：**M7 自动周报**已上线，每周一由 GitHub Actions 生成一份，见 [reports/weekly](reports/weekly/README.md)。正在做 M7b 准确率提升，完整规划见 [PROJECT_BRIEF.md](PROJECT_BRIEF.md)。**真实运行样例**见 [examples/real_runs](examples/real_runs/README.md)。
+> 当前进度：**M7 自动周报**已上线，每周一由 GitHub Actions 生成一份，见 [reports/weekly](reports/weekly/README.md)；**M7b 准确率提升**已完成，前后对比见 [m7b-comparison.md](eval/results/m7b-comparison.md)。完整规划见 [PROJECT_BRIEF.md](PROJECT_BRIEF.md)，**真实运行样例**见 [examples/real_runs](examples/real_runs/README.md)。
 
 ## 进度
 
@@ -17,7 +17,7 @@
 | M5 | 电商分析流程（Skill，按需加载 + 流程检查） | ✅ |
 | M6 | 评测集与基线对比（含“无流程 / 有流程”对比） | ✅ |
 | M7 | GitHub Actions 自动周报 | ✅ |
-| M7b | 准确率提升（计算工具、核查后退回修正、日均指标，留出题检验） | 进行中 |
+| M7b | 准确率提升（计算工具、核查后退回修正、日均指标，留出题检验） | ✅ |
 | M8 | 面试材料 | 未开始 |
 | 之后 | 上市公司财报分析流程（可选） | 未开始 |
 
@@ -39,7 +39,9 @@ uv run da-agent doctor --ping    # 发 1 次真实请求，确认模型地址、
 uv run da-agent ask "上周 GMV 为什么变化？"  # 用真实模型回答，运行记录、核查结果和报告存到 runs/
 uv run da-agent check runs/<运行编号>        # 对已保存的运行补做核查、重新生成报告，不调用模型
 uv run da-agent eval --repeats 2              # 评测：10 道题 × 3 个对比组，程序打分（约 200 次模型调用）
+uv run da-agent eval --case-file eval/holdout.yaml --conditions agent,agent_skill  # 留出题（M7b）
 uv run da-agent eval-rescore eval/results/<名称>  # 评分规则修改后，离线重新打分，不调用模型
+uv run da-agent eval-compare eval/results/<改进前> eval/results/<改进后>  # 前后对比表，不调用模型
 uv run da-agent weekly --llm fake --week 2010-W02 # 用假模型检查周报流程（输出在 runs/，不提交）
 ```
 
@@ -65,6 +67,7 @@ Agent 在 M3 中调用的就是这些确定性函数，数字全部由 SQL 和 P
 | `decompose_gmv` | GMV 的变化来自客户数、人均订单数还是客单价（连环替代法 + Shapley 分解） | [decompose.py](src/da_agent/decompose.py) |
 | `drilldown` | 变化主要来自哪个国家、新客还是老客、哪个商品 | [metrics.py](src/da_agent/metrics.py) |
 | `proportion_test` 等 | AB 实验的显著性、置信区间、所需样本量、样本比例失衡（SRM）检查 | [abtest.py](src/da_agent/abtest.py) |
+| `calculate`（M7b） | 四则运算：求和、相减、占比、变化率、日均。让推导出的数字也有出处 | [calculator.py](src/da_agent/calculator.py) |
 
 设计要点：
 
@@ -79,7 +82,7 @@ Agent 在 M3 中调用的就是这些确定性函数，数字全部由 SQL 和 P
 
 Agent 就是一个循环：把问题和工具说明书发给模型 → 模型回复“请调用某个工具” → 程序执行工具、把结果放回对话 → 再发给模型……直到模型不再要工具、直接作答。模型负责决定下一步做什么，程序负责执行和约束。代码见 [agent.py](src/da_agent/agent.py)、[tools.py](src/da_agent/tools.py)、[llm.py](src/da_agent/llm.py)，系统提示词见 [prompts/agent_system.md](prompts/agent_system.md)。
 
-- **工具只读**：6 个工具只查询和计算，不能改数据、不能写文件，也不能执行模型生成的代码。
+- **工具只读**：工具只查询和计算，不能改数据、不能写文件，也不能执行模型生成的代码（M7b 加入的 `calculate` 只接受四则运算，先解析语法树再逐个检查，不用 `eval`）。
 - **参数先校验**：参数格式用 pydantic 定义，同一份定义生成给模型看的说明书，也在执行前校验。参数不合法、工具拒绝计算、工具内部出错，都会把原因交还给模型，让它改正或说明，程序不会崩溃。
 - **四道闸**：工具调用次数上限；轮数上限；模型发出的每个工具请求都有对应回复（接口要求）；模型调用失败时以明确状态结束。
 - **运行记录**：每次运行在 `runs/` 下保存完整对话（`run.json`）和答案（`answer.md`），可以逐步复盘，不含密钥。
@@ -142,7 +145,30 @@ Agent 就是一个循环：把问题和工具说明书发给模型 → 模型回
 
 局限：只有 10 道题、每组 2 次、单一模型；关键词评分是近似的；人工复核由 Claude 辅助完成，待项目作者确认。
 
-下一步候选（有评测依据）：工具提供日均指标（针对 W49 类错误）；提供确定性计算工具，让推导出的数字也有出处。两项都可以用同一题集重跑，对比改进前后。
+评测提出的两项改进（日均指标、确定性计算工具）已在 M7b 完成，见下一节。
+
+## 准确率提升（M7b 产出）
+
+M6 中 Agent 没通过的运行，大多是因为数字找不到出处（模型自己做了加减和占比），另有 W49 的推理错误。M7b 对症做了四件事：
+
+1. **`calculate` 计算工具**：只做四则运算；算式的输入也要能在工具结果里找到，否则算出的数不算出处。
+2. **核查后退回修正**：答案里有找不到出处的数字，程序把它们退回模型修正一次；修正失败时保留初稿。
+3. **日均指标和“交易天数不同”警告**：以前 5 天对 6 天的银行假日周没有任何提示。
+4. **几处小修**：AB 工具写明推导量、核查器忽略小节编号、周报里 AI 部分的标题降级。
+
+为了防止只针对原题调优，另写了 5 道留出题，在改代码之前冻结并先跑出改进前成绩。完整对比和解读：[m7b-comparison.md](eval/results/m7b-comparison.md)。
+
+| 通过次数 | Agent 不带流程 | Agent 带流程 |
+|---|---:|---:|
+| 原题（10 道）：改进前 → 改进后 | 9/20 → 18/20 | 9/20 → 20/20 |
+| 其中不靠退回修正 | 10/20 | 12/20 |
+| 留出题（5 道）：改进前 → 改进后 | 6/10 → 10/10 | 5/10 → 8/10 |
+| 其中不靠退回修正 | 4/10 | 5/10 |
+
+- **提升主要来自“核查后退回修正”**。修正用的就是评分用的核查器，所以“数字有出处”这一项的提升有一部分是构造出来的；只看初稿，成绩和改进前差不多。
+- **不靠构造的改进**：W49 从 M6 的 4 次全错变为 3 次正确（4 次都用 `calculate` 算出剔除大单后环比 +1.90%）；留出题的三道陷阱改进后都通过；核查器拦下了 4 次输入找不到出处的计算。
+- **代价**：每次运行的 token 约为原来的 1.9 倍（原题：16,165 → 30,286、20,884 → 38,729）。
+- **剩下的问题**：W49 仍有 1 次用不完整周的总量下结论；留出题“带流程”组的 2 次失败，是模型把工具调用写成了一段文字、程序把它当成了答案。评测后已加防护，但没有重跑。
 
 ## 部署到 GitHub Actions（M7）
 

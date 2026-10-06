@@ -405,8 +405,8 @@ def render_comparison(before: dict[str, Any], after: dict[str, Any]) -> str:
         lines.append(
             f"| {a['label']} | {b['passed']}/{b['runs']} → {a['passed']}/{a['runs']} | "
             f"{a.get('passed_without_repair', a['passed'])}/{a['runs']} | "
-            f"{_pct(b['grounded_rate'])} → {_pct(a['grounded_rate'])} | {b['avg_llm_calls']} → {a['avg_llm_calls']} | "
-            f"{b['avg_tokens']:.0f} → {a['avg_tokens']:.0f} | {b['avg_seconds']} → {a['avg_seconds']} |")
+            f"{_pct(b['grounded_rate'])} → {_pct(a['grounded_rate'])} | {b['avg_llm_calls']:.1f} → {a['avg_llm_calls']:.1f} | "
+            f"{b['avg_tokens']:,.0f} → {a['avg_tokens']:,.0f} | {b['avg_seconds']:.1f} → {a['avg_seconds']:.1f} |")
     lines += ["", "| 题目 | 类别 | " + " | ".join(CONDITIONS[c] for c in conditions) + " |",
               "|---|---|" + "---:|" * len(conditions)]
     for case_id, row in after["by_case"].items():
