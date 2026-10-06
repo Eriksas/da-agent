@@ -209,3 +209,9 @@ def test_only_the_first_user_message_is_a_source() -> None:
     """后面的“用户消息”是程序加的提示（例如核查退回时列出的数字），不能把这些数字变成有出处。"""
     notice = {"role": "user", "content": "（系统核查）找不到出处的数字：「5,555.55」"}
     assert [m["text"] for m in check_run(with_messages("增长 5,555.55", notice))["numbers"]["ungrounded"]] == ["5,555.55"]
+
+
+def test_slash_dates_are_not_numbers() -> None:
+    """留出题改进前的运行：“闭店为 4/21–4/25”里的 25 被当成数字判为没有出处。分数和比例不受影响。"""
+    assert texts("闭店为 4/21–4/25，截止 2011/12/09") == []
+    assert texts("480/8000 对 520/8000") == ["480", "8000", "520", "8000"]
