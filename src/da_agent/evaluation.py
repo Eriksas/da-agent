@@ -33,6 +33,7 @@ from .periods import week_monday
 from .report import render_report
 
 CASES_PATH = ROOT / "eval" / "cases.yaml"
+HOLDOUT_PATH = ROOT / "eval" / "holdout.yaml"  # 留出题：改进之前冻结，用来检验改进能不能推广
 RESULTS_DIR = ROOT / "eval" / "results"
 CONDITIONS = {
     "baseline": "直接问模型（只给周度指标表，无工具）",
@@ -301,10 +302,11 @@ def _pct(value: float | None) -> str:
 
 def render_summary(summary: dict[str, Any], meta: dict[str, Any]) -> str:
     """结果表（Markdown）。只排版，不新增任何数字。"""
+    cases_file = meta.get("cases_file", "eval/cases.yaml")
     lines = [f"# 评测结果：{meta['name']}", "",
              f"- 模型：{meta['model']}；题目 {summary['cases']} 道；共 {summary['runs']} 次运行；"
              f"Agent 组每题重复 {meta['repeats']} 次，直接问模型组每题 1 次",
-             f"- 时间：{meta['finished_at']}；题集与评分规则见 [eval/cases.yaml](../../cases.yaml)", "",
+             f"- 时间：{meta['finished_at']}；题集与评分规则见 [{cases_file}](../../{Path(cases_file).name})", "",
              "## 按对比组", "",
              "| 组别 | 运行 | 通过 | 通过率 | 要点命中率 | 违规 | 数字有出处率 | 流程使用正确率 | 流程完成率 | 平均工具调用 | 平均模型调用 | 平均 token | 平均用时（秒） |",
              "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]

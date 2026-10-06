@@ -1,13 +1,16 @@
 """评测模块：题集校验、异动注入、打分规则、端到端汇总。全部用小样例和假模型。"""
 
 import json
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
 
+from da_agent import cli
+from da_agent.agent import AgentRun
 from da_agent.cleaning import connect_frame
 from da_agent.evaluation import (
-    Case, Connections, inject, load_cases, render_summary, rescore, run_eval, score, verify_injection,
+    HOLDOUT_PATH, Case, Connections, inject, load_cases, render_summary, rescore, run_eval, score, verify_injection,
 )
 from da_agent.llm import FakeLLM, LLMReply, ToolCall
 from helpers import make_frame
@@ -19,6 +22,26 @@ def test_real_case_file_is_valid() -> None:
     assert len(cases) == 10
     assert {case.id for case in cases} >= {"w49-trap", "out-of-range", "injected-eire"}
     assert next(c for c in cases if c.id == "injected-eire").inject == {"drop_country": "EIRE", "week": "2011-W31"}
+
+
+def test_holdout_file_is_valid_and_separate() -> None:
+    holdout = load_cases(HOLDOUT_PATH)
+    assert len(holdout) == 5
+    assert not {c.id for c in holdout} & {c.id for c in load_cases()}  # 和原题集重名的话，结果会混在一起
+
+
+def test_rescore_uses_the_case_file_recorded_in_meta(tmp_path: Path) -> None:
+    run = asdict(AgentRun(run_id="r", question="2011-W41 的 GMV 为什么下降？", model="fake", max_tool_calls=5,
+                          status="completed", answer="2011-W41 的客单价下降。"))
+    run["messages"] = [{"role": "system", "content": "s"}, {"role": "user", "content": run["question"]}]
+    run_dir = tmp_path / "runs" / "w41-why" / "agent-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run.json").write_text(json.dumps(run, ensure_ascii=False), encoding="utf-8")
+    meta = {"name": "t", "model": "fake", "repeats": 1, "cases_file": "eval/holdout.yaml", "finished_at": "now"}
+    (tmp_path / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    assert cli.main(["eval-rescore", str(tmp_path)]) == 0  # w41-why 只在留出题里：读错题集会找不到这道题
+    assert "[eval/holdout.yaml](../../holdout.yaml)" in (tmp_path / "summary.md").read_text(encoding="utf-8")
+    assert json.loads((tmp_path / "results.json").read_text(encoding="utf-8"))[0]["passed"] is True
 
 
 @pytest.mark.parametrize("text, message", [

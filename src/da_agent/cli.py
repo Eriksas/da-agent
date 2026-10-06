@@ -139,7 +139,8 @@ def check(run_dir: Path) -> int:
     return 1 if checks["numbers"]["ungrounded"] else 0
 
 
-def evaluate(llm_kind: str, case_ids: str | None, conditions: str, repeats: int, name: str | None) -> int:
+def evaluate(llm_kind: str, case_ids: str | None, conditions: str, repeats: int, name: str | None,
+             case_file: str = "eval/cases.yaml") -> int:
     """运行评测并写出结果表。--llm fake 只用来检查流程是否跑得通，结果不代表模型表现。"""
     import json
     from datetime import datetime
@@ -147,10 +148,13 @@ def evaluate(llm_kind: str, case_ids: str | None, conditions: str, repeats: int,
     from .dataset import PARQUET_PATH
     from .evaluation import Connections, RESULTS_DIR, load_cases, render_summary, run_eval
     from .llm import LLMReply, OpenAICompatibleLLM
+    from .paths import ROOT
 
     if not PARQUET_PATH.exists():
         raise SystemExit("还没有准备数据，请先运行：da-agent prepare-data")
-    cases = load_cases()
+    if not (ROOT / case_file).exists():
+        raise ValueError(f"题集文件不存在：{case_file}")
+    cases = load_cases(ROOT / case_file)
     if case_ids:
         wanted = [i.strip() for i in case_ids.split(",") if i.strip()]
         unknown = sorted(set(wanted) - {case.id for case in cases})
@@ -175,7 +179,8 @@ def evaluate(llm_kind: str, case_ids: str | None, conditions: str, repeats: int,
         raise SystemExit(f"{out_dir} 已存在，请换一个 --name")
     summary = run_eval(cases, [c.strip() for c in conditions.split(",")], repeats, make_llm, Connections(),
                        out_dir, settings.llm_max_tool_calls)
-    meta = {"name": name, "model": model, "repeats": repeats, "finished_at": f"{datetime.now():%Y-%m-%d %H:%M}"}
+    meta = {"name": name, "model": model, "repeats": repeats, "cases_file": case_file,
+            "finished_at": f"{datetime.now():%Y-%m-%d %H:%M}"}
     (out_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     markdown = render_summary(summary, meta)
     (out_dir / "summary.md").write_text(markdown, encoding="utf-8")
@@ -192,15 +197,17 @@ def rescore_eval(out_dir: Path) -> int:
     from datetime import datetime
 
     from .evaluation import Connections, load_cases, render_summary, rescore
+    from .paths import ROOT
 
     meta_path = out_dir / "meta.json"
     if not meta_path.exists():
         raise SystemExit(f"{out_dir} 下没有 meta.json，不是评测结果目录")
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
     original = out_dir / "summary.original.md"
     if (out_dir / "summary.md").exists() and not original.exists():
         shutil.copy(out_dir / "summary.md", original)
-    summary = rescore(out_dir, load_cases(), Connections())
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    # 用当时的题集重评；M7b 之前的结果没有记录题集文件，都来自 eval/cases.yaml
+    summary = rescore(out_dir, load_cases(ROOT / meta.get("cases_file", "eval/cases.yaml")), Connections())
     meta["rescored_at"] = f"{datetime.now():%Y-%m-%d %H:%M}"
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     markdown = render_summary(summary, meta)
@@ -348,6 +355,7 @@ def main(argv: list[str] | None = None) -> int:
     weekly_parser.add_argument("--advance", action="store_true", help="生成成功后把回放游标推进一周")
     eval_parser = commands.add_parser("eval", help="评测：同一批题目在多个对比组各跑一遍，程序打分并汇总")
     eval_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 真实模型；fake 只检查流程")
+    eval_parser.add_argument("--case-file", default="eval/cases.yaml", help="题集文件（相对仓库根目录），例如 eval/holdout.yaml")
     eval_parser.add_argument("--cases", help="只跑这些题目，逗号分隔，例如 w48-why,w49-trap")
     eval_parser.add_argument("--conditions", default="baseline,agent,agent_skill", help="对比组，逗号分隔")
     eval_parser.add_argument("--repeats", type=int, default=2, help="Agent 组每题重复次数（直接问模型组固定 1 次）")
@@ -383,7 +391,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "eval-rescore":
             return rescore_eval(args.out_dir)
         if args.command == "eval":
-            return evaluate(args.llm, args.cases, args.conditions, args.repeats, args.name)
+            return evaluate(args.llm, args.cases, args.conditions, args.repeats, args.name, args.case_file)
         return demo(args.llm)
     except (ValueError, MissingApiKeyError) as exc:  # 输入不合法或缺少密钥：给出原因，不打印报错堆栈
         print(f"错误：{exc}")
