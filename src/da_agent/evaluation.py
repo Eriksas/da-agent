@@ -168,6 +168,29 @@ def score(case: Case, run: dict[str, Any], checks: dict[str, Any], expected: flo
     }
 
 
+def draft_view(run: dict[str, Any]) -> dict[str, Any] | None:
+    """被核查退回之前的版本：答案换成初稿，对话和工具调用都截到初稿为止。没有被退回过时返回 None。
+
+    用来单独衡量“退回修正”这一步的作用：同一次运行，修正前、修正后各打一次分。
+    """
+    repair = run.get("repair")
+    if not repair:
+        return None
+    return {**run, "answer": repair["draft"], "status": "completed",
+            "messages": run["messages"][:repair["draft_message_index"] + 1],
+            "steps": [step for step in run["steps"] if step["round"] < repair["draft_round"]]}
+
+
+def score_run(case: Case, run: dict[str, Any], checks: dict[str, Any], expected: float | None) -> dict[str, Any]:
+    """打分，并在被退回修正过时给初稿也打一次分。"""
+    result = score(case, run, checks, expected)
+    draft = draft_view(run)
+    result["repaired"] = draft is not None
+    result["passed_without_repair"] = (result["passed"] if draft is None
+                                       else score(case, draft, check_run(draft), expected)["passed"])
+    return result
+
+
 def _save(run_dir: Path, run: dict[str, Any], checks: dict[str, Any], result: dict[str, Any]) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     files = {"run.json": run, "checks.json": checks, "score.json": result}
@@ -217,7 +240,7 @@ def run_eval(cases: list[Case], conditions: list[str], repeats: int,
                             use_skills=condition == "agent_skill")
         run_dict = asdict(run)
         checks = check_run(run_dict)
-        result = score(case, run_dict, checks, expected_value(con, case))
+        result = score_run(case, run_dict, checks, expected_value(con, case))
         _save(out_dir / "runs" / case.id / f"{condition}-{i}", run_dict, checks, result)
         results.append({"case": case.id, "category": case.category, "condition": condition, "repeat": i, **result})
         progress(f"[{n}/{len(plan)}] {case.id} {condition} #{i} → {'通过' if result['passed'] else '未通过'}"
@@ -254,6 +277,9 @@ def summarize(results: list[dict[str, Any]], cases: list[Case], conditions: list
             "process_complete_rate": (_ratio(sum(r["process_complete"] is True for r in rows if r["skill_expected"]),
                                              sum(1 for r in rows if r["skill_expected"]))
                                       if condition == "agent_skill" else None),
+            # M7b 之前的结果没有这两项：没有退回修正，修正前后相同
+            "repaired": sum(r.get("repaired", False) for r in rows),
+            "passed_without_repair": sum(r.get("passed_without_repair", r["passed"]) for r in rows),
             "avg_tool_calls": _ratio(sum(r["tool_calls"] for r in rows), len(rows)),
             "avg_llm_calls": _ratio(sum(r["llm_calls"] for r in rows), len(rows)),
             "avg_tokens": _ratio(sum(r["tokens"] for r in rows), len(rows)),
@@ -316,6 +342,12 @@ def render_summary(summary: dict[str, Any], meta: dict[str, Any]) -> str:
                      f"{_pct(stats['skill_use_correct_rate'])} | {_pct(stats['process_complete_rate'])} | "
                      f"{stats['avg_tool_calls']} | {stats['avg_llm_calls']} | "
                      f"{stats['avg_tokens']:.0f} | {stats['avg_seconds']} |")
+    if any(stats.get("repaired") for stats in summary["by_condition"].values()):
+        lines += ["", "## 核查后退回修正", "",
+                  "答案里有找不到出处的数字时，程序把这些数字退回模型修正一次。同一次运行，初稿和修正后各打一次分：", "",
+                  "| 组别 | 运行 | 被退回 | 修正前通过 | 修正后通过 |", "|---|---:|---:|---:|---:|"]
+        lines += [f"| {s['label']} | {s['runs']} | {s['repaired']} | {s['passed_without_repair']} | {s['passed']} |"
+                  for s in summary["by_condition"].values()]
     labels = [CONDITIONS[c] for c in summary["conditions"]]
     lines += ["", "## 按题目（通过次数 / 运行次数）", "",
               "| 题目 | 类别 | " + " | ".join(labels) + " |", "|---|---|" + "---:|" * len(labels)]
@@ -375,7 +407,7 @@ def rescore(out_dir: Path, cases: list[Case], connections: Connections) -> dict[
         run = json.loads(run_path.read_text(encoding="utf-8"))
         checks = check_run(run)
         expected = expected_value(connections.get(case), case) if case.expect_value else None
-        result = score(case, run, checks, expected)
+        result = score_run(case, run, checks, expected)
         _save(run_path.parent, run, checks, result)
         results.append({"case": case.id, "category": case.category, "condition": condition, "repeat": int(repeat),
                         **result})

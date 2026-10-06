@@ -36,6 +36,16 @@ def render_report(run: dict[str, Any], checks: dict[str, Any]) -> str:
         lines.append("- 本次没有加载分析流程。")
     lines += [f"- ⚠️ {signal}" for signal in checks["danger_signals"]] or ["- 没有变化超过 50% 的核心指标。"]
     lines += ["", "## 附录 B：找不到出处的数字", ""]
+    repair = run.get("repair")
+    if repair:
+        lines += [f"初稿有 {len(repair['ungrounded'])} 个数字找不到出处（{'、'.join(m['text'] for m in repair['ungrounded'])}），"
+                  "已退回模型修正 1 次" + (f"，修正失败（{repair['error']}），上面仍是初稿。" if repair.get("error")
+                                         else "。上面是修正后的版本，下面是对它的核查。"), ""]
+    for calc in numbers["unsupported_calculations"]:
+        lines.append(f"- calculate `{calc['expression']}`（{calc['purpose']}）的输入 "
+                     f"{'、'.join(calc['unsupported_inputs'])} 找不到出处，计算结果不算出处。")
+    if numbers["unsupported_calculations"]:
+        lines.append("")
     if numbers["ungrounded"]:
         lines += ["这些数字在本次工具输出里找不到，可能是模型自己算的或编的，**必须核对**：", "",
                   "| 数字 | 所在句子 |", "|---|---|"]

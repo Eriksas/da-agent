@@ -7,6 +7,7 @@
 """
 
 import json
+import re
 from dataclasses import asdict
 from datetime import timedelta
 from pathlib import Path
@@ -96,16 +97,26 @@ def facts_section(con: duckdb.DuckDBPyConnection, week: str) -> tuple[list[str],
     return lines, {"base": summary["period"]["base"], "gmv_change_pct": gmv["change_pct"]}
 
 
+def demote_headings(markdown: str, levels: int = 2) -> str:
+    """AI 回答里的标题降两级再放进周报：周报的“二、AI 解读”是二级标题，AI 的一级标题放在它下面，目录会乱。"""
+    return re.sub(r"(?m)^(#{1,6})(?=[ \t])", lambda m: "#" * min(len(m.group(1)) + levels, 6), markdown)
+
+
 def ai_section(run: dict[str, Any], checks: dict[str, Any]) -> list[str]:
     """第二部分：AI 解读，开头先放自动核查结果。"""
     lines = ["## 二、AI 解读（初稿，待人工复核）", "",
              f"> 自动核查：{checks['summary']}。{checks['process']['summary']}。"]
+    repair = run.get("repair")
+    if repair:
+        lines.append(f"> 核查后退回修正 1 次：初稿有 {len(repair['ungrounded'])} 个数字找不到出处（"
+                     + "、".join(m["text"] for m in repair["ungrounded"])
+                     + ("），修正失败，下面仍是初稿。" if repair.get("error") else "），下面是修正后的版本。"))
     lines += [f"> ⚠️ {signal}" for signal in checks["danger_signals"]]
     if checks["numbers"]["ungrounded"]:
         lines.append("> 找不到出处的数字：" + "、".join(m["text"] for m in checks["numbers"]["ungrounded"]))
     lines.append("")
     if run["status"] == "completed":
-        lines.append(run["answer"])
+        lines.append(demote_headings(run["answer"]))
     else:
         lines.append(f"（AI 解读未完成：{run['error'] or run['status']}。第一部分的指标由程序计算，不受影响。）")
     return lines

@@ -9,7 +9,9 @@ from da_agent import cli
 from da_agent.cleaning import connect_frame
 from da_agent.dataset import read_normalized_csv
 from da_agent.llm import FakeLLM, LLMError, LLMReply, ToolCall
-from da_agent.weekly import FIRST_REPLAY_WEEK, generate_weekly, next_replay_week, read_cursor, write_cursor
+from da_agent.weekly import (
+    FIRST_REPLAY_WEEK, demote_headings, generate_weekly, next_replay_week, read_cursor, write_cursor,
+)
 from helpers import S2, UK, make_frame
 from test_metrics import ROWS
 
@@ -78,3 +80,27 @@ def test_closed_base_week_is_explained_not_crashed(tmp_path: Path) -> None:
 def test_fake_model_cannot_advance_cursor(capsys: pytest.CaptureFixture[str]) -> None:
     assert cli.main(["weekly", "--llm", "fake", "--advance"]) == 2
     assert "不能推进回放游标" in capsys.readouterr().out
+
+
+def test_program_part_has_per_day_rows(con, tmp_path: Path) -> None:
+    generate_weekly(con, "2011-W02", FakeLLM(replies=[LLMReply(content="好")]), max_tool_calls=5, out_dir=tmp_path)
+    report = (tmp_path / "2011-W02.md").read_text(encoding="utf-8")
+    assert "| 日均 GMV | 29.00 | 35.00 | -6.00（-17.14%） |" in report  # 5 天对 4 天：总量 +3.57%，日均 −17.14%
+    assert "交易天数不同：当期 2011-W02 5 天，基期 2011-W01 4 天" in report
+
+
+def test_repair_note_and_demoted_headings(con, tmp_path: Path) -> None:
+    llm = FakeLLM(replies=[
+        LLMReply(content="", tool_calls=(ToolCall(id="m", name="metric_summary", arguments={"week": "2011-W02"}),)),
+        LLMReply(content="# 周报\n\nGMV 约 1,234.56。"),
+        LLMReply(content="# 周报\n\n## 结论\n\nGMV 为 145.0。"),
+    ])
+    generate_weekly(con, "2011-W02", llm, max_tool_calls=5, out_dir=tmp_path)
+    report = (tmp_path / "2011-W02.md").read_text(encoding="utf-8")
+    assert "> 核查后退回修正 1 次：初稿有 1 个数字找不到出处（1,234.56），下面是修正后的版本。" in report
+    assert "\n### 周报\n" in report and "\n#### 结论\n" in report  # AI 的标题降两级，放在“二、AI 解读”下面
+    assert "\n# 周报\n" not in report
+
+
+def test_demote_headings_leaves_other_lines_alone() -> None:
+    assert demote_headings("# A\n#不是标题\n正文 # 号\n###### F") == "### A\n#不是标题\n正文 # 号\n###### F"

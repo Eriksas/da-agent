@@ -144,7 +144,7 @@ flowchart TD
   LLM_BASE_URL=https://api.minimax.cn/v1   # MiniMax 国内站 OpenAI 兼容地址（2026-09 官方文档）
   LLM_API_KEY=your-key-here
   LLM_MODEL=MiniMax-M3
-  LLM_MAX_TOOL_CALLS=12
+  LLM_MAX_TOOL_CALLS=15
   FEISHU_WEBHOOK=            # 可选，留空表示不推送
   ```
 - 代码用 `pydantic-settings` 读取配置。缺少密钥时，只允许使用 `--llm fake` 模式，并给出清楚的报错。

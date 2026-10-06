@@ -7,10 +7,12 @@ from pathlib import Path
 import pytest
 
 from da_agent import cli
-from da_agent.agent import AgentRun
+from da_agent.agent import AgentRun, run_agent
+from da_agent.checks import check_run
 from da_agent.cleaning import connect_frame
 from da_agent.evaluation import (
-    HOLDOUT_PATH, Case, Connections, inject, load_cases, render_summary, rescore, run_eval, score, verify_injection,
+    HOLDOUT_PATH, Case, Connections, inject, load_cases, render_summary, rescore, run_eval, score, score_run,
+    verify_injection,
 )
 from da_agent.llm import FakeLLM, LLMReply, ToolCall
 from helpers import make_frame
@@ -164,3 +166,34 @@ def test_compare_with_human_counts_both_views() -> None:
     result = compare_with_human(results, review)
     assert (result["agree_substance"], result["agree_passed"], result["blind"]) == (1, 0, 1)
     assert result["by_condition"] == {"agent": {"human_passed": 1, "reviewed": 2}}
+
+
+def test_repair_is_scored_before_and_after(tmp_path: Path) -> None:
+    def make_llm(case: Case, condition: str, i: int) -> FakeLLM:
+        return FakeLLM(replies=[
+            LLMReply(content="", tool_calls=(ToolCall(id="m", name="metric_summary", arguments={"week": "2011-W02"}),)),
+            LLMReply(content="2011-W02 的客单价下降，GMV 约 999.99。"),  # 编的数字：被退回修正
+            LLMReply(content="2011-W02 的客单价下降，GMV 为 145.0。")])
+
+    summary = run_eval([CASE], ["agent"], 1, make_llm, FixtureConnections(), tmp_path, max_tool_calls=5,
+                       progress=lambda _: None)
+    stats = summary["by_condition"]["agent"]
+    assert (stats["repaired"], stats["passed_without_repair"], stats["passed"]) == (1, 0, 1)
+    markdown = render_summary(summary, {"name": "t", "model": "fake", "repeats": 1, "finished_at": "now"})
+    assert "| Agent 不带流程 | 1 | 1 | 0 | 1 |" in markdown
+    assert rescore(tmp_path, [CASE], FixtureConnections())["by_condition"] == summary["by_condition"]
+
+
+def test_draft_is_checked_only_against_what_existed_before_repair() -> None:
+    """初稿和修正稿文字相同，区别只在修正时补了一次 calculate：初稿不能借用修正阶段才有的出处。"""
+    text = "2011-W02 的客单价下降，GMV 比上周多 3.5714%。"  # 工具只给到 0.0357，4 位小数的写法找不到出处
+    llm = FakeLLM(replies=[
+        LLMReply(content="", tool_calls=(ToolCall(id="m", name="metric_summary", arguments={"week": "2011-W02"}),)),
+        LLMReply(content=text),
+        LLMReply(content="", tool_calls=(ToolCall(id="c", name="calculate",
+                                                  arguments={"expression": "(145 - 140) / 140", "purpose": "环比"}),)),
+        LLMReply(content=text)])
+    with connect_frame(make_frame(ROWS)) as con:
+        run = asdict(run_agent(CASE.question, llm=llm, con=con, max_tool_calls=5))
+    result = score_run(CASE, run, check_run(run), None)
+    assert (result["repaired"], result["passed_without_repair"], result["passed"]) == (True, False, True)

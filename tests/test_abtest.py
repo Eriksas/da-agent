@@ -68,3 +68,11 @@ def test_results_are_json_serializable() -> None:
     json.dumps(proportion_test(200, 2000, 250, 2000))
     json.dumps(mean_test(100, 20, 400, 104, 30, 300))
     json.dumps(srm_check(5000, 5200))
+
+
+def test_srm_reports_observed_and_expected_counts() -> None:
+    """M6 的 SRM 题：模型自己算了总人数、实验组占比、期望人数和差额，都没有出处。"""
+    result = srm_check(5000, 5600)
+    assert (result["total"], result["expected_control"], result["expected_treatment"]) == (10600, 5300.0, 5300.0)
+    assert (result["observed_treatment_share"], result["control_minus_expected"]) == (0.528302, -300.0)
+    assert result["treatment_minus_control"] == 600

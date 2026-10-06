@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.minimax.cn/v1"
     llm_api_key: SecretStr | None = None
     llm_model: str = "MiniMax-M3"
-    llm_max_tool_calls: int = Field(default=12, ge=1, le=50)
+    llm_max_tool_calls: int = Field(default=15, ge=1, le=50)  # 评测用 15；calculate 也占次数
     llm_temperature: float | None = Field(default=None, ge=0, le=2)  # 不填使用模型默认值
     llm_timeout_seconds: float = Field(default=120, gt=0, le=600)
 

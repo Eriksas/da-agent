@@ -2,6 +2,7 @@
 
 能查的：
 - 每个数字能否在本次运行的工具输出（以及用户问题）里找到。找不到，说明是模型自己算的或编的。
+- calculate 工具算出的数，只有当算式里的每个输入数字都有出处时，才算有出处（出处可以层层追溯）。
 - 哪些句子用了因果表述或绝对化的说法。只标记、不拦截，交给人判断。
 
 查不了的（必须人工复核）：
@@ -22,6 +23,7 @@ IGNORED = [
     re.compile(r"\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?"),
     re.compile(r"\b\d{1,2}:\d{2}\b"),
     re.compile(r"(?m)^[ \t]*(?:#+[ \t]*)?\d+[.、)][ \t]"),
+    re.compile(r"(?m)^[ \t]*#+[ \t]*\d+(?:\.\d+)+"),  # 多级小节编号：### 2.1、#### 3.2.1（首份真实周报里被误判过）
 ]
 # 数字前面不能是英文字母、数字、下划线或小数点（排除 W49、R09、C581484 这类编号），但可以紧挨汉字
 NUMBER = re.compile(r"(?<![A-Za-z0-9_.])([+\-−]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)[ \t]*(%|个百分点|pp|万|亿)?")
@@ -92,15 +94,61 @@ def _numbers_in(value: Any, pool: list[float]) -> None:
             _numbers_in(item, pool)
 
 
-def source_numbers(messages: list[dict[str, Any]]) -> list[float]:
-    """可以作为出处的数：工具输出、用户问题、系统提示词（数据范围等）。模型自己的话不算出处。"""
+CALC_CONSTANTS = (100.0,)  # 算式里不需要出处的常数：比例 × 100 换成百分数。≤ 10 的整数（如天数）本来就不核查
+
+
+def _grounded(value: float, tolerance: float, pool: list[float]) -> bool:
+    return any(abs(source - value) < tolerance - 1e-12 for source in pool)
+
+
+def _audit_calculation(result: dict[str, Any], pool: list[float]) -> dict[str, Any]:
+    """检查一次 calculate 的输入数字是否都有出处。输入可能写成百分数（6.5 表示 0.065），两种都接受。"""
+    inputs, _ = extract_numbers(result["expression"])
+    unsupported = [m.text for m in inputs
+                   if m.value not in CALC_CONSTANTS and not _grounded(m.value, m.tolerance, pool)
+                   and not _grounded(m.value / 100, m.tolerance / 100, pool)]
+    return {"expression": result["expression"], "purpose": result["purpose"], "result": result["result"],
+            "unsupported_inputs": unsupported}
+
+
+def collect_sources(messages: list[dict[str, Any]]) -> tuple[list[float], list[dict[str, Any]]]:
+    """按对话顺序收集可以作为出处的数：系统提示词（数据范围等）、用户的问题、工具输出。模型自己的话不算出处。
+
+    - 只有第一条用户消息是用户的问题。之后的“用户消息”都是程序加的提示（工具次数用完、核查退回），
+      不算出处：退回提示里列着那些找不到出处的数字，算进来的话它们就“有出处”了。
+    - calculate 的结果只有在输入数字都有出处时才进入出处池，防止把编出来的数“算”成有出处。
+      模型可能先乘 100 再把结果写成百分数，所以结果同时按 ÷100 存一份。
+
+    返回（出处池，每次 calculate 的检查结果）。
+    """
     pool: list[float] = []
+    calculations = []
+    asked = False
     for message in messages:
-        if message["role"] == "tool":
-            _numbers_in(json.loads(message["content"]), pool)
-        elif message["role"] in ("user", "system"):
+        if message["role"] == "system" or (message["role"] == "user" and not asked):
+            asked = asked or message["role"] == "user"
             _numbers_in(message["content"], pool)
-    return pool
+        elif message["role"] == "tool":
+            content = json.loads(message["content"])
+            if content.get("tool") != "calculate":
+                _numbers_in(content, pool)
+                continue
+            audit = _audit_calculation(content, pool)  # 只用算式之前已有的出处：输入必须来自更早的工具结果
+            calculations.append(audit)
+            if not audit["unsupported_inputs"]:
+                pool += [abs(content["result"]), abs(content["result"]) / 100]
+    return pool, calculations
+
+
+def number_check(answer: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
+    """核查答案里的数字。Agent 交答案前的自查和事后的完整核查用的是同一个函数，标准一致。"""
+    pool, calculations = collect_sources(messages)
+    mentions, skipped = extract_numbers(answer)
+    ungrounded = [m for m in mentions if not _grounded(m.value, m.tolerance, pool)]
+    return {"checked": len(mentions), "grounded": len(mentions) - len(ungrounded),
+            "ungrounded": [asdict(m) for m in ungrounded], "skipped_small_integers": skipped,
+            "calculations": len(calculations),
+            "unsupported_calculations": [c for c in calculations if c["unsupported_inputs"]]}
 
 
 def flagged_phrases(text: str) -> list[dict[str, str]]:
@@ -153,17 +201,19 @@ def danger_signals(run: dict[str, Any]) -> list[str]:
 
 def check_run(run: dict[str, Any]) -> dict[str, Any]:
     """核查一次运行的答案。run 是 run.json 的内容。"""
-    pool = source_numbers(run["messages"])
-    mentions, skipped = extract_numbers(run.get("answer") or "")
-    ungrounded = [m for m in mentions
-                  if not any(abs(value - m.value) < m.tolerance - 1e-12 for value in pool)]
+    numbers = number_check(run.get("answer") or "", run["messages"])
     phrases = flagged_phrases(run.get("answer") or "")
+    calculations = ""
+    if numbers["calculations"]:
+        unsupported = len(numbers["unsupported_calculations"])
+        calculations = f"；用 calculate 计算 {numbers['calculations']} 次" + (
+            f"，其中 {unsupported} 次的输入找不到出处" if unsupported else "，输入都有出处")
     return {
-        "numbers": {"checked": len(mentions), "grounded": len(mentions) - len(ungrounded),
-                    "ungrounded": [asdict(m) for m in ungrounded], "skipped_small_integers": skipped},
+        "numbers": numbers,
         "phrases": phrases,
         "process": process_check(run),
         "danger_signals": danger_signals(run),
-        "summary": (f"数字核查：{len(mentions) - len(ungrounded)}/{len(mentions)} 个能在工具输出中找到出处"
-                    f"（另有 {skipped} 个 ≤ {SMALL_INTEGER} 的整数未核查）；需人工复核的表述 {len(phrases)} 处"),
+        "summary": (f"数字核查：{numbers['grounded']}/{numbers['checked']} 个能在工具输出中找到出处"
+                    f"（另有 {numbers['skipped_small_integers']} 个 ≤ {SMALL_INTEGER} 的整数未核查）{calculations}；"
+                    f"需人工复核的表述 {len(phrases)} 处"),
     }

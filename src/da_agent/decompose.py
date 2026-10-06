@@ -15,7 +15,7 @@ from typing import Any
 
 import duckdb
 
-from .metrics import METRICS, compare_periods, week_warnings, weekly_row
+from .metrics import METRICS, compare_periods, comparison_warnings, week_warnings, weekly_row
 
 FACTORS = ("active_customers", "orders_per_customer", "identified_aov")  # 默认顺序：量 → 频 → 价
 IDENTITY = "GMV = 活跃客户数 × 人均订单数 × 可识别客户客单价 + 缺客户 ID 的 GMV"
@@ -85,5 +85,6 @@ def decompose_gmv(con: duckdb.DuckDBPyConnection, week: str, compare: str = "wow
         "check": {"contributions_sum_to_total": abs(explained - total_change) < 0.01},
         "notes": ["chain 是默认顺序下的贡献；shapley 是 6 种顺序的平均，与顺序无关；两者相差大时，说明结论对顺序敏感。",
                   "share_of_total_change 按 shapley 计算；因子反向变化时占比可能超过 100% 或为负。"],
-        "warnings": week_warnings(con, week) + week_warnings(con, period["base"], role="基期"),
+        "warnings": (week_warnings(con, week) + week_warnings(con, period["base"], role="基期")
+                     + comparison_warnings(con, week, period["base"])),
     }

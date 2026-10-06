@@ -91,7 +91,11 @@ def srm_check(control_n: int, treatment_n: int, expected_control_share: float = 
     mismatch = bool(p_value < alpha)
     return {
         "method": "卡方拟合优度检验",
-        "observed_control_share": round(control_n / total, 6), "expected_control_share": expected_control_share,
+        # 观察值和期望值并排给出：说明“偏了多少”时直接引用，不用自己算
+        "total": total, "observed_control_share": round(control_n / total, 6),
+        "observed_treatment_share": round(treatment_n / total, 6), "expected_control_share": expected_control_share,
+        "expected_control": round(expected[0], 2), "expected_treatment": round(expected[1], 2),
+        "control_minus_expected": round(control_n - expected[0], 2), "treatment_minus_control": treatment_n - control_n,
         "chi2": round(float(chi2), 4), "p_value": round(float(p_value), 6), "sample_ratio_mismatch": mismatch,
         "advice": "样本比例与设计不符，先排查分流和埋点，暂不解读实验效果。" if mismatch else "样本比例与设计相符。",
     }
