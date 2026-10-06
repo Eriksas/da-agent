@@ -2,7 +2,7 @@
 
 **运营周报与指标异动分析 Agent。** 给一份运营数据和一个业务问题（如“上周 GMV 为什么下降？”），模型负责选择分析工具，Python 负责计算每一个数字，最终报告里的数字都能回查到工具输出。
 
-> 当前进度：**M6 评测**已完成。自动周报（M7）尚未实现，完整规划见 [PROJECT_BRIEF.md](PROJECT_BRIEF.md)。**真实运行样例**见 [examples/real_runs](examples/real_runs/README.md)。
+> 当前进度：**M7 自动周报**已上线，每周一由 GitHub Actions 生成一份，见 [reports/weekly](reports/weekly/README.md)。正在做 M7b 准确率提升，完整规划见 [PROJECT_BRIEF.md](PROJECT_BRIEF.md)。**真实运行样例**见 [examples/real_runs](examples/real_runs/README.md)。
 
 ## 进度
 
@@ -16,7 +16,8 @@
 | M4 | 报告与数字核查 | ✅ |
 | M5 | 电商分析流程（Skill，按需加载 + 流程检查） | ✅ |
 | M6 | 评测集与基线对比（含“无流程 / 有流程”对比） | ✅ |
-| M7 | GitHub Actions 自动周报 | 进行中（待首次云端运行） |
+| M7 | GitHub Actions 自动周报 | ✅ |
+| M7b | 准确率提升（计算工具、核查后退回修正、日均指标，留出题检验） | 进行中 |
 | M8 | 面试材料 | 未开始 |
 | 之后 | 上市公司财报分析流程（可选） | 未开始 |
 
@@ -162,7 +163,8 @@ Agent 就是一个循环：把问题和工具说明书发给模型 → 模型回
 - 回放：[state/replay_cursor.json](state/replay_cursor.json) 记录下一次要分析的周，从 2010-W02 开始，跑完数据的最后一周（2011-W49）后自动停止。这是历史数据的模拟上线。
 - 用量：每次运行调用模型几次。M6 评测中“Agent 带流程”组平均每题调用模型 3.6 次、约 2.1 万 token，可作参考。
 - 停用：Actions 页面对该工作流选择 Disable workflow。
-- 注意：定时任务按 UTC 计时，高峰期可能延迟；公开仓库 60 天没有活动时，GitHub 会自动停用定时任务。来自 fork 的 PR 读不到 Secrets，这是 GitHub 的安全设计。
+- 注意：定时任务按 UTC 计时，高峰期可能延迟（第一次定时运行比预定时间晚了约 5.5 小时）；公开仓库 60 天没有活动时，GitHub 会自动停用定时任务。来自 fork 的 PR 读不到 Secrets，这是 GitHub 的安全设计。
+- 运行记录：2026-09-29 手动触发 `fake`（68 秒）和 `real`（86 秒）均成功，生成第一份周报 2010-W02；2026-10-05 第一次定时运行成功，生成 2010-W03。
 
 ## 数据与致谢
 
