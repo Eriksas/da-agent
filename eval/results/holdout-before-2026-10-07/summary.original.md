@@ -7,7 +7,7 @@
 
 | 组别 | 运行 | 通过 | 通过率 | 要点命中率 | 违规 | 数字有出处率 | 流程使用正确率 | 流程完成率 | 平均工具调用 | 平均模型调用 | 平均 token | 平均用时（秒） |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Agent 不带流程 | 10 | 6 | 60% | 100% | 0 | 99% | — | — | 6.3 | 3.5 | 22127 | 23.808 |
+| Agent 不带流程 | 10 | 5 | 50% | 94% | 0 | 99% | — | — | 6.3 | 3.5 | 22127 | 23.808 |
 | Agent 带流程 | 10 | 5 | 50% | 100% | 0 | 99% | 100% | 100% | 7.6 | 5.3 | 36133 | 26.663 |
 
 ## 按题目（通过次数 / 运行次数）
@@ -17,7 +17,7 @@
 | w03-cancelled-order | 陷阱：被取消的极端大单（完整周） | 2/2 | 2/2 |
 | w22-bank-holiday | 陷阱：交易天数不同（银行假日） | 2/2 | 1/2 |
 | au-small-sample | 陷阱：小样本 | 0/2 | 0/2 |
-| w41-why | 常规诊断 | 1/2 | 1/2 |
+| w41-why | 常规诊断 | 0/2 | 1/2 |
 | ab-not-significant | 实验：不显著 | 1/2 | 1/2 |
 
 ## 未通过的运行
@@ -28,8 +28,9 @@
 - `au-small-sample` Agent 带流程 第 1 次：4 个数字找不到出处（[记录](runs/au-small-sample/agent_skill-1/report.md)）
 - `au-small-sample` Agent 带流程 第 2 次：2 个数字找不到出处（[记录](runs/au-small-sample/agent_skill-2/report.md)）
 - `w41-why` Agent 不带流程 第 1 次：1 个数字找不到出处（[记录](runs/w41-why/agent-1/report.md)）
+- `w41-why` Agent 不带流程 第 2 次：1 个数字找不到出处（[记录](runs/w41-why/agent-2/report.md)）
 - `w41-why` Agent 带流程 第 2 次：1 个数字找不到出处（[记录](runs/w41-why/agent_skill-2/report.md)）
-- `ab-not-significant` Agent 不带流程 第 2 次：2 个数字找不到出处（[记录](runs/ab-not-significant/agent-2/report.md)）
+- `ab-not-significant` Agent 不带流程 第 2 次：没提到 不显著/没有统计显著/未达到显著/不具有统计显著/不具备统计显著/没有达到显著/并不显著；2 个数字找不到出处（[记录](runs/ab-not-significant/agent-2/report.md)）
 - `ab-not-significant` Agent 带流程 第 2 次：1 个数字找不到出处（[记录](runs/ab-not-significant/agent_skill-2/report.md)）
 
 ## 说明与局限
