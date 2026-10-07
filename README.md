@@ -49,7 +49,7 @@ flowchart LR
 | M1 | 数据加载与质量检查 | ✅ |
 | M2 | 确定性分析工具（指标、GMV 拆解、维度下钻、实验检验） | ✅ |
 | M3 | Agent 循环（工具调用） | ✅ |
-| M3b | 用 LangGraph 重写同一循环做对照（可选） | 未开始 |
+| M3b | 用 LangGraph 重写同一循环做对照（可选） | ✅ |
 | M4 | 报告与数字核查 | ✅ |
 | M5 | 电商分析流程（Skill，按需加载 + 流程检查） | ✅ |
 | M6 | 评测集与基线对比（含“无流程 / 有流程”对比） | ✅ |
@@ -211,6 +211,52 @@ M6 中 Agent 没通过的运行，大多是因为数字找不到出处（模型�
 - **不靠构造的改进**：W49 从 M6 的 4 次全错变为 3 次正确（4 次都用 `calculate` 算出剔除大单后环比 +1.90%）；留出题的三道陷阱改进后都通过；核查器拦下了 4 次输入找不到出处的计算。
 - **代价**：每次运行的 token 约为原来的 1.9 倍（原题：16,165 → 30,286、20,884 → 38,729）。
 - **剩下的问题**：W49 仍有 1 次用不完整周的总量下结论；留出题“带流程”组的 2 次失败，是模型把工具调用写成了一段文字、程序把它当成了答案。评测后已加防护，但没有重跑。
+
+## LangGraph 对照（M3b 产出）
+
+主流程的 Agent 循环是手写的（[agent.py](src/da_agent/agent.py)），没有用框架。为了回答“为什么不用 LangGraph”，用 LangGraph 把同一个循环重写了一遍（[langgraph_version.py](examples/langgraph_version.py)）：工具、数字核查、模型客户端都直接复用，换掉的只有控制流程——`while` 循环变成一张有 4 个节点的图。
+
+**怎么证明两个版本一样**（[对照测试](tests/test_langgraph_version.py)）：12 个假模型剧本，覆盖正常回答、工具次数用完、核查后退回修正（成功、失败、修正时的工具次数）、格式错误的工具调用（重发一次、连续两次）、轮数上限、未知工具、模型报错、空回答和财报领域。每个剧本下，两个版本每一轮发给模型的内容、工具调用、完整对话、最终答案和状态都完全一致。另外故意把 LangGraph 版改坏 5 处，每一处都有对应的剧本报警。
+
+**对比**（由 [compare_langgraph.py](examples/compare_langgraph.py) 现算，耗时和机器有关）：
+
+| 对比项 | 手写循环 | LangGraph 版 |
+|---|---:|---:|
+| 控制流程的代码行数（不含空行、注释、文档字符串） | 67 | 113 |
+| 额外依赖的包（按 uv.lock 计） | 0 | 25 |
+| 额外导入时间（新进程导入 langgraph.graph，中位数） | — | 1.75 秒 |
+| 跑一次演示剧本（假模型，中位数） | 87.9 毫秒 | 97.8 毫秒 |
+
+LangGraph 根据代码自动画出的流程图：
+
+```mermaid
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	model(model)
+	tools(tools)
+	review(review)
+	finish(finish)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> model;
+	model -.-> finish;
+	model -.-> review;
+	model -.-> tools;
+	review -.-> finish;
+	review -.-> model;
+	tools -.-> finish;
+	tools -.-> model;
+	finish --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
+```
+
+**结论**：
+- 在这个规模下手写更合适：代码更短，不多出 25 个依赖和 1.75 秒的导入时间，出错时调用栈里也只有自己的代码。
+- LangGraph 的好处是把流程画成了图，每个节点只管一件事，状态的合并方式（追加还是覆盖）写在类型里。它还自带这个项目没用到的能力：断点续跑、人工审批时暂停、并行分支、流式输出。
+- 如果以后要加“人工确认后再发布周报”或者多个 Agent 协作，再迁移的成本不高：工具、核查和流程手册都能原样复用，这次的对照已经证明了这一点。
+
+LangGraph 是可选依赖组（`uv sync --group langgraph`），只有 CI 的对照测试安装它，主流程和每周周报都不依赖它。
 
 ## 上市公司财报分析（M9 产出）
 
