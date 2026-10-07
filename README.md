@@ -5,15 +5,15 @@
 
 **运营周报与指标异动分析 Agent。** 给一份运营数据和一个业务问题（如“上周 GMV 为什么下降？”），模型负责选择分析工具，Python 负责计算每一个数字，最终报告里的数字都能回查到工具输出。
 
-> 当前进度：**M7 自动周报**已上线，每周一由 GitHub Actions 生成一份，见 [reports/weekly](reports/weekly/README.md)；**M7b 准确率提升**已完成，前后对比见 [m7b-comparison.md](eval/results/m7b-comparison.md)。完整规划见 [PROJECT_BRIEF.md](PROJECT_BRIEF.md)，**真实运行样例**见 [examples/real_runs](examples/real_runs/README.md)。
+> 当前进度：**M7 自动周报**已上线，每周一由 GitHub Actions 生成一份，见 [reports/weekly](reports/weekly/README.md)；**M7b 准确率提升**已完成，前后对比见 [m7b-comparison.md](eval/results/m7b-comparison.md)；**M9 上市公司财报分析**已完成，同一个 Agent 换成财报领域，见[下文](#上市公司财报分析m9-产出)。完整规划见 [PROJECT_BRIEF.md](PROJECT_BRIEF.md)，**真实运行样例**见 [examples/real_runs](examples/real_runs/README.md)。
 
 ## 架构
 
 ```mermaid
 flowchart LR
     Q["业务问题<br/>或每周定时"] --> A["Agent 循环<br/>（模型决定下一步）"]
-    A -- "调用工具" --> T["8 个只读工具<br/>指标 · GMV 拆解 · 下钻<br/>AB 检验 · 计算"]
-    T -- "SQL / Python" --> D[("DuckDB<br/>清洗后的数据")]
+    A -- "调用工具" --> T["只读工具（按领域）<br/>电商：指标 · GMV 拆解 · 下钻 · AB 检验<br/>财报：科目 · 比率 · 杜邦 · 同行对比<br/>共用：计算 · 加载流程"]
+    T -- "SQL / Python" --> D[("DuckDB<br/>电商交易数据 / SEC 财报科目")]
     T -- "结果 + 口径 + 警告" --> A
     A -- "答案初稿" --> C{"数字核查<br/>每个数字有出处吗？"}
     C -- "没有：退回修正 1 次" --> A
@@ -36,6 +36,7 @@ flowchart LR
 | 能不能推广？（5 道改代码前冻结的新题） | 11/20 → 18/20；只看初稿 9/20 | [M7b 对比](eval/results/m7b-comparison.md) |
 | 代价 | 每次运行 token 约为原来的 1.9 倍 | [M7b 对比](eval/results/m7b-comparison.md) |
 | 自动周报 | 每周一运行；已生成的周报数字出处 122/129、119/119 | [reports/weekly](reports/weekly/README.md) |
+| 换一个领域：上市公司财报（8 道题） | 直接问模型 4/8，数字有出处率 46%；Agent 16/16，只看初稿 9/16 | [M9 评测](eval/results/company-2026-10-07/summary.md) |
 | 测试 | 214 个，每次 push 由 CI 运行 | [ci.yml](.github/workflows/ci.yml) |
 
 提升主要来自“核查后退回修正”，它和评分用的是同一个核查器，所以“数字有出处”这一项的提升有一部分是构造出来的；局限和解读见 [M7b 对比](eval/results/m7b-comparison.md)。人工复核由 Claude 辅助完成，待项目作者确认。
@@ -55,6 +56,7 @@ flowchart LR
 | M7 | GitHub Actions 自动周报 | ✅ |
 | M7b | 准确率提升（计算工具、核查后退回修正、日均指标，留出题检验） | ✅ |
 | M8 | 面试材料（README 首屏：架构图、关键结果表） | ✅ |
+| M9 | 上市公司财报分析（SEC 年报数据、4 个财报工具、分析流程、评测） | ✅ |
 | 之后 | 上市公司财报分析流程（可选） | 未开始 |
 
 ## 本地运行
@@ -79,6 +81,10 @@ uv run da-agent eval --case-file eval/holdout.yaml --conditions agent,agent_skil
 uv run da-agent eval-rescore eval/results/<名称>  # 评分规则修改后，离线重新打分，不调用模型
 uv run da-agent eval-compare eval/results/<改进前> eval/results/<改进后>  # 前后对比表，不调用模型
 uv run da-agent weekly --llm fake --week 2010-W02 # 用假模型检查周报流程（输出在 runs/，不提交）
+
+uv run da-agent fetch-financials              # 下载 SEC 财报数据，重新生成关键科目表（需要 SEC_USER_AGENT；表已提交，平时不用跑）
+uv run da-agent company-ask "阿里巴巴最近一个财年的盈利能力怎么样？"  # 上市公司财报分析
+uv run da-agent eval --case-file eval/company_cases.yaml --conditions baseline,agent_skill  # 财报评测
 ```
 
 ## 数据质量（M1 产出）
@@ -205,6 +211,33 @@ M6 中 Agent 没通过的运行，大多是因为数字找不到出处（模型�
 - **不靠构造的改进**：W49 从 M6 的 4 次全错变为 3 次正确（4 次都用 `calculate` 算出剔除大单后环比 +1.90%）；留出题的三道陷阱改进后都通过；核查器拦下了 4 次输入找不到出处的计算。
 - **代价**：每次运行的 token 约为原来的 1.9 倍（原题：16,165 → 30,286、20,884 → 38,729）。
 - **剩下的问题**：W49 仍有 1 次用不完整周的总量下结论；留出题“带流程”组的 2 次失败，是模型把工具调用写成了一段文字、程序把它当成了答案。评测后已加防护，但没有重跑。
+
+## 上市公司财报分析（M9 产出）
+
+同一个 Agent 循环换一个领域：只换工具、系统提示词和分析流程，数字核查、退回修正和 `calculate` 原样复用。问“阿里巴巴最近一个财年的盈利能力怎么样、变化来自哪里”，Agent 用财报工具算数，按流程写结论。只做财务分析和风险提示，**不做估值、评级，不构成投资建议**。
+
+- **数据**：SEC EDGAR 的 XBRL 年报数据（美国证监会公开数据，公共领域），阿里巴巴、京东、拼多多，加亚马逊作参照。整理后的[关键科目表](data/financials/README.md)提交在仓库里，每个数字都带出处（报表类型、文件编号、提交日期）。代码见 [financials.py](src/da_agent/financials.py)。
+- **真实数据里的坑**（都写在测试里）：
+  - 同一个数字在多份年报里重复出现：取最新提交的那份，重述后的数字会覆盖旧数字；
+  - 每条记录的 `fy` 是报表年度，不是数字所属的年度：财年要按期间结束日期判断；
+  - 阿里财年截至 3 月 31 日；
+  - 中概股报表里混有少量美元“便利换算”数字：只用编报币种；
+  - 京东 2017 年起换了归母净利润的标注写法；亚马逊没有标注总负债，要用“负债和权益合计 − 股东权益”推出；
+  - 公司用自定义科目标注的数字不在标准分类里（例如阿里、拼多多近年的资本开支），标为“未披露”，不当成 0。
+- **4 个工具**（[company.py](src/da_agent/company.py)）：`company_overview`（公司、财年、币种、缺失科目）、`financial_summary`（科目、比率、同比，每个数带出处）、`dupont`（ROE = 净利率 × 周转率 × 权益乘数，复用 M2 的 Shapley 拆解）、`peer_compare`（跨公司只比比率，不比金额）。
+- **分析流程**（[SKILL.md](skills/company-financial-analysis/SKILL.md)）：步骤参照 CFA 财报分析框架；分析维度借用中诚信国际通用评级方法的“业务风险 + 财务风险（盈利能力、资本结构、偿债能力）”结构，只借结构，不做评级；陷阱清单全部来自上面的真实数据问题。
+- **首次真实运行发现的问题**：原始金额有 12–13 位，模型自己换算成“百万”，换算后的数字找不到出处。于是工具给每个金额加上“亿”的写法（核查器认识“亿”），核查器也不再把 SEC 文件编号当成数字。修复后的两次真实运行，数字出处分别为 100/100 和 102/102（[样例和复核](examples/real_runs/README.md)）。
+
+**评测**（[结果](eval/results/company-2026-10-07/summary.md)，[题集](eval/company_cases.yaml)）：8 道题，覆盖查数、杜邦拆解、同行对比、财年不对齐、币种不同、未披露不等于 0、拒绝投资建议、拒答数据外的公司。
+
+| 组别 | 通过 | 要点命中率 | 数字有出处率 | 平均 token | 平均用时（秒） |
+|---|---:|---:|---:|---:|---:|
+| 直接问模型（只给一张关键科目表，单位亿） | 4/8 | 90% | 46% | 5,656 | 22.3 |
+| Agent 带流程 | 16/16（只看初稿 9/16） | 100% | 100% | 31,679 | 37.3 |
+
+- 直接问模型组能答对大部分陷阱和拒答题，例如它也拒绝了投资建议，也指出了币种不同。它没通过的 4 道题，都是因为自己算的数字（比率或变化额）没有出处；杜邦拆解那道题还漏了周转率。抽查：它按平均权益算出的 FY2024 ROE 为 44.9%，与工具的 44.92% 一致。差别在于能不能追溯、拆解是否完整，而不是算错。
+- 第一次评分后发现 5 处评分规则缺陷：4 处是正确答案用了同义词表里没有的说法，1 处是把答案里引用用户问题的话（“值得买入吗”）当成了违规。修正后重评，直接问模型组 1/8 → 4/8，Agent 组 15/16 → 16/16，重评前的结果保留在 `summary.original.md`。这些规则是按同一批答案校准的，分数会偏乐观。
+- 局限：每题 Agent 组只跑 2 次、直接问模型组 1 次，单一模型，关键词评分是近似的；没有人工复核。
 
 ## 部署到 GitHub Actions（M7）
 
