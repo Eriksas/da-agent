@@ -43,6 +43,7 @@ BUDGET_NOTICE = "（系统提示）工具调用次数已用完。请不要再调
 FORMAT_NOTICE = ("（系统提示）上一条回复里有工具调用的文字标记，但没有按函数调用的格式发出，程序无法执行。"
                  "需要工具时请直接发起工具调用；不需要时请给出文字回答。")
 TOOL_CALL_TEXT = re.compile(r"<tool_call>|</?invoke\b|minimax\[>")  # 2026-10-07 评测中出现过的写法
+MALFORMED_ERROR = "模型连续两次把工具调用写成文字，没有按接口格式发出"
 REPAIR_TOOL_CALLS = 3  # 修正时最多再调用几次工具（通常是 calculate）
 REPAIR_NOTICE = """（系统核查）回答里有 {count} 个数字在工具结果中找不到出处：
 {items}
@@ -83,7 +84,7 @@ def build_system_prompt(con: duckdb.DuckDBPyConnection, max_tool_calls: int, use
     return template.format(**data_range(con), max_tool_calls=max_tool_calls, skills_catalog=skills)
 
 
-def _repair_notice(ungrounded: list[dict[str, Any]]) -> str:
+def repair_notice(ungrounded: list[dict[str, Any]]) -> str:
     items = "\n".join(f"- 「{m['text']}」：{m['context']}" for m in ungrounded)
     return REPAIR_NOTICE.format(count=len(ungrounded), items=items, calls=REPAIR_TOOL_CALLS)
 
@@ -121,7 +122,7 @@ def run_agent(question: str, *, llm: LLMClient, con: duckdb.DuckDBPyConnection, 
             if run.malformed_replies == 1:  # 提示重发一次
                 run.messages.append({"role": "user", "content": FORMAT_NOTICE})
                 continue
-            run.status, run.error = "malformed_answer", "模型连续两次把工具调用写成文字，没有按接口格式发出"
+            run.status, run.error = "malformed_answer", MALFORMED_ERROR
             break
         if not reply.tool_calls:
             if repair and run.repair is None and reply.content:
@@ -130,7 +131,7 @@ def run_agent(question: str, *, llm: LLMClient, con: duckdb.DuckDBPyConnection, 
                     run.repair = {"draft": reply.content, "draft_message_index": len(run.messages) - 1,
                                   "draft_round": round_no,
                                   "ungrounded": [{"text": m["text"], "context": m["context"]} for m in ungrounded]}
-                    run.messages.append({"role": "user", "content": _repair_notice(ungrounded)})
+                    run.messages.append({"role": "user", "content": repair_notice(ungrounded)})
                     limit, max_rounds = used + REPAIR_TOOL_CALLS, round_no + REPAIR_TOOL_CALLS + 1
                     continue
             run.answer = reply.content
