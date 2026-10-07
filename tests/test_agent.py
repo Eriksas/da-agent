@@ -196,3 +196,25 @@ def test_tool_call_written_as_text_twice_is_not_an_answer() -> None:
     run, _ = run_with([LLMReply(content=GARBLED), LLMReply(content=GARBLED)])
     assert (run.status, run.answer) == ("malformed_answer", "")
     assert "连续两次" in run.error
+
+
+def test_company_domain_uses_its_own_prompt_and_tools(tmp_path: Path) -> None:
+    """同一个循环换一个领域：提示词、工具和流程目录都换成财报的，核查和退回修正不变。"""
+    from da_agent.company import connect_financials
+    from test_company import write_key_facts
+
+    llm = FakeLLM(replies=[
+        tools(call(1, "metric_summary", week="2011-W02")),  # 电商工具：在财报领域里不存在
+        tools(call(2, "financial_summary", company="alibaba", fiscal_year=2024)),
+        LLMReply(content="阿里巴巴 FY2024 的 ROE 为 8.70%，营业收入同比 25.00%。"),
+    ])
+    with connect_financials(write_key_facts(tmp_path / "key_facts.csv")) as con:
+        run = run_agent("阿里巴巴 FY2024 的盈利能力怎么样？", llm=llm, con=con, max_tool_calls=5, domain="company")
+    system = run.messages[0]["content"]
+    assert "- `alibaba` 阿里巴巴（BABA）：FY2023–FY2024，财年截至 03-31，人民币" in system
+    assert "company-financial-analysis" in system and "ecommerce-metric-diagnosis" not in system
+    assert {s["function"]["name"] for s in llm.received[0]["tools"]} >= {"financial_summary", "dupont", "calculate"}
+    assert "metric_summary" not in {s["function"]["name"] for s in llm.received[0]["tools"]}
+    assert run.steps[0]["ok"] is False and "没有名为 metric_summary 的工具" in run.steps[0]["error"]
+    assert (run.status, run.domain, run.repair) == ("completed", "company", None)
+    assert check_run(asdict(run))["numbers"]["ungrounded"] == []

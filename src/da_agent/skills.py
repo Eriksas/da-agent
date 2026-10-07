@@ -31,6 +31,7 @@ class Skill:
     description: str
     body: str
     required_tools: tuple[str, ...]
+    domain: str = "ecommerce"  # 属于哪个领域（ecommerce 电商运营 / company 上市公司财报），只出现在该领域的目录里
 
 
 def parse_skill(path: Path) -> Skill:
@@ -50,15 +51,17 @@ def parse_skill(path: Path) -> Skill:
         raise SkillError(f"{path}：description 不能为空，它决定模型什么时候使用这个流程")
     if len(body) > MAX_BODY_CHARS:
         raise SkillError(f"{path}：正文 {len(body)} 字符，超过 {MAX_BODY_CHARS}；请精简或拆出参考文件")
-    tools = str((meta.get("metadata") or {}).get("required_tools", ""))
+    metadata = meta.get("metadata") or {}
+    tools = str(metadata.get("required_tools", ""))
     return Skill(name=name, description=str(description).strip(), body=body.strip(),
-                 required_tools=tuple(t.strip() for t in tools.split(",") if t.strip()))
+                 required_tools=tuple(t.strip() for t in tools.split(",") if t.strip()),
+                 domain=str(metadata.get("domain", "ecommerce")))
 
 
-def load_skills(skills_dir: Path = SKILLS_DIR) -> dict[str, Skill]:
-    """读取目录下的全部流程，按名字索引。"""
-    return {skill.name: skill for skill in
-            (parse_skill(path) for path in sorted(skills_dir.glob("*/SKILL.md")))}
+def load_skills(skills_dir: Path = SKILLS_DIR, domain: str | None = None) -> dict[str, Skill]:
+    """读取目录下的流程，按名字索引；给出 domain 时只取该领域的流程。"""
+    skills = (parse_skill(path) for path in sorted(skills_dir.glob("*/SKILL.md")))
+    return {skill.name: skill for skill in skills if domain is None or skill.domain == domain}
 
 
 def catalog(skills: dict[str, Skill]) -> str:

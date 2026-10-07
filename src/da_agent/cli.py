@@ -6,6 +6,8 @@
 - `da-agent quality`：生成数据质量报告（reports/data_quality.md 和 .json）
 - `da-agent week 2011-W48`：不经过模型，直接用分析工具输出某一周的指标、拆解和下钻
 - `da-agent ask "问题"`：用真实模型（或 --llm fake 加剧本）回答问题，运行记录、核查结果和报告存到 runs/
+- `da-agent fetch-financials`：下载 SEC 财报数据，生成上市公司关键科目表
+- `da-agent company-ask "问题"`：上市公司财报分析，用法同 ask
 - `da-agent check runs/<运行编号>`：对已保存的运行补做核查，重新生成报告，不调用模型
 - `da-agent eval`：评测，同一批题目在多个对比组各跑一遍，程序打分，结果写到 eval/results/
 - `da-agent eval-compare 改进前目录 改进后目录`：对比两次评测，不调用模型
@@ -19,7 +21,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .config import MissingApiKeyError, Settings
+from .config import MissingApiKeyError, MissingSecUserAgentError, Settings
 from .llm import FakeLLM
 from .paths import FIXTURES_DIR, REPORTS_DIR, RUNS_DIR
 
@@ -37,6 +39,7 @@ def doctor(settings: Settings, ping_model: bool = False) -> int:
     print(f"模型名称：{settings.llm_model}")
     print(f"API Key：{'已配置' if settings.has_api_key() else '未配置（只能使用 --llm fake）'}")
     print(f"单次运行工具调用上限：{settings.llm_max_tool_calls}")
+    print(f"SEC 联系方式：{'已配置' if settings.sec_user_agent else '未配置（下载财报数据时需要）'}")
     if not ping_model:
         return 0
     from .llm import LLMError, ping
@@ -108,14 +111,18 @@ def demo(llm_kind: str) -> int:
     return 0 if run.status == "completed" else 1
 
 
-def ask(question: str, llm_kind: str, script: Path | None) -> int:
-    """在真实数据上回答问题。默认调用真实模型；--llm fake 时按剧本回放（用于调试）。"""
+def ask(question: str, llm_kind: str, script: Path | None, domain: str = "ecommerce") -> int:
+    """在真实数据上回答问题。默认调用真实模型；--llm fake 时按剧本回放（用于调试）。
+
+    domain：ecommerce 用电商交易数据（ask）；company 用上市公司关键科目表（company-ask）。
+    """
     from .agent import run_agent, save_run
     from .cleaning import connect
+    from .company import connect_financials
     from .dataset import PARQUET_PATH
     from .llm import OpenAICompatibleLLM
 
-    if not PARQUET_PATH.exists():
+    if domain == "ecommerce" and not PARQUET_PATH.exists():
         raise SystemExit("还没有准备数据，请先运行：da-agent prepare-data")
     settings = Settings()
     if llm_kind == "fake":
@@ -124,8 +131,8 @@ def ask(question: str, llm_kind: str, script: Path | None) -> int:
         llm = FakeLLM.from_file(script)
     else:
         llm = OpenAICompatibleLLM(settings)
-    with connect(PARQUET_PATH) as con:
-        run = run_agent(question, llm=llm, con=con, max_tool_calls=settings.llm_max_tool_calls)
+    with (connect_financials() if domain == "company" else connect(PARQUET_PATH)) as con:
+        run = run_agent(question, llm=llm, con=con, max_tool_calls=settings.llm_max_tool_calls, domain=domain)
     run_dir = save_run(run, RUNS_DIR)
     _print_run(run, run_dir)
     _review(run_dir)
@@ -151,11 +158,11 @@ def evaluate(llm_kind: str, case_ids: str | None, conditions: str, repeats: int,
     from .llm import LLMReply, OpenAICompatibleLLM
     from .paths import ROOT
 
-    if not PARQUET_PATH.exists():
-        raise SystemExit("还没有准备数据，请先运行：da-agent prepare-data")
     if not (ROOT / case_file).exists():
         raise ValueError(f"题集文件不存在：{case_file}")
     cases = load_cases(ROOT / case_file)
+    if any(case.domain == "ecommerce" for case in cases) and not PARQUET_PATH.exists():
+        raise SystemExit("还没有准备数据，请先运行：da-agent prepare-data")
     if case_ids:
         wanted = [i.strip() for i in case_ids.split(",") if i.strip()]
         unknown = sorted(set(wanted) - {case.id for case in cases})
@@ -275,6 +282,19 @@ def weekly_report(week: str | None, llm_kind: str, advance: bool) -> int:
     return 0
 
 
+def fetch_financials(refresh: bool) -> int:
+    """下载 SEC 财报数据并生成关键科目表 data/financials/key_facts.csv。"""
+    from .financials import KEY_FACTS_PATH, build_key_facts, fetch_all
+
+    fetch_all(Settings().require_sec_user_agent(), refresh=refresh)
+    frame = build_key_facts()
+    summary = frame.groupby("company")["fiscal_year"].agg(["min", "max", "count"])
+    for company, row in summary.iterrows():
+        print(f"{company}：{row['min']}–{row['max']} 财年，{row['count']} 个数字")
+    print(f"关键科目表：{KEY_FACTS_PATH}")
+    return 0
+
+
 def prepare_data(force: bool) -> int:
     """下载、校验并转换数据集。"""
     from .dataset import prepare
@@ -368,6 +388,10 @@ def main(argv: list[str] | None = None) -> int:
     ask_parser.add_argument("question", help="例如：上周 GMV 为什么下降？")
     ask_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 调用真实模型（默认）；fake 按剧本回放")
     ask_parser.add_argument("--script", type=Path, help="--llm fake 时使用的剧本文件")
+    company_parser = commands.add_parser("company-ask", help="上市公司财报分析：用 Agent 回答一个问题，运行记录存到 runs/")
+    company_parser.add_argument("question", help="例如：阿里巴巴最近一个财年的盈利能力怎么样？")
+    company_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 调用真实模型（默认）；fake 按剧本回放")
+    company_parser.add_argument("--script", type=Path, help="--llm fake 时使用的剧本文件")
     weekly_parser = commands.add_parser("weekly", help="生成一周的周报（默认按回放游标）")
     weekly_parser.add_argument("--week", help="指定周，例如 2010-W02；不填则用回放游标")
     weekly_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 真实模型；fake 只检查流程")
@@ -389,6 +413,8 @@ def main(argv: list[str] | None = None) -> int:
     prepare_parser = commands.add_parser("prepare-data", help="下载并转换 UCI Online Retail II 数据集")
     prepare_parser.add_argument("--force", action="store_true", help="即使已有 parquet 也重新转换")
     commands.add_parser("quality", help="生成数据质量报告")
+    fin_parser = commands.add_parser("fetch-financials", help="下载 SEC 财报数据，生成关键科目表（需要 SEC_USER_AGENT）")
+    fin_parser.add_argument("--refresh", action="store_true", help="重新下载，即使本地已有原始数据")
     week_parser = commands.add_parser("week", help="不经过模型，输出某一周的指标、GMV 拆解和下钻")
     week_parser.add_argument("week", help="ISO 周，例如 2011-W48")
     week_parser.add_argument("--compare", choices=["wow", "yoy"], default="wow", help="wow 环比（默认），yoy 同比")
@@ -402,10 +428,14 @@ def main(argv: list[str] | None = None) -> int:
             return prepare_data(args.force)
         if args.command == "quality":
             return quality()
+        if args.command == "fetch-financials":
+            return fetch_financials(args.refresh)
         if args.command == "week":
             return week(args.week, args.compare)
         if args.command == "ask":
             return ask(args.question, args.llm, args.script)
+        if args.command == "company-ask":
+            return ask(args.question, args.llm, args.script, domain="company")
         if args.command == "check":
             return check(args.run_dir)
         if args.command == "weekly":
@@ -417,7 +447,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "eval":
             return evaluate(args.llm, args.cases, args.conditions, args.repeats, args.name, args.case_file)
         return demo(args.llm)
-    except (ValueError, MissingApiKeyError) as exc:  # 输入不合法或缺少密钥：给出原因，不打印报错堆栈
+    except (ValueError, MissingApiKeyError, MissingSecUserAgentError) as exc:  # 输入不合法或缺少配置：给出原因，不打印堆栈
         print(f"错误：{exc}")
         return 2
 

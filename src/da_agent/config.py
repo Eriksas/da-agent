@@ -14,6 +14,10 @@ class MissingApiKeyError(RuntimeError):
     """需要真实模型但没有配置密钥。"""
 
 
+class MissingSecUserAgentError(RuntimeError):
+    """下载 SEC 财报数据，但没有配置联系方式。"""
+
+
 class Settings(BaseSettings):
     """项目配置。字段名对应大写的环境变量，例如 llm_api_key ↔ LLM_API_KEY。"""
 
@@ -26,6 +30,17 @@ class Settings(BaseSettings):
     llm_max_tool_calls: int = Field(default=15, ge=1, le=50)  # 评测用 15；calculate 也占次数
     llm_temperature: float | None = Field(default=None, ge=0, le=2)  # 不填使用模型默认值
     llm_timeout_seconds: float = Field(default=120, gt=0, le=600)
+    # SEC 要求请求头里写明联系方式（名字 + 邮箱）。含个人邮箱，所以和密钥一样用 SecretStr，不打印、不写日志
+    sec_user_agent: SecretStr | None = None
+
+    def require_sec_user_agent(self) -> str:
+        """取出 SEC 请求头的联系方式；没有配置时给出可操作的报错。"""
+        value = self.sec_user_agent.get_secret_value().strip() if self.sec_user_agent else ""
+        if "@" not in value:
+            raise MissingSecUserAgentError(
+                "未配置 SEC_USER_AGENT。SEC 要求请求头写明联系方式，请在 .env 里加一行："
+                "SEC_USER_AGENT=da-agent 你的名字 你的邮箱")
+        return value
 
     def has_api_key(self) -> bool:
         """是否配置了真实密钥（占位值不算）。"""

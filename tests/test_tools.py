@@ -6,7 +6,7 @@ import pytest
 
 from da_agent.cleaning import connect_frame
 from da_agent.llm import INVALID_JSON_KEY
-from da_agent.tools import TOOLS, execute, tool_specs
+from da_agent.tools import DOMAIN_TOOLS, TOOLS, execute, tool_specs
 from helpers import make_frame
 from test_metrics import ROWS
 
@@ -20,8 +20,13 @@ def con():
 
 def test_specs_are_valid_function_definitions() -> None:
     specs = tool_specs()
-    assert [s["function"]["name"] for s in specs] == list(TOOLS)
-    for spec in specs:
+    assert [s["function"]["name"] for s in specs] == list(DOMAIN_TOOLS["ecommerce"])  # 默认是电商，顺序不变
+    company = [s["function"]["name"] for s in tool_specs("company")]
+    assert company == ["company_overview", "financial_summary", "dupont", "peer_compare", "load_skill", "calculate"]
+    assert set(DOMAIN_TOOLS["ecommerce"]) | set(company) == set(TOOLS)  # 每个工具都属于某个领域
+    with pytest.raises(ValueError, match="未知领域"):
+        tool_specs("crypto")
+    for spec in specs + tool_specs("company"):
         assert spec["type"] == "function"
         assert spec["function"]["description"]
         assert spec["function"]["parameters"]["type"] == "object"
