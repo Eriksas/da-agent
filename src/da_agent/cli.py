@@ -19,7 +19,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .config import MissingApiKeyError, Settings
+from .config import MissingApiKeyError, MissingSecUserAgentError, Settings
 from .llm import FakeLLM
 from .paths import FIXTURES_DIR, REPORTS_DIR, RUNS_DIR
 
@@ -37,6 +37,7 @@ def doctor(settings: Settings, ping_model: bool = False) -> int:
     print(f"模型名称：{settings.llm_model}")
     print(f"API Key：{'已配置' if settings.has_api_key() else '未配置（只能使用 --llm fake）'}")
     print(f"单次运行工具调用上限：{settings.llm_max_tool_calls}")
+    print(f"SEC 联系方式：{'已配置' if settings.sec_user_agent else '未配置（下载财报数据时需要）'}")
     if not ping_model:
         return 0
     from .llm import LLMError, ping
@@ -275,6 +276,19 @@ def weekly_report(week: str | None, llm_kind: str, advance: bool) -> int:
     return 0
 
 
+def fetch_financials(refresh: bool) -> int:
+    """下载 SEC 财报数据并生成关键科目表 data/financials/key_facts.csv。"""
+    from .financials import KEY_FACTS_PATH, build_key_facts, fetch_all
+
+    fetch_all(Settings().require_sec_user_agent(), refresh=refresh)
+    frame = build_key_facts()
+    summary = frame.groupby("company")["fiscal_year"].agg(["min", "max", "count"])
+    for company, row in summary.iterrows():
+        print(f"{company}：{row['min']}–{row['max']} 财年，{row['count']} 个数字")
+    print(f"关键科目表：{KEY_FACTS_PATH}")
+    return 0
+
+
 def prepare_data(force: bool) -> int:
     """下载、校验并转换数据集。"""
     from .dataset import prepare
@@ -389,6 +403,8 @@ def main(argv: list[str] | None = None) -> int:
     prepare_parser = commands.add_parser("prepare-data", help="下载并转换 UCI Online Retail II 数据集")
     prepare_parser.add_argument("--force", action="store_true", help="即使已有 parquet 也重新转换")
     commands.add_parser("quality", help="生成数据质量报告")
+    fin_parser = commands.add_parser("fetch-financials", help="下载 SEC 财报数据，生成关键科目表（需要 SEC_USER_AGENT）")
+    fin_parser.add_argument("--refresh", action="store_true", help="重新下载，即使本地已有原始数据")
     week_parser = commands.add_parser("week", help="不经过模型，输出某一周的指标、GMV 拆解和下钻")
     week_parser.add_argument("week", help="ISO 周，例如 2011-W48")
     week_parser.add_argument("--compare", choices=["wow", "yoy"], default="wow", help="wow 环比（默认），yoy 同比")
@@ -402,6 +418,8 @@ def main(argv: list[str] | None = None) -> int:
             return prepare_data(args.force)
         if args.command == "quality":
             return quality()
+        if args.command == "fetch-financials":
+            return fetch_financials(args.refresh)
         if args.command == "week":
             return week(args.week, args.compare)
         if args.command == "ask":
@@ -417,7 +435,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "eval":
             return evaluate(args.llm, args.cases, args.conditions, args.repeats, args.name, args.case_file)
         return demo(args.llm)
-    except (ValueError, MissingApiKeyError) as exc:  # 输入不合法或缺少密钥：给出原因，不打印报错堆栈
+    except (ValueError, MissingApiKeyError, MissingSecUserAgentError) as exc:  # 输入不合法或缺少配置：给出原因，不打印堆栈
         print(f"错误：{exc}")
         return 2
 
