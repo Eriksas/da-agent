@@ -282,6 +282,15 @@ def weekly_report(week: str | None, llm_kind: str, advance: bool) -> int:
     return 0
 
 
+def build_site(out_dir: Path) -> int:
+    """生成项目展示网站（静态网页，GitHub Pages 托管）。不调用模型。"""
+    from .site import build_site as build
+
+    files = build(out_dir)
+    print(f"已生成 {len(files)} 个页面：{out_dir / 'index.html'}")
+    return 0
+
+
 def fetch_financials(refresh: bool) -> int:
     """下载 SEC 财报数据并生成关键科目表 data/financials/key_facts.csv。"""
     from .financials import KEY_FACTS_PATH, build_key_facts, fetch_all
@@ -413,6 +422,8 @@ def main(argv: list[str] | None = None) -> int:
     prepare_parser = commands.add_parser("prepare-data", help="下载并转换 UCI Online Retail II 数据集")
     prepare_parser.add_argument("--force", action="store_true", help="即使已有 parquet 也重新转换")
     commands.add_parser("quality", help="生成数据质量报告")
+    site_parser = commands.add_parser("build-site", help="生成项目展示网站（静态网页，用于 GitHub Pages）")
+    site_parser.add_argument("--out", type=Path, default=Path("_site"), help="输出目录，默认 _site")
     fin_parser = commands.add_parser("fetch-financials", help="下载 SEC 财报数据，生成关键科目表（需要 SEC_USER_AGENT）")
     fin_parser.add_argument("--refresh", action="store_true", help="重新下载，即使本地已有原始数据")
     week_parser = commands.add_parser("week", help="不经过模型，输出某一周的指标、GMV 拆解和下钻")
@@ -430,6 +441,8 @@ def main(argv: list[str] | None = None) -> int:
             return quality()
         if args.command == "fetch-financials":
             return fetch_financials(args.refresh)
+        if args.command == "build-site":
+            return build_site(args.out)
         if args.command == "week":
             return week(args.week, args.compare)
         if args.command == "ask":
