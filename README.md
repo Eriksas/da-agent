@@ -1,8 +1,44 @@
 # da-agent
 
+[![CI](https://github.com/Eriksas/da-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Eriksas/da-agent/actions/workflows/ci.yml)
+[![Weekly report](https://github.com/Eriksas/da-agent/actions/workflows/weekly-report.yml/badge.svg)](https://github.com/Eriksas/da-agent/actions/workflows/weekly-report.yml)
+
 **运营周报与指标异动分析 Agent。** 给一份运营数据和一个业务问题（如“上周 GMV 为什么下降？”），模型负责选择分析工具，Python 负责计算每一个数字，最终报告里的数字都能回查到工具输出。
 
 > 当前进度：**M7 自动周报**已上线，每周一由 GitHub Actions 生成一份，见 [reports/weekly](reports/weekly/README.md)；**M7b 准确率提升**已完成，前后对比见 [m7b-comparison.md](eval/results/m7b-comparison.md)。完整规划见 [PROJECT_BRIEF.md](PROJECT_BRIEF.md)，**真实运行样例**见 [examples/real_runs](examples/real_runs/README.md)。
+
+## 架构
+
+```mermaid
+flowchart LR
+    Q["业务问题<br/>或每周定时"] --> A["Agent 循环<br/>（模型决定下一步）"]
+    A -- "调用工具" --> T["8 个只读工具<br/>指标 · GMV 拆解 · 下钻<br/>AB 检验 · 计算"]
+    T -- "SQL / Python" --> D[("DuckDB<br/>清洗后的数据")]
+    T -- "结果 + 口径 + 警告" --> A
+    A -- "答案初稿" --> C{"数字核查<br/>每个数字有出处吗？"}
+    C -- "没有：退回修正 1 次" --> A
+    C -- "有" --> R["报告<br/>程序计算部分 + AI 解读<br/>（待人工复核）"]
+    R --> W["GitHub Actions<br/>每周提交周报"]
+```
+
+- **模型只做判断，不做计算**：模型决定调用哪个工具、怎么解读；数字全部来自经过测试的 SQL 和 Python 函数，模型不能执行自己写的代码。
+- **每个数字都能追溯**：程序逐个检查答案里的数字能否在工具输出里找到；找不到就退回模型修正一次，仍找不到的在报告里列出。
+- **结论要人来定**：报告标注“AI 初稿，待人工复核”，并列出因果表述、警告和工具调用记录。
+
+## 关键结果
+
+全部来自仓库里的结果文件，每次运行的完整记录都已提交。模型 MiniMax-M3.1-Flash-Preview。
+
+| 问题 | 结果 | 出处 |
+|---|---|---|
+| 工具有没有用？（10 道题） | 直接问模型通过 2/10，数字有出处率 51%；Agent 两组合计通过 18/40 | [M6 评测](eval/results/full-2026-09-29/summary.md) |
+| 对症改进后（同 10 道题） | 18/40 → 38/40；只看初稿（不靠核查后退回修正）22/40 | [M7b 对比](eval/results/m7b-comparison.md) |
+| 能不能推广？（5 道改代码前冻结的新题） | 11/20 → 18/20；只看初稿 9/20 | [M7b 对比](eval/results/m7b-comparison.md) |
+| 代价 | 每次运行 token 约为原来的 1.9 倍 | [M7b 对比](eval/results/m7b-comparison.md) |
+| 自动周报 | 每周一运行；已生成的周报数字出处 122/129、119/119 | [reports/weekly](reports/weekly/README.md) |
+| 测试 | 214 个，每次 push 由 CI 运行 | [ci.yml](.github/workflows/ci.yml) |
+
+提升主要来自“核查后退回修正”，它和评分用的是同一个核查器，所以“数字有出处”这一项的提升有一部分是构造出来的；局限和解读见 [M7b 对比](eval/results/m7b-comparison.md)。人工复核由 Claude 辅助完成，待项目作者确认。
 
 ## 进度
 
@@ -18,7 +54,7 @@
 | M6 | 评测集与基线对比（含“无流程 / 有流程”对比） | ✅ |
 | M7 | GitHub Actions 自动周报 | ✅ |
 | M7b | 准确率提升（计算工具、核查后退回修正、日均指标，留出题检验） | ✅ |
-| M8 | 面试材料 | 未开始 |
+| M8 | 面试材料（README 首屏：架构图、关键结果表） | ✅ |
 | 之后 | 上市公司财报分析流程（可选） | 未开始 |
 
 ## 本地运行
