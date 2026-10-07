@@ -38,7 +38,7 @@ CASES_PATH = ROOT / "eval" / "cases.yaml"
 HOLDOUT_PATH = ROOT / "eval" / "holdout.yaml"  # 留出题：改进之前冻结，用来检验改进能不能推广
 RESULTS_DIR = ROOT / "eval" / "results"
 CONDITIONS = {
-    "baseline": "直接问模型（只给周度指标表，无工具）",
+    "baseline": "直接问模型（只给一张数据表，无工具）",
     "agent": "Agent 不带流程",
     "agent_skill": "Agent 带流程",
 }
