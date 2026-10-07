@@ -1,0 +1,56 @@
+name: Pages
+
+# 项目展示网站：根据仓库里已提交的数据生成静态网页，发布到 GitHub Pages。
+# 不调用模型、不读取任何密钥。
+# 每周周报由机器人提交，那次推送不会触发其他工作流（GitHub 的设计），所以另外在周报工作流完成后再生成一次。
+on:
+  push:
+    branches: [main]
+  workflow_run:
+    workflows: ["Weekly report"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies (from uv.lock)
+        run: uv sync --locked
+
+      - name: Build site
+        run: uv run da-agent build-site --out _site
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

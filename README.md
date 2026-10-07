@@ -5,6 +5,8 @@
 
 **运营周报与指标异动分析 Agent。** 给一份运营数据和一个业务问题（如“上周 GMV 为什么下降？”），模型负责选择分析工具，Python 负责计算每一个数字，最终报告里的数字都能回查到工具输出。
 
+> **项目网站**：<https://eriksas.github.io/da-agent/>（周报、评测、财报比率、运行回放，每周自动更新）
+>
 > 当前进度：**M7 自动周报**已上线，每周一由 GitHub Actions 生成一份，见 [reports/weekly](reports/weekly/README.md)；**M7b 准确率提升**已完成，前后对比见 [m7b-comparison.md](eval/results/m7b-comparison.md)；**M9 上市公司财报分析**已完成，同一个 Agent 换成财报领域，见[下文](#上市公司财报分析m9-产出)。完整规划见 [PROJECT_BRIEF.md](PROJECT_BRIEF.md)，**真实运行样例**见 [examples/real_runs](examples/real_runs/README.md)。
 
 ## 架构
@@ -57,6 +59,7 @@ flowchart LR
 | M7b | 准确率提升（计算工具、核查后退回修正、日均指标，留出题检验） | ✅ |
 | M8 | 面试材料（README 首屏：架构图、关键结果表） | ✅ |
 | M9 | 上市公司财报分析（SEC 年报数据、4 个财报工具、分析流程、评测） | ✅ |
+| M10 | 项目展示网站（GitHub Pages，静态网页，每周随周报更新） | ✅ |
 | 之后 | 上市公司财报分析流程（可选） | 未开始 |
 
 ## 本地运行
@@ -80,6 +83,7 @@ uv run da-agent eval --repeats 2              # 评测：10 道题 × 3 个对�
 uv run da-agent eval --case-file eval/holdout.yaml --conditions agent,agent_skill  # 留出题（M7b）
 uv run da-agent eval-rescore eval/results/<名称>  # 评分规则修改后，离线重新打分，不调用模型
 uv run da-agent eval-compare eval/results/<改进前> eval/results/<改进后>  # 前后对比表，不调用模型
+uv run da-agent build-site                    # 生成项目网站到 _site/（静态网页，不调用模型）
 uv run da-agent weekly --llm fake --week 2010-W02 # 用假模型检查周报流程（输出在 runs/，不提交）
 
 uv run da-agent fetch-financials              # 下载 SEC 财报数据，重新生成关键科目表（需要 SEC_USER_AGENT；表已提交，平时不用跑）
@@ -284,6 +288,18 @@ LangGraph 是可选依赖组（`uv sync --group langgraph`），只有 CI 的对
 - 直接问模型组能答对大部分陷阱和拒答题，例如它也拒绝了投资建议，也指出了币种不同。它没通过的 4 道题，都是因为自己算的数字（比率或变化额）没有出处；杜邦拆解那道题还漏了周转率。抽查：它按平均权益算出的 FY2024 ROE 为 44.9%，与工具的 44.92% 一致。差别在于能不能追溯、拆解是否完整，而不是算错。
 - 第一次评分后发现 5 处评分规则缺陷：4 处是正确答案用了同义词表里没有的说法，1 处是把答案里引用用户问题的话（“值得买入吗”）当成了违规。修正后重评，直接问模型组 1/8 → 4/8，Agent 组 15/16 → 16/16，重评前的结果保留在 `summary.original.md`。这些规则是按同一批答案校准的，分数会偏乐观。
 - 局限：每题 Agent 组只跑 2 次、直接问模型组 1 次，单一模型，关键词评分是近似的；没有人工复核。
+
+## 项目展示网站（M10 产出）
+
+网址：<https://eriksas.github.io/da-agent/>。代码见 [site.py](src/da_agent/site.py)，发布流程见 [pages.yml](.github/workflows/pages.yml)。
+
+- **只放静态网页**：GitHub Pages 只能托管静态文件，不能运行 Python，也不能安全地调用模型（密钥会暴露给所有访客）。所以网站展示的是已经产生的结果，不提供在线提问。
+- **内容**：首页（项目介绍、架构图、关键结果）、自动周报（每周一份，带 GMV 环比图）、评测（改进前后、直接问模型对 Agent）、财报比率（四家公司的 ROE 小多图和比率表）、运行回放（真实运行时每一步调了什么工具、答案、核查结果和人工复核）。
+- **数字从哪来**：全部来自仓库里已提交的结果文件，或者由分析工具在生成网页时现算；图表由 Python 直接画成 SVG。模型回答当作不可信文本，渲染前先转义，原始 HTML 不会进入网页。
+- **什么时候更新**：推送到 main 时，以及每周周报工作流成功之后（机器人提交的推送不会触发其他工作流，所以用周报工作流的完成事件来触发）。
+- **本地预览**：`uv run da-agent build-site` 后，用 `python -m http.server --directory _site` 打开。
+
+启用（只需一次）：仓库 Settings → Pages → Build and deployment → Source 选 **GitHub Actions**。
 
 ## 部署到 GitHub Actions（M7）
 
