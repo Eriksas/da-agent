@@ -32,8 +32,8 @@ def rows_for(company: str, currency: str, year_end: str, values: dict[str, dict[
     return out
 
 
-@pytest.fixture(scope="module")
-def con(tmp_path_factory: pytest.TempPathFactory):
+def write_key_facts(path: Path) -> Path:
+    """写出本文件开头说明的手算样例，供各测试文件共用。"""
     alibaba = rows_for("alibaba", "CNY", "03-31", {
         "revenue": {2023: 800, 2024: 1000}, "cost_of_revenue": {2023: 480, 2024: 600},
         "operating_income": {2023: 80, 2024: 150}, "net_income": {2023: 60, 2024: 100},
@@ -48,9 +48,13 @@ def con(tmp_path_factory: pytest.TempPathFactory):
         "assets": {2023: 600, 2024: 700}, "liabilities_and_equity": {2023: 600, 2024: 700},
         "equity": {2023: 280, 2024: 300},
     })
-    path = tmp_path_factory.mktemp("fin") / "key_facts.csv"
     pd.DataFrame(alibaba + amazon, columns=COLUMNS).to_csv(path, index=False)
-    connection = connect_financials(path)
+    return path
+
+
+@pytest.fixture(scope="module")
+def con(tmp_path_factory: pytest.TempPathFactory):
+    connection = connect_financials(write_key_facts(tmp_path_factory.mktemp("fin") / "key_facts.csv"))
     yield connection
     connection.close()
 

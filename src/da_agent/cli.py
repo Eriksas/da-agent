@@ -6,6 +6,8 @@
 - `da-agent quality`：生成数据质量报告（reports/data_quality.md 和 .json）
 - `da-agent week 2011-W48`：不经过模型，直接用分析工具输出某一周的指标、拆解和下钻
 - `da-agent ask "问题"`：用真实模型（或 --llm fake 加剧本）回答问题，运行记录、核查结果和报告存到 runs/
+- `da-agent fetch-financials`：下载 SEC 财报数据，生成上市公司关键科目表
+- `da-agent company-ask "问题"`：上市公司财报分析，用法同 ask
 - `da-agent check runs/<运行编号>`：对已保存的运行补做核查，重新生成报告，不调用模型
 - `da-agent eval`：评测，同一批题目在多个对比组各跑一遍，程序打分，结果写到 eval/results/
 - `da-agent eval-compare 改进前目录 改进后目录`：对比两次评测，不调用模型
@@ -109,14 +111,18 @@ def demo(llm_kind: str) -> int:
     return 0 if run.status == "completed" else 1
 
 
-def ask(question: str, llm_kind: str, script: Path | None) -> int:
-    """在真实数据上回答问题。默认调用真实模型；--llm fake 时按剧本回放（用于调试）。"""
+def ask(question: str, llm_kind: str, script: Path | None, domain: str = "ecommerce") -> int:
+    """在真实数据上回答问题。默认调用真实模型；--llm fake 时按剧本回放（用于调试）。
+
+    domain：ecommerce 用电商交易数据（ask）；company 用上市公司关键科目表（company-ask）。
+    """
     from .agent import run_agent, save_run
     from .cleaning import connect
+    from .company import connect_financials
     from .dataset import PARQUET_PATH
     from .llm import OpenAICompatibleLLM
 
-    if not PARQUET_PATH.exists():
+    if domain == "ecommerce" and not PARQUET_PATH.exists():
         raise SystemExit("还没有准备数据，请先运行：da-agent prepare-data")
     settings = Settings()
     if llm_kind == "fake":
@@ -125,8 +131,8 @@ def ask(question: str, llm_kind: str, script: Path | None) -> int:
         llm = FakeLLM.from_file(script)
     else:
         llm = OpenAICompatibleLLM(settings)
-    with connect(PARQUET_PATH) as con:
-        run = run_agent(question, llm=llm, con=con, max_tool_calls=settings.llm_max_tool_calls)
+    with (connect_financials() if domain == "company" else connect(PARQUET_PATH)) as con:
+        run = run_agent(question, llm=llm, con=con, max_tool_calls=settings.llm_max_tool_calls, domain=domain)
     run_dir = save_run(run, RUNS_DIR)
     _print_run(run, run_dir)
     _review(run_dir)
@@ -382,6 +388,10 @@ def main(argv: list[str] | None = None) -> int:
     ask_parser.add_argument("question", help="例如：上周 GMV 为什么下降？")
     ask_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 调用真实模型（默认）；fake 按剧本回放")
     ask_parser.add_argument("--script", type=Path, help="--llm fake 时使用的剧本文件")
+    company_parser = commands.add_parser("company-ask", help="上市公司财报分析：用 Agent 回答一个问题，运行记录存到 runs/")
+    company_parser.add_argument("question", help="例如：阿里巴巴最近一个财年的盈利能力怎么样？")
+    company_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 调用真实模型（默认）；fake 按剧本回放")
+    company_parser.add_argument("--script", type=Path, help="--llm fake 时使用的剧本文件")
     weekly_parser = commands.add_parser("weekly", help="生成一周的周报（默认按回放游标）")
     weekly_parser.add_argument("--week", help="指定周，例如 2010-W02；不填则用回放游标")
     weekly_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 真实模型；fake 只检查流程")
@@ -424,6 +434,8 @@ def main(argv: list[str] | None = None) -> int:
             return week(args.week, args.compare)
         if args.command == "ask":
             return ask(args.question, args.llm, args.script)
+        if args.command == "company-ask":
+            return ask(args.question, args.llm, args.script, domain="company")
         if args.command == "check":
             return check(args.run_dir)
         if args.command == "weekly":

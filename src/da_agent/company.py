@@ -183,6 +183,14 @@ def company_overview(con: duckdb.DuckDBPyConnection) -> dict[str, Any]:
                       "财年按结束日期所在年份命名；ROE 等用到平均数的比率需要上一财年末的数据。", NOTICE]}
 
 
+def company_catalog(con: duckdb.DuckDBPyConnection) -> str:
+    """放进系统提示词的公司目录：每家公司一行。"""
+    currency = {"CNY": "人民币", "USD": "美元"}
+    return "\n".join(f"- `{c['company']}` {c['name']}（{c['ticker']}）：FY{c['fiscal_years'][0]}–FY{c['fiscal_years'][1]}，"
+                     f"财年截至 {c['fiscal_year_end']}，{currency.get(c['currency'], c['currency'])}"
+                     for c in company_overview(con)["companies"])
+
+
 def financial_summary(con: duckdb.DuckDBPyConnection, company: str, fiscal_year: int | None = None) -> dict[str, Any]:
     """一家公司一个财年的关键科目和比率，对比上一财年。"""
     info = _company(company)

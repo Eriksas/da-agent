@@ -29,6 +29,7 @@ from uuid import uuid4
 import duckdb
 
 from .checks import number_check
+from .company import company_catalog
 from .llm import LLMClient, LLMError
 from .metrics import data_range
 from .paths import ROOT
@@ -36,6 +37,8 @@ from .skills import catalog, load_skills
 from .tools import ToolOutcome, execute, tool_specs
 
 SYSTEM_PROMPT_PATH = ROOT / "prompts" / "agent_system.md"
+# 每个领域一份系统提示词和一组工具；循环、核查、退回修正对所有领域都一样
+SYSTEM_PROMPTS = {"ecommerce": SYSTEM_PROMPT_PATH, "company": ROOT / "prompts" / "company_system.md"}
 BUDGET_NOTICE = "（系统提示）工具调用次数已用完。请不要再调用工具，直接根据已有的工具结果给出最终回答。"
 FORMAT_NOTICE = ("（系统提示）上一条回复里有工具调用的文字标记，但没有按函数调用的格式发出，程序无法执行。"
                  "需要工具时请直接发起工具调用；不需要时请给出文字回答。")
@@ -56,6 +59,7 @@ class AgentRun:
     model: str
     max_tool_calls: int
     use_skills: bool = True  # 评测对比用：False 时不提供分析流程
+    domain: str = "ecommerce"  # ecommerce 电商运营 / company 上市公司财报
     status: str = "running"  # completed / empty_answer / llm_error / max_rounds / malformed_answer
     answer: str = ""
     error: str | None = None
@@ -69,11 +73,14 @@ class AgentRun:
     messages: list[dict[str, Any]] = field(default_factory=list)
 
 
-def build_system_prompt(con: duckdb.DuckDBPyConnection, max_tool_calls: int, use_skills: bool = True) -> str:
-    """把数据范围、最近完整周、工具上限、分析流程目录填进系统提示词模板。"""
-    template = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
-    skills = load_skills() if use_skills else {}
-    return template.format(**data_range(con), max_tool_calls=max_tool_calls, skills_catalog=catalog(skills))
+def build_system_prompt(con: duckdb.DuckDBPyConnection, max_tool_calls: int, use_skills: bool = True,
+                        domain: str = "ecommerce") -> str:
+    """把数据范围（电商：周范围和最近完整周；财报：公司和财年）、工具上限、本领域的流程目录填进提示词模板。"""
+    template = SYSTEM_PROMPTS[domain].read_text(encoding="utf-8")
+    skills = catalog(load_skills(domain=domain) if use_skills else {})
+    if domain == "company":
+        return template.format(companies=company_catalog(con), max_tool_calls=max_tool_calls, skills_catalog=skills)
+    return template.format(**data_range(con), max_tool_calls=max_tool_calls, skills_catalog=skills)
 
 
 def _repair_notice(ungrounded: list[dict[str, Any]]) -> str:
@@ -82,15 +89,18 @@ def _repair_notice(ungrounded: list[dict[str, Any]]) -> str:
 
 
 def run_agent(question: str, *, llm: LLMClient, con: duckdb.DuckDBPyConnection, max_tool_calls: int,
-              system_prompt: str | None = None, use_skills: bool = True, repair: bool = True) -> AgentRun:
+              system_prompt: str | None = None, use_skills: bool = True, repair: bool = True,
+              domain: str = "ecommerce") -> AgentRun:
     """运行一次 Agent 循环，返回完整记录。任何失败都体现在 status 里，不向外抛异常。"""
     start = time.perf_counter()
     run = AgentRun(run_id=f"{datetime.now():%Y%m%dT%H%M%S}-{uuid4().hex[:6]}", question=question, model=llm.model,
-                   max_tool_calls=max_tool_calls, use_skills=use_skills,
+                   max_tool_calls=max_tool_calls, use_skills=use_skills, domain=domain,
                    started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
-    run.messages = [{"role": "system", "content": system_prompt or build_system_prompt(con, max_tool_calls, use_skills)},
+    run.messages = [{"role": "system",
+                     "content": system_prompt or build_system_prompt(con, max_tool_calls, use_skills, domain)},
                     {"role": "user", "content": question}]
-    specs = [s for s in tool_specs() if use_skills or s["function"]["name"] != "load_skill"]
+    specs = [s for s in tool_specs(domain) if use_skills or s["function"]["name"] != "load_skill"]
+    allowed = [s["function"]["name"] for s in specs]  # 只执行这个领域的工具：别的领域的工具连的是另一份数据
     used, limit, notified_at = 0, max_tool_calls, None
     max_rounds = max_tool_calls + 2  # 正常情况下每轮至少用 1 次工具，再加作答的一轮和一轮余量
     run.status = "max_rounds"
@@ -129,6 +139,9 @@ def run_agent(question: str, *, llm: LLMClient, con: duckdb.DuckDBPyConnection, 
         for call in reply.tool_calls:
             if used >= limit:
                 outcome = ToolOutcome(False, {"error": "工具调用次数已用完，请直接根据已有结果回答"}, 0)
+            elif call.name not in allowed:
+                used += 1
+                outcome = ToolOutcome(False, {"error": f"没有名为 {call.name} 的工具；可用工具：{allowed}"}, 0)
             else:
                 used += 1
                 outcome = execute(con, call.name, call.arguments)

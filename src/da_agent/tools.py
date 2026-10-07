@@ -17,7 +17,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .abtest import proportion_test, sample_size_proportions, srm_check
 from .calculator import MAX_LENGTH, calculate
+from .company import RATIOS, company_overview, dupont, financial_summary, peer_compare
 from .decompose import decompose_gmv
+from .financials import COMPANIES
 from .llm import INVALID_JSON_KEY
 from .metrics import METRICS, drilldown, metric_summary
 from .quality import build_report
@@ -71,6 +73,23 @@ class CalculateArgs(_Args):
         "算术表达式，只能用数字、+ - * / 和括号。数字照抄工具结果，不带千分位逗号和 %，百分数写成小数，"
         "例如 (315255.39 - 309381.59) / 309381.59"))
     purpose: str = Field(min_length=1, max_length=100, description="算的是什么，例如“剔除发票 581483 后的 GMV 环比”")
+
+
+CompanyName = Literal[tuple(COMPANIES)]  # type: ignore[valid-type]
+RatioName = Literal[tuple(RATIOS)]  # type: ignore[valid-type]
+COMPANY_HINT = "、".join(f"{key}（{company.name}）" for key, company in COMPANIES.items())
+
+
+class CompanyArgs(_Args):
+    company: CompanyName = Field(description=f"公司：{COMPANY_HINT}")
+    fiscal_year: int | None = Field(None, ge=2000, le=2100, description=(
+        "财年，按财年结束日期所在年份，例如阿里 FY2025 = 2024-04-01 至 2025-03-31；不填用最近一个财年"))
+
+
+class PeerArgs(_Args):
+    companies: list[CompanyName] = Field(default_factory=list, description="要比较的公司；不填比较全部")
+    fiscal_year: int | None = Field(None, ge=2000, le=2100, description="财年；不填时每家用各自最近的财年")
+    ratios: list[RatioName] = Field(default_factory=list, description="要比较的比率；不填用常用比率")
 
 
 class SampleSizeArgs(_Args):
@@ -177,7 +196,27 @@ TOOLS: dict[str, Tool] = {tool.name: tool for tool in (
          "四则运算计算器。需要求和、相减、算占比、变化率或日均时调用，再引用它的 result；不要心算或估算。"
          "参与计算的数字必须照抄之前的工具结果或用户的问题。",
          CalculateArgs, _calculate),
+    Tool("company_overview",
+         "查看可以分析的公司：财年范围、财年截止日、币种、最近一次年报、哪些科目没有标准数据。分析前先调用。",
+         NoArgs, lambda con, _: company_overview(con)),
+    Tool("financial_summary",
+         "查看一家公司一个财年的关键科目（收入、利润、费用、现金流、资产负债）和比率（增速、利润率、费用率、ROE、"
+         "资产负债率、现金流质量等），对比上一财年。每个数字带出处，返回值含口径说明和警告。",
+         CompanyArgs, lambda con, a: financial_summary(con, a.company, a.fiscal_year)),
+    Tool("dupont",
+         "杜邦分析：ROE = 归母净利率 × 总资产周转率 × 权益乘数，并把 ROE 相对上一财年的变化拆到三个因子上"
+         "（连环替代法，并给出与顺序无关的 Shapley 值）。用于回答“ROE 为什么变了”。",
+         CompanyArgs, lambda con, a: dupont(con, a.company, a.fiscal_year)),
+    Tool("peer_compare",
+         "多家公司的比率对比（增速、利润率、ROE、资产负债率、现金流质量等）。只比比率，不比金额：各公司币种和财年截止日不同。",
+         PeerArgs, lambda con, a: peer_compare(con, a.companies or None, a.fiscal_year, a.ratios or None)),
 )}
+# 每个领域给模型看的工具。电商的顺序和 M7b 评测时一致；load_skill 和 calculate 两个领域共用
+DOMAIN_TOOLS: dict[str, tuple[str, ...]] = {
+    "ecommerce": ("metric_summary", "decompose_gmv", "drilldown", "data_quality_overview", "load_skill",
+                  "ab_proportion_test", "ab_sample_size", "calculate"),
+    "company": ("company_overview", "financial_summary", "dupont", "peer_compare", "load_skill", "calculate"),
+}
 
 
 def _drop_titles(schema: Any) -> Any:
@@ -189,11 +228,13 @@ def _drop_titles(schema: Any) -> Any:
     return schema
 
 
-def tool_specs() -> list[dict[str, Any]]:
-    """发给模型的工具说明书（OpenAI function calling 格式）。"""
+def tool_specs(domain: str = "ecommerce") -> list[dict[str, Any]]:
+    """发给模型的工具说明书（OpenAI function calling 格式），只包含这个领域的工具。"""
+    if domain not in DOMAIN_TOOLS:
+        raise ValueError(f"未知领域：{domain}；可选：{list(DOMAIN_TOOLS)}")
     return [{"type": "function", "function": {"name": tool.name, "description": tool.description,
                                               "parameters": _drop_titles(tool.args_model.model_json_schema())}}
-            for tool in TOOLS.values()]
+            for tool in (TOOLS[name] for name in DOMAIN_TOOLS[domain])]
 
 
 @dataclass(frozen=True)

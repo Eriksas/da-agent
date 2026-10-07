@@ -23,10 +23,19 @@ def test_real_skill_is_valid() -> None:
 
 
 def test_catalog_only_has_name_and_description() -> None:
-    skills = load_skills()
-    text = catalog(skills)
+    text = catalog(load_skills(domain="ecommerce"))
     assert text.startswith("- `ecommerce-metric-diagnosis`：")
     assert "陷阱清单" not in text  # 正文不进系统提示词，按需加载
+    assert "company-financial-analysis" not in text  # 每个领域只列自己的流程
+
+
+def test_real_company_skill_is_valid() -> None:
+    skills = load_skills(domain="company")
+    assert list(skills) == ["company-financial-analysis"]
+    skill = skills["company-financial-analysis"]
+    assert skill.required_tools == ("company_overview", "financial_summary")
+    assert "不适用于" in skill.description and "买卖建议" in skill.description
+    assert "未披露不等于 0" in skill.body and "财年不对齐" in skill.body
 
 
 @pytest.mark.parametrize("folder, text, message", [
