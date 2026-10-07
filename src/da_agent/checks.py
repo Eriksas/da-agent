@@ -100,7 +100,8 @@ def _numbers_in(value: Any, pool: list[float]) -> None:
             _numbers_in(item, pool)
 
 
-CALC_CONSTANTS = (100.0,)  # 算式里不需要出处的常数：比例 × 100 换成百分数。≤ 10 的整数（如天数）本来就不核查
+# 算式里不需要出处的常数：× 100 换成百分数，÷ 1 万、÷ 1 亿换成“万”“亿”（财报金额常用）。≤ 10 的整数（如天数）本来就不核查
+CALC_CONSTANTS = (100.0, 1e4, 1e8)
 
 
 def _grounded(value: float, tolerance: float, pool: list[float]) -> bool:

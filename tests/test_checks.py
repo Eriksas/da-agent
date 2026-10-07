@@ -215,3 +215,11 @@ def test_slash_dates_are_not_numbers() -> None:
     """留出题改进前的运行：“闭店为 4/21–4/25”里的 25 被当成数字判为没有出处。分数和比例不受影响。"""
     assert texts("闭店为 4/21–4/25，截止 2011/12/09") == []
     assert texts("480/8000 对 520/8000") == ["480", "8000", "520", "8000"]
+
+
+def test_unit_conversion_constants_need_no_source() -> None:
+    """财报分析真实运行：模型用 ÷ 100000000 把元换成亿元，这个常数不需要出处。"""
+    run = with_messages("相差 879.48 亿元", calc("(106938690000 - 18991000000) / 100000000", 879.4769),
+                        tool={"a": 106938690000, "b": 18991000000})
+    numbers = check_run(run)["numbers"]
+    assert numbers["ungrounded"] == [] and numbers["unsupported_calculations"] == []
