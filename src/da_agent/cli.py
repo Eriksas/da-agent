@@ -158,11 +158,11 @@ def evaluate(llm_kind: str, case_ids: str | None, conditions: str, repeats: int,
     from .llm import LLMReply, OpenAICompatibleLLM
     from .paths import ROOT
 
-    if not PARQUET_PATH.exists():
-        raise SystemExit("还没有准备数据，请先运行：da-agent prepare-data")
     if not (ROOT / case_file).exists():
         raise ValueError(f"题集文件不存在：{case_file}")
     cases = load_cases(ROOT / case_file)
+    if any(case.domain == "ecommerce" for case in cases) and not PARQUET_PATH.exists():
+        raise SystemExit("还没有准备数据，请先运行：da-agent prepare-data")
     if case_ids:
         wanted = [i.strip() for i in case_ids.split(",") if i.strip()]
         unknown = sorted(set(wanted) - {case.id for case in cases})

@@ -25,7 +25,9 @@ import yaml
 from .agent import AgentRun, run_agent
 from .checks import check_run, extract_numbers
 from .cleaning import connect, connect_frame, fetch_rows
+from .company import connect_financials, financial_summary
 from .dataset import PARQUET_PATH
+from .financials import COMPANIES, ITEMS
 from .llm import LLMClient, LLMError
 from .metrics import data_range, drilldown, weekly_row
 from .paths import ROOT
@@ -45,6 +47,11 @@ BASELINE_PROMPT = """你是一名电商运营数据分析助手。下面是程�
 
 {table}
 """
+COMPANY_BASELINE_PROMPT = """你是一名上市公司财报分析助手。下面是程序从 SEC 年报整理的关键科目表：金额单位为“亿”，各公司用自己的编报币种（人民币或美元），没有做汇率换算；“—”表示标准分类里没有这个数字。
+请只根据这张表和用户提供的信息回答问题，用中文 Markdown 写出结论、主要发现、风险提示和需要注意的地方。不做估值、评级，不给投资建议。
+
+{table}
+"""
 
 
 @dataclass(frozen=True)
@@ -56,9 +63,10 @@ class Case:
     question: str
     must_mention: tuple[tuple[str, ...], ...] = ()
     must_not: tuple[str, ...] = ()
-    expect_value: dict[str, str] | None = None
+    expect_value: dict[str, Any] | None = None
     inject: dict[str, str] | None = None
     expects_skill: bool = True
+    domain: str = "ecommerce"  # 题集文件开头的 domain：ecommerce 电商运营 / company 上市公司财报
 
 
 def load_cases(path: Path = CASES_PATH) -> list[Case]:
@@ -68,7 +76,7 @@ def load_cases(path: Path = CASES_PATH) -> list[Case]:
                   must_mention=tuple(tuple(group) for group in item.get("must_mention") or []),
                   must_not=tuple(item.get("must_not") or []),
                   expect_value=item.get("expect_value"), inject=item.get("inject"),
-                  expects_skill=bool(item.get("expects_skill", True)))
+                  expects_skill=bool(item.get("expects_skill", True)), domain=str(data.get("domain", "ecommerce")))
              for item in data["cases"]]
     ids = [case.id for case in cases]
     if len(ids) != len(set(ids)):
@@ -111,15 +119,41 @@ def weekly_table(con: duckdb.DuckDBPyConnection) -> str:
     return "\n".join(lines)
 
 
-def run_baseline(question: str, *, llm: LLMClient, con: duckdb.DuckDBPyConnection) -> AgentRun:
+COMPANY_TABLE_ITEMS = ("revenue", "cost_of_revenue", "operating_income", "net_income", "operating_cash_flow", "capex",
+                       "assets", "liabilities", "equity")
+
+
+def company_table(con: duckdb.DuckDBPyConnection) -> str:
+    """财报领域直接问模型组拿到的输入：每家公司每个财年一行的关键科目（单位：亿，原始科目，不含推导量）。"""
+    rows: dict[tuple[str, int], dict[str, dict[str, Any]]] = {}
+    for row in fetch_rows(con, "SELECT * FROM key_facts ORDER BY company, fiscal_year"):
+        rows.setdefault((row["company"], int(row["fiscal_year"])), {})[row["item"]] = row
+    lines = ["| 公司 | 财年 | 期间 | 币种 | " + " | ".join(ITEMS[i].label for i in COMPANY_TABLE_ITEMS) + " |",
+             "|---|---|---|---|" + "---:|" * len(COMPANY_TABLE_ITEMS)]
+    for (company, year), items in rows.items():
+        if "revenue" not in items:  # 只有年末余额、没有当年利润表的年份（2017 年之前的余额）不列
+            continue
+        revenue = items["revenue"]
+        # 每格都写上“亿”：核查器按单位换算，只在表头写单位的话，引用“11,588.19 亿元”会被误判为没有出处
+        cells = " | ".join("—" if i not in items else f"{float(items[i]['value']) / 1e8:,.2f} 亿" for i in COMPANY_TABLE_ITEMS)
+        lines.append(f"| {COMPANIES[company].name} | FY{year} | {revenue['period_start']} 至 {revenue['period_end']} | "
+                     f"{revenue['currency']} | {cells} |")
+    return "\n".join(lines)
+
+
+def run_baseline(question: str, *, llm: LLMClient, con: duckdb.DuckDBPyConnection, domain: str = "ecommerce") -> AgentRun:
     """直接问模型：一次调用，不给工具。记录格式和 Agent 运行一致，方便用同一套核查和打分。"""
     start = time.perf_counter()
     run = AgentRun(run_id=f"{datetime.now():%Y%m%dT%H%M%S}-{uuid4().hex[:6]}", question=question, model=llm.model,
-                   max_tool_calls=0, use_skills=False, started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
-    bounds = data_range(con)
-    run.messages = [{"role": "system", "content": BASELINE_PROMPT.format(
-                        first_week=bounds["first_week"], last_week=bounds["last_week"], table=weekly_table(con))},
-                    {"role": "user", "content": question}]
+                   max_tool_calls=0, use_skills=False, domain=domain,
+                   started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    if domain == "company":
+        system = COMPANY_BASELINE_PROMPT.format(table=company_table(con))
+    else:
+        bounds = data_range(con)
+        system = BASELINE_PROMPT.format(first_week=bounds["first_week"], last_week=bounds["last_week"],
+                                        table=weekly_table(con))
+    run.messages = [{"role": "system", "content": system}, {"role": "user", "content": question}]
     try:
         reply = llm.chat(run.messages, tools=None)
     except LLMError as exc:
@@ -136,10 +170,18 @@ def run_baseline(question: str, *, llm: LLMClient, con: duckdb.DuckDBPyConnectio
 
 
 def expected_value(con: duckdb.DuckDBPyConnection, case: Case) -> float | None:
-    """题目要求答案里出现的正确数值，由工具现算。"""
-    if not case.expect_value:
+    """题目要求答案里出现的正确数值，由工具现算。
+
+    电商：{week, metric}；财报：{company, fiscal_year, item} 取科目原始数字，或 {company, fiscal_year, ratio} 取比率。
+    """
+    spec = case.expect_value
+    if not spec:
         return None
-    return float(weekly_row(con, case.expect_value["week"])[case.expect_value["metric"]])
+    if case.domain != "company":
+        return float(weekly_row(con, spec["week"])[spec["metric"]])
+    summary = financial_summary(con, spec["company"], spec["fiscal_year"])
+    key, rows = ("item", summary["items"]) if "item" in spec else ("ratio", summary["ratios"])
+    return float(next(row["current"] for row in rows if row[key] == spec[key]))
 
 
 def score(case: Case, run: dict[str, Any], checks: dict[str, Any], expected: float | None) -> dict[str, Any]:
@@ -208,9 +250,11 @@ class Connections:
         self._cache: dict[str, duckdb.DuckDBPyConnection] = {}
 
     def get(self, case: Case) -> duckdb.DuckDBPyConnection:
-        key = json.dumps(case.inject, sort_keys=True) if case.inject else "real"
+        key = "company" if case.domain == "company" else json.dumps(case.inject, sort_keys=True) if case.inject else "real"
         if key not in self._cache:
-            if case.inject:
+            if case.domain == "company":
+                con = connect_financials()
+            elif case.inject:
                 frame = duckdb.sql(f"SELECT * FROM read_parquet('{self.parquet_path.as_posix()}')").df()
                 con = connect_frame(inject(frame, case.inject))
                 verify_injection(con, case.inject)
@@ -234,10 +278,10 @@ def run_eval(cases: list[Case], conditions: list[str], repeats: int,
         con = connections.get(case)
         llm = make_llm(case, condition, i)
         if condition == "baseline":
-            run = run_baseline(case.question, llm=llm, con=con)
+            run = run_baseline(case.question, llm=llm, con=con, domain=case.domain)
         else:
             run = run_agent(case.question, llm=llm, con=con, max_tool_calls=max_tool_calls,
-                            use_skills=condition == "agent_skill")
+                            use_skills=condition == "agent_skill", domain=case.domain)
         run_dict = asdict(run)
         checks = check_run(run_dict)
         result = score_run(case, run_dict, checks, expected_value(con, case))

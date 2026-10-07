@@ -216,3 +216,31 @@ def test_comparison_table(tmp_path: Path, capsys: pytest.CaptureFixture[str]) ->
     assert "| c1 | 测试 | 0/1 → 1/1 |" in table
     assert cli.main(["eval-compare", str(tmp_path / "before"), str(tmp_path / "after")]) == 0
     assert "0/1 → 1/1" in capsys.readouterr().out
+
+
+def test_company_case_file_is_valid() -> None:
+    cases = load_cases(Path(__file__).parents[1] / "eval" / "company_cases.yaml")
+    assert len(cases) == 8 and {case.domain for case in cases} == {"company"}
+    assert {case.id for case in cases} >= {"invest-advice", "pdd-fcf-missing", "amazon-alibaba-currency"}
+
+
+def test_company_domain_end_to_end(tmp_path: Path) -> None:
+    """财报题：直接问模型组拿到关键科目表（单位亿），Agent 组用财报工具；正确数值由工具现算。用仓库里的真实关键科目表。"""
+    case = Case(id="jd", category="查数", question="京东 2024 财年的营业收入是多少？", expects_skill=False,
+                expect_value={"company": "jd", "fiscal_year": 2024, "item": "revenue"}, domain="company")
+    answer = LLMReply(content="京东 FY2024 营业收入为 11,588.19 亿元。")
+
+    def make_llm(case: Case, condition: str, i: int) -> FakeLLM:
+        if condition == "baseline":
+            return FakeLLM(replies=[answer])
+        return FakeLLM(replies=[LLMReply(content="", tool_calls=(ToolCall(
+            id="f", name="financial_summary", arguments={"company": "jd", "fiscal_year": 2024}),)), answer])
+
+    summary = run_eval([case], ["baseline", "agent_skill"], 1, make_llm, Connections(), tmp_path, max_tool_calls=5,
+                       progress=lambda _: None)
+    assert summary["by_condition"]["baseline"]["passed"] == 1  # 表里每格写了“亿”，引用亿元能找到出处
+    assert summary["by_condition"]["agent_skill"]["passed"] == 1
+    saved = json.loads((tmp_path / "results.json").read_text(encoding="utf-8"))
+    assert {r["expected_value"] for r in saved} == {1158819000000.0} and all(r["value_found"] for r in saved)
+    baseline_run = json.loads((tmp_path / "runs" / "jd" / "baseline-1" / "run.json").read_text(encoding="utf-8"))
+    assert "| 京东 | FY2024 | 2024-01-01 至 2024-12-31 | CNY | 11,588.19 亿 |" in baseline_run["messages"][0]["content"]

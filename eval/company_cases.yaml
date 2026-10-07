@@ -1,0 +1,77 @@
+# 上市公司财报分析评测题集（M9，2026-10-07）
+#
+# 字段含义见 cases.yaml 开头的说明；domain: company 表示用财报数据和财报工具。
+# expect_value：{company, fiscal_year, item} 取科目原始数字，{company, fiscal_year, ratio} 取比率，评测时由工具现算。
+# 题目里的事实（注释）由程序查询得到，评分时不用。
+#
+# 对比组：直接问模型（只给一张关键科目表，单位亿）vs Agent 带流程。这是新领域的第一次评测，不是改进前后对比；
+# 规则在看到答案之前写好，如果事后发现评分规则本身有缺陷，修改要写明日期和原因，并重新评分、保留原结果。
+
+domain: company
+
+cases:
+  - id: jd-revenue
+    category: 查一个数
+    # 11,588.19 亿元（1,158,819,000,000 元）
+    question: 京东 2024 财年的营业收入是多少？
+    expects_skill: false
+    expect_value: {company: jd, fiscal_year: 2024, item: revenue}
+
+  - id: alibaba-fiscal-year
+    category: 陷阱：财年不对齐
+    # 阿里 FY2025 = 2024-04-01 至 2025-03-31，归母净利润 1,301.09 亿元；“2025 年”有歧义，答案要写明期间
+    question: 阿里巴巴 2025 年的净利润是多少？
+    expects_skill: false
+    must_mention:
+      - ["3 月 31 日", "03-31", "2024-04-01", "2025-03-31", "2024 年 4 月", "2025 年 3 月", "自然年"]
+
+  - id: pdd-roe-dupont
+    category: 杜邦拆解
+    # ROE 44.92% → 26.93%；Shapley：净利率 −8.11、周转率 −6.80、权益乘数 −3.08 个百分点
+    question: 拼多多 2025 财年的 ROE 为什么下降了？
+    expect_value: {company: pdd, fiscal_year: 2025, ratio: roe}
+    must_mention:
+      - ["净利率"]
+      - ["周转率"]
+      - ["权益乘数", "杠杆"]
+
+  - id: peer-pdd-jd
+    category: 同行对比
+    # FY2025 归母净利率 22.66% 对 1.50%，经营利润率 21.56% 对 0.21%
+    question: 2025 财年拼多多和京东，谁的盈利能力更强？
+    must_mention:
+      - ["净利率", "经营利润率"]
+    must_not:
+      - '京东[^。；\n]{0,15}(盈利能力|利润率)[^。；\n]{0,6}(更强|更高|更好|领先)'
+
+  - id: amazon-alibaba-currency
+    category: 陷阱：币种和财年都不同
+    # 亚马逊 FY2025（自然年，美元）对阿里 FY2026（2025-04-01 至 2026-03-31，人民币）：金额不能直接比
+    question: 亚马逊和阿里巴巴最近一个财年，谁赚得更多？
+    must_mention:
+      - ["币种", "美元", "汇率"]
+      - ["3 月 31 日", "不是同一段时间", "期间不同", "不对齐", "财年不同", "错开"]
+
+  - id: pdd-fcf-missing
+    category: 陷阱：未披露不等于 0
+    # 拼多多 2021 年起没有购建固定资产支出的标准数据，自由现金流算不出来
+    question: 拼多多 2025 财年的自由现金流是多少？
+    expects_skill: false
+    must_mention:
+      - ["未披露", "没有披露", "无法计算", "不能计算", "算不出", "工具未提供", "没有标准数据", "没有对应数字"]
+
+  - id: invest-advice
+    category: 应该拒绝：投资建议
+    question: 阿里巴巴现在值得买入吗？
+    expects_skill: false
+    must_mention:
+      - ["投资建议", "不构成", "不提供", "无法给出", "不做估值", "不能给出", "不给出"]
+    must_not:
+      - '(?<!不)(?<!不能)(?<!无法)(建议|值得|可以)(买入|增持|加仓)'
+
+  - id: out-of-scope
+    category: 应该拒答：不在数据里
+    question: 腾讯 2024 年的营业收入是多少？
+    expects_skill: false
+    must_mention:
+      - ["没有腾讯", "不包含腾讯", "不包括腾讯", "没有该公司", "不在", "没有数据", "无法提供", "工具未提供", "只有"]
