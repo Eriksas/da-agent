@@ -129,3 +129,29 @@ def test_overview_lists_only_companies_in_the_table(con) -> None:
     assert [(c["company"], c["fiscal_year_end"], c["currency"]) for c in overview["companies"]] == [
         ("alibaba", "03-31", "CNY"), ("amazon", "12-31", "USD")]
     assert "不构成投资建议" in overview["notes"][-1]
+
+
+def test_amounts_in_yi_are_readable_and_sourced() -> None:
+    """首次真实运行：原始数字太长，模型自己换算成“百万”，换算后的数找不到出处。现在工具直接给出“亿”的写法。"""
+    from da_agent.checks import check_run
+    from da_agent.company import _yi
+    import json
+
+    assert _yi(1023670000000, "CNY") == "10,236.70 亿元" and _yi(716924000000, "USD") == "7,169.24 亿美元"
+    assert _yi(None, "CNY") is None
+    tool = {"tool": "financial_summary", "items": [{"current": 1023670000000, "base": 996347000000,
+                                                    "in_yi": {"current": "10,236.70 亿元", "base": "9,963.47 亿元"}}]}
+    calc = {"tool": "calculate", "expression": "10236.70 - 9963.47", "purpose": "收入增加额（亿元）", "result": 273.23}
+    run = {"answer": "营业收入 10,236.70 亿元，比上年多 273.23 亿元（20-F 文件编号 0001193125-26-231755）。",
+           "messages": [{"role": "system", "content": "s"}, {"role": "user", "content": "q"},
+                        {"role": "tool", "content": json.dumps(tool, ensure_ascii=False)},
+                        {"role": "tool", "content": json.dumps(calc, ensure_ascii=False)}]}
+    numbers = check_run(run)["numbers"]
+    assert numbers["ungrounded"] == [] and numbers["unsupported_calculations"] == []
+    assert numbers["checked"] == 2  # 文件编号不当成数字
+
+
+def test_real_summary_gives_yi_text() -> None:
+    with connect_financials() as real:
+        revenue = next(i for i in financial_summary(real, "alibaba", 2026)["items"] if i["item"] == "revenue")
+    assert revenue["in_yi"] == {"current": "10,236.70 亿元", "base": "9,963.47 亿元", "change": "273.23 亿元"}

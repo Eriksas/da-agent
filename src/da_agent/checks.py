@@ -17,6 +17,9 @@ from typing import Any
 
 # 不参与核查的文本：周、日期时间、单独的时间、列表序号
 IGNORED = [
+    # SEC 文件编号：0001193125-26-231755。必须排在日期规则前面，否则其中的“3125-26-23”会先被当成日期遮掉，
+    # 剩下的“000119”“1755”被当成数字（财报分析首次真实运行里出现过）
+    re.compile(r"\d{10}-\d{2}-\d{6}"),
     re.compile(r"\d{4}-W\d{2}"),
     re.compile(r"\d{4}[ \t]*年[ \t]*(?:第[ \t]*)?\d{1,2}[ \t]*周"),  # 中文周写法：2011 年 45 周、2011 年第 45 周
     re.compile(r"第[ \t]*\d{1,2}[ \t]*周"),
@@ -25,6 +28,7 @@ IGNORED = [
     re.compile(r"(?m)^[ \t]*(?:#+[ \t]*)?\d+[.、)][ \t]"),
     re.compile(r"(?m)^[ \t]*#+[ \t]*\d+(?:\.\d+)+"),  # 多级小节编号：### 2.1、#### 3.2.1（首份真实周报里被误判过）
     re.compile(r"\d{4}/\d{1,2}/\d{1,2}"),  # 斜杠日期：2011/12/09
+    re.compile(r"\b(?:10-K|10-Q|20-F|6-K|8-K)(?:/A)?\b"),  # SEC 报表类型：20-F 里的 20 不是数字
     re.compile(r"(?<![\d/.])\d{1,2}/\d{1,2}(?![\d/])"),  # 月/日：4/21–4/25（留出题改进前的运行里被误判过）
 ]
 # 数字前面不能是英文字母、数字、下划线或小数点（排除 W49、R09、C581484 这类编号），但可以紧挨汉字
@@ -119,7 +123,8 @@ def collect_sources(messages: list[dict[str, Any]]) -> tuple[list[float], list[d
     - 只有第一条用户消息是用户的问题。之后的“用户消息”都是程序加的提示（工具次数用完、核查退回），
       不算出处：退回提示里列着那些找不到出处的数字，算进来的话它们就“有出处”了。
     - calculate 的结果只有在输入数字都有出处时才进入出处池，防止把编出来的数“算”成有出处。
-      模型可能先乘 100 再把结果写成百分数，所以结果同时按 ÷100 存一份。
+      结果本身不带单位：模型可能先乘 100 再写成百分数，也可能用“亿”“万”为单位计算后写成“273.23 亿元”，
+      所以结果同时按 ÷100、×1 万、×1 亿各存一份。
 
     返回（出处池，每次 calculate 的检查结果）。
     """
@@ -138,7 +143,8 @@ def collect_sources(messages: list[dict[str, Any]]) -> tuple[list[float], list[d
             audit = _audit_calculation(content, pool)  # 只用算式之前已有的出处：输入必须来自更早的工具结果
             calculations.append(audit)
             if not audit["unsupported_inputs"]:
-                pool += [abs(content["result"]), abs(content["result"]) / 100]
+                result = abs(content["result"])
+                pool += [result, result / 100, result * 1e4, result * 1e8]  # 结果不带单位：可能是百分数，也可能以万、亿为单位
     return pool, calculations
 
 

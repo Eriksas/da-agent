@@ -138,6 +138,17 @@ def _r(value: float | None) -> float | None:
     return None if value is None else round(value, 4)
 
 
+def _yi(value: float | None, currency: str) -> str | None:
+    """金额换算成“亿”的写法，例如 1023670000000 元 → “10,236.70 亿元”。
+
+    原始数字有 12–13 位，模型会自己换算成“百万”，换算后的数在工具输出里找不到出处（首次真实运行发现）。
+    给出“亿”的写法后，回答和 calculate 都可以直接引用；核查器认识“亿”这个单位。
+    """
+    if value is None:
+        return None
+    return f"{value / 1e8:,.2f} 亿{'元' if currency == 'CNY' else '美元' if currency == 'USD' else currency}"
+
+
 def _period(facts: dict[int, dict[str, dict[str, Any]]], year: int) -> dict[str, Any]:
     row = facts.get(year, {}).get("revenue") or next(iter(facts.get(year, {}).values()), None)
     if row is None:
@@ -211,6 +222,8 @@ def financial_summary(con: duckdb.DuckDBPyConnection, company: str, fiscal_year:
         items.append({"item": key, "label": label, "current": round(cur[key]), "base": None if prev[key] is None else round(prev[key]),
                       "change": None if change is None else round(change),
                       "change_pct": _r(_div(change, abs(prev[key]) if prev[key] else None)),
+                      "in_yi": {"current": _yi(cur[key], currency), "base": _yi(prev[key], currency),
+                                "change": _yi(change, currency)},
                       "source": ({"derived": derived[key]} if key in derived else
                                  {"concept": row["concept"], "form": row["form"], "accn": row["accn"], "filed": row["filed"]})})
         old = facts.get(base, {}).get(key)
@@ -238,7 +251,8 @@ def financial_summary(con: duckdb.DuckDBPyConnection, company: str, fiscal_year:
     if base_ratios["roe"] is None and current_ratios["roe"] is not None:
         warnings.append(f"FY{base} 的 ROE 等需要 FY{base - 1} 年末的数据，表里没有，不计算。")
     return {"tool": "financial_summary", "company": company, "name": info.name, "currency": currency,
-            "unit": f"金额单位：{'元（人民币）' if currency == 'CNY' else '美元'}，原始数字，未做换算；比率是小数（0.1234 = 12.34%）",
+            "unit": (f"current、base、change 是原始数字（{'元，人民币' if currency == 'CNY' else '美元'}），未做汇率换算；"
+                     "in_yi 是换算成“亿”的写法，回答里写金额请用它；比率是小数（0.1234 = 12.34%）"),
             "period": {"current": _period(facts, year), "base": _period(facts, base)},
             "items": items, "ratios": ratios, "warnings": warnings, "notes": [NOTICE]}
 
