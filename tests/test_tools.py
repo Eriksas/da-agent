@@ -81,3 +81,21 @@ def test_load_skill_returns_body_and_required_tools(con) -> None:
     assert "陷阱清单" in outcome.content["content"]
     missing = execute(con, "load_skill", {"name": "no-such-skill"})
     assert missing.ok is False and "没有名为 no-such-skill 的分析流程" in missing.content["error"]
+
+
+def test_calculate_tool(con) -> None:
+    outcome = execute(con, "calculate", {"expression": "(145 - 140) / 140", "purpose": "GMV 环比"})
+    assert outcome.ok and outcome.content == {"tool": "calculate", "expression": "(145 - 140) / 140",
+                                              "purpose": "GMV 环比", "result": 0.035714}
+    refused = execute(con, "calculate", {"expression": "__import__('os')", "purpose": "x"})
+    assert refused.ok is False and "只支持" in refused.content["error"]
+    missing = execute(con, "calculate", {"expression": "1 + 1"})  # 必须写明算的是什么，方便复查
+    assert missing.ok is False and "purpose" in missing.content["error"]
+
+
+def test_sample_size_tool_states_its_assumptions(con) -> None:
+    """M6：模型引用目标转化率（8% + 0.8pp）、总样本量时，这些数在工具结果里找不到。"""
+    outcome = execute(con, "ab_sample_size", {"baseline_rate": 0.08, "min_detectable_effect": 0.008})
+    content = outcome.content
+    assert (content["baseline_rate"], content["min_detectable_effect"], content["target_rate"]) == (0.08, 0.008, 0.088)
+    assert content["total"] == 2 * content["per_group"]

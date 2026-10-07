@@ -1,11 +1,13 @@
 """Agent 循环：正常流程，以及各种“不按剧本走”的情况。全部用假模型，不联网。"""
 
 import json
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
 
-from da_agent.agent import BUDGET_NOTICE, AgentRun, run_agent, save_run
+from da_agent.agent import BUDGET_NOTICE, FORMAT_NOTICE, AgentRun, run_agent, save_run
+from da_agent.checks import check_run
 from da_agent.cleaning import connect_frame
 from da_agent.llm import FakeLLM, LLMError, LLMReply, ToolCall
 from helpers import make_frame
@@ -126,3 +128,71 @@ def test_saved_run_has_no_secret(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert json.loads(text)["status"] == "completed"
     assert fake_key not in text
     assert (run_dir / "answer.md").read_text(encoding="utf-8").strip() == "好"
+
+
+def test_ungrounded_answer_is_sent_back_once_and_fixed() -> None:
+    run, llm = run_with([
+        tools(call(1, "metric_summary", week="2011-W02")),
+        LLMReply(content="GMV 为 145.0，约合 1,234.56。"),  # 1,234.56 在工具结果里找不到
+        tools(call(2, "calculate", expression="145 - 140", purpose="GMV 比上周多多少")),
+        LLMReply(content="GMV 为 145.0，比上周多 5.0。"),
+    ])
+    assert (run.status, run.answer) == ("completed", "GMV 为 145.0，比上周多 5.0。")
+    assert run.repair["draft"] == "GMV 为 145.0，约合 1,234.56。"
+    assert [m["text"] for m in run.repair["ungrounded"]] == ["1,234.56"]
+    notice = llm.received[2]["messages"][-1]
+    assert notice["role"] == "user" and notice["content"].startswith("（系统核查）") and "「1,234.56」" in notice["content"]
+    assert check_run(asdict(run))["numbers"]["ungrounded"] == []  # 退回提示里列出的数字不算出处，修正后的答案也没有问题
+    assert_every_tool_call_answered(run)
+
+
+def test_repair_failure_keeps_the_draft() -> None:
+    run, _ = run_with([LLMReply(content="GMV 为 1,234.56。")])  # 剧本没有修正这一轮：等同于修正时模型调用失败
+    assert (run.status, run.answer, run.error) == ("completed", "GMV 为 1,234.56。", None)
+    assert "假模型只预设了 1 条回复" in run.repair["error"]
+
+
+def test_repair_happens_only_once() -> None:
+    run, llm = run_with([LLMReply(content="GMV 为 1,234.56。"), LLMReply(content="GMV 为 6,543.21。")])
+    assert run.answer == "GMV 为 6,543.21。"  # 修正后仍有问题也不再退回，交给核查报告标出来
+    assert len(llm.received) == 2
+
+
+def test_repair_can_be_turned_off() -> None:
+    with connect_frame(make_frame(ROWS)) as con:
+        run = run_agent(QUESTION, llm=FakeLLM(replies=[LLMReply(content="GMV 为 1,234.56。")]), con=con,
+                        max_tool_calls=5, repair=False)
+    assert run.repair is None and run.answer == "GMV 为 1,234.56。"
+
+
+def test_repair_gets_its_own_small_tool_budget() -> None:
+    def calc(n: int) -> ToolCall:
+        return call(n, "calculate", expression="145 - 140", purpose="差额")
+
+    run, _ = run_with([
+        tools(call(1, "metric_summary", week="2011-W02")),  # 上限 1 次，已经用完
+        LLMReply(content="GMV 为 1,234.56。"),
+        tools(calc(2), calc(3), calc(4), calc(5)),  # 修正时最多再调用 3 次，第 4 次被拒绝
+        LLMReply(content="GMV 为 145.0。"),
+    ], max_tool_calls=1)
+    assert [s["ok"] for s in run.steps] == [True, True, True, True, False]
+    assert run.answer == "GMV 为 145.0。"
+    assert [m["content"] for m in run.messages if m["role"] == "user"].count(BUDGET_NOTICE) == 2
+    assert_every_tool_call_answered(run)
+
+
+GARBLED = ']<]minimax[>[<tool_call>\n]<]minimax[>[ invoke name="load_skill">]<]minimax[>[</invoke>'  # 评测中出现过的样子（节选）
+
+
+def test_tool_call_written_as_text_is_retried_once() -> None:
+    run, llm = run_with([LLMReply(content=GARBLED), tools(call(1, "metric_summary", week="2011-W02")),
+                         LLMReply(content="GMV 为 145.0。")])
+    assert (run.status, run.answer, run.malformed_replies) == ("completed", "GMV 为 145.0。", 1)
+    assert llm.received[1]["messages"][-1]["content"] == FORMAT_NOTICE
+
+
+def test_tool_call_written_as_text_twice_is_not_an_answer() -> None:
+    """以前这段乱码会被当成最终答案，在周报里作为“AI 解读”发布。"""
+    run, _ = run_with([LLMReply(content=GARBLED), LLMReply(content=GARBLED)])
+    assert (run.status, run.answer) == ("malformed_answer", "")
+    assert "连续两次" in run.error

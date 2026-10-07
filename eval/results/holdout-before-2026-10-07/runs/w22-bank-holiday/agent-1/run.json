@@ -1,0 +1,296 @@
+{
+  "run_id": "20261007T012247-ceb775",
+  "question": "2011-W22 的 GMV 环比降了近三成，业务出了什么问题？",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "max_tool_calls": 15,
+  "use_skills": false,
+  "status": "completed",
+  "answer": "# 2011-W22 GMV 环比分析（基期：2011-W21）\n\n## 1. 结论\n\nGMV 从 159,463.82 降到 115,065.00，减少 44,398.82，环比 **-27.84%**，与\"降了近三成\"一致。但**这大概率不是业务故障**：两个关键对照都指向\"基数问题和统计口径问题\"，而非真实流失——① 当周只有 **5 个交易天**，上周有 6 天；② 同比看 W22 的 GMV 反而是**上涨的**（115,065.00 vs 106,601.91，**+7.94%**），且去年 2010-W22 同样只有 5 个交易天。\n\n## 2. 主要原因（按贡献排序）\n\n**① 少了一个交易天，\"环比三成\"被放大（口径因素，最需要先排除）**\n- `metric_summary`：trading_days 5（W22） vs 6（W21），change -1（-16.67%）\n- 同工具同比对照：2010-W22 也是 5 天 vs 2011-W22 的 5 天，交易天数 change = 0\n- ⚠️ 工具未提供日均 GMV，也未提供 W22 具体缺的是哪一天，因此无法量化\"这一天大概值多少钱\"，需要人工核对\n\n**② 下滑其实从 W20 就开始了，不是 W22 突然掉的（`metric_summary`）**\n- W21：210,335.39 → 159,463.82，**-24.19%**（两周都是 6 个交易天，不受天数影响）\n- W22：继续降到 115,065.00\n- W23：反弹到 214,478.31，**+86.4%**（6 个交易天）\n- 所以真实形态是\"两周下滑 + 一周强力反弹\"，W22 只是在低位\n\n**③ 若只看用户侧因子，活跃客户数是最大单一贡献（`decompose_gmv`）**\n- 活跃客户数 260 → 212，Shapley 贡献 **-24,548.60**，占总变化 **55.29%**（环比 -18.46%）\n- 人均订单数 1.2462 → 1.1226，贡献 **-12,590.53**，占 **28.36%**\n- 可识别客单价 439.70 → 423.63，贡献 **-4,502.08**，占 **10.14%**\n- 缺客户 ID 的 GMV 16,999.49 → 14,241.88，贡献 **-2,757.61**，占 **6.21%**\n- 四项合计等于总变化（工具 check：contributions_sum_to_total = true）\n\n**④ 降幅集中在英国老客（`drilldown`）**\n- 国家：United Kingdom 137,820.66 → 96,176.99，**-41,643.67**，占总变化 **93.79%**，订单 315 → 232\n- 新老客：老客 137,421.07 → 93,603.39，**-43,817.68**，占总变化 **98.69%**；新客反而 +2,176.47（+43.16%），但订单仅 21→22，**样本不足**\n- ⚠️ 除英国外其余 15 个国家几乎全是小样本（orders < 30），工具明确警告不宜单独下结论；欧洲多国合计仅占很小比重\n\n**⑤ 商品层面没有单一\"爆款断供\"（`drilldown`）**\n- 前 10 名商品中只有 PARTY BUNTING（订单 47→45）和 HEART OF WICKER SMALL（订单 31→37）达到 30 单以上，其余全部小样本\n- \"others\"（另外 2,017 个商品）合计 **-26,148.51**，占总变化 **58.89%**——说明下降是**长尾普遍性的**，不是几个 SKU 造成的\n\n## 3. 需要注意（口径与警告）\n\n- **GMV 是下单口径**，含之后被取消的订单；净销售额 113,356.54（-28.1%）与 GMV 基本同步，趋势一致\n- **取消率小幅上升**：1.48% vs 1.13%，+0.35 个百分点（百分点变化，工具不做百分比）\n- ⚠️ **W23 的反弹有杂质**：`metric_summary` 明确警告 W23 含极端大额行——发票 556444（PICNIC BASKET WICKER 60 PIECES）金额 **38,970.00**，被人工调整冲销，GMV 和净销售额都含它，**净销售额偏高**。所以\"W23 大涨\"不能当作纯粹的经营回暖来汇报\n- `data_quality_overview` 的停业清单中，2011 年最后一次是 2011-04-21 → 2011-04-26（间隔 5 天），**并未记录 W22 期间的停业**——少的那一天到底是没有营业，还是数据漏采，工具无法判断\n- 缺客户 ID 的订单全量占比 13.11%，W22 单周 unidentified GMV 为 14,241.88，活跃客户数不含这部分客户\n- 部分国家/分组订单数 < 30，`drilldown` 已标注 small_sample\n- 无对照实验，以上均为同期相关性与结构拆解，**不能判定因果**\n\n## 4. 建议下一步\n\n1. **查 W22 缺的那个交易日**（2011-W22 落在 5/30–6/5）：是仓库/网站停摆，还是数据采集漏数？这是\"少三成\"最大的一块，且决定要不要真的按事故处理。\n2. **把 W20→W22 一起看，而不是单看 W22**：真正要解释的是 W21 就已发生的 -24.19%（两天数相同，是干净的对比），W22 只是惯性延续。\n3. **盯英国老客**：占变化 93.79%/98.69%，建议单独拉英国新客获取、复购率和老客流失名单。\n4. **复核 W23 反弹**：剔除发票 556444（38,970.00）后重算 W23，看是否仍为增长。\n5. **补一列\"日均 GMV/日均订单\"**到周报，本次分析中该口径工具未提供，是最大的盲点。\n\n> 补充：如需判断某个改动是否真的带来转化提升，请提供实验组/对照组的转化数与总人数，我可以用 AB 检验工具给出显著性结论（数字不能由我编造）。",
+  "error": null,
+  "budget_exhausted": false,
+  "steps": [
+    {
+      "round": 1,
+      "tool": "metric_summary",
+      "arguments": {
+        "week": "2011-W22",
+        "compare": "wow"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 26
+    },
+    {
+      "round": 1,
+      "tool": "decompose_gmv",
+      "arguments": {
+        "week": "2011-W22",
+        "compare": "wow"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 28
+    },
+    {
+      "round": 1,
+      "tool": "data_quality_overview",
+      "arguments": {},
+      "ok": true,
+      "error": null,
+      "ms": 334
+    },
+    {
+      "round": 2,
+      "tool": "drilldown",
+      "arguments": {
+        "week": "2011-W22",
+        "compare": "wow",
+        "dimension": "country",
+        "metric": "gmv",
+        "top_n": 10
+      },
+      "ok": true,
+      "error": null,
+      "ms": 92
+    },
+    {
+      "round": 2,
+      "tool": "drilldown",
+      "arguments": {
+        "week": "2011-W22",
+        "compare": "wow",
+        "dimension": "customer_type",
+        "metric": "gmv",
+        "top_n": 5
+      },
+      "ok": true,
+      "error": null,
+      "ms": 63
+    },
+    {
+      "round": 2,
+      "tool": "drilldown",
+      "arguments": {
+        "week": "2011-W22",
+        "compare": "wow",
+        "dimension": "product",
+        "metric": "gmv",
+        "top_n": 10
+      },
+      "ok": true,
+      "error": null,
+      "ms": 90
+    },
+    {
+      "round": 2,
+      "tool": "metric_summary",
+      "arguments": {
+        "week": "2011-W22",
+        "compare": "yoy",
+        "metrics": [
+          "gmv",
+          "orders",
+          "active_customers",
+          "trading_days"
+        ]
+      },
+      "ok": true,
+      "error": null,
+      "ms": 31
+    },
+    {
+      "round": 3,
+      "tool": "metric_summary",
+      "arguments": {
+        "compare": "wow",
+        "metrics": [
+          "gmv",
+          "orders",
+          "active_customers",
+          "trading_days"
+        ],
+        "week": "2011-W21"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 27
+    },
+    {
+      "round": 3,
+      "tool": "metric_summary",
+      "arguments": {
+        "compare": "wow",
+        "metrics": [
+          "gmv",
+          "orders",
+          "active_customers",
+          "trading_days"
+        ],
+        "week": "2011-W23"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 28
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 25822,
+    "completion_tokens": 3917,
+    "llm_calls": 4
+  },
+  "started_at": "2026-10-06T17:22:47+00:00",
+  "seconds": 25.2,
+  "messages": [
+    {
+      "role": "system",
+      "content": "你是一名电商运营数据分析助手，帮助运营同学回答业务问题，例如“上周 GMV 为什么下降”。\n\n## 工作方式\n\n你只能通过工具获取数据。所有计算都由工具完成，你负责：选择工具、组织分析思路、解读结果、写结论。\n\n## 分析流程\n\n下面是可用的分析流程，只列出名字和用途。遇到对应的问题时，先调用 load_skill 加载完整流程，再按流程执行：\n\n（当前没有可用的分析流程）\n\n## 必须遵守\n\n1. 回答中的每个数字都必须来自工具返回的结果，原样引用；不要自己做任何计算（包括求和、相减、算百分比）。工具没有提供的数字，就写“工具未提供”。\n2. 工具结果里的 warnings（警告）必须在回答中说明，例如不完整周、停业、极端大额订单、样本不足。\n3. 没有对照实验时，不能下因果结论：写“与……同时发生”“可能的原因”，不要写“导致”“因为”。\n4. 工具报错时，根据错误信息修正参数再试；无法修正就在回答中说明。\n5. 数据范围：2009-W49 至 2011-W49（最后一条销售记录在 2011-12-09 12:50）。用户说“上周”“最近一周”时，指 2011-W48（最近的完整周），并在回答开头写明分析的是哪一周。\n6. 最多调用 15 次工具，信息够用就停。\n\n## 回答格式（中文 Markdown）\n\n1. **结论**：一两句话说清发生了什么。\n2. **主要原因**：按贡献大小列出，每条带数字，并注明来自哪个工具。\n3. **需要注意**：数据口径和警告。\n4. **建议下一步**：还需要看什么、验证什么。\n"
+    },
+    {
+      "role": "user",
+      "content": "2011-W22 的 GMV 环比降了近三成，业务出了什么问题？"
+    },
+    {
+      "content": "我先看 2011-W22 的核心指标和质量口径。",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_01a1123d49647475af10ea56",
+          "function": {
+            "arguments": "{\"week\":\"2011-W22\",\"compare\":\"wow\"}",
+            "name": "metric_summary"
+          },
+          "type": "function"
+        },
+        {
+          "id": "call_01a1123d49647475af10ea57",
+          "function": {
+            "arguments": "{\"week\":\"2011-W22\",\"compare\":\"wow\"}",
+            "name": "decompose_gmv"
+          },
+          "type": "function"
+        },
+        {
+          "id": "call_01a1123d49647475af10ea58",
+          "function": {
+            "arguments": "{}",
+            "name": "data_quality_overview"
+          },
+          "type": "function"
+        }
+      ],
+      "reasoning_content": "The user asks about 2011-W22 GMV dropping nearly 30% week-over-week. Let me analyze.\n\nLet me start with metric_summary for 2011-W22 with compare=wow, and also data_quality_overview, and decompose_gmv.\n\nLet me make independent calls together."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01a1123d49647475af10ea56",
+      "content": "{\"tool\": \"metric_summary\", \"period\": {\"current\": \"2011-W22\", \"base\": \"2011-W21\", \"compare\": \"wow\", \"compare_label\": \"环比（上一周）\"}, \"metrics\": [{\"metric\": \"gmv\", \"label\": \"GMV\", \"unit\": \"money\", \"current\": 115065.0, \"base\": 159463.82, \"change\": -44398.82, \"change_pct\": -0.2784}, {\"metric\": \"net_sales\", \"label\": \"净销售额\", \"unit\": \"money\", \"current\": 113356.54, \"base\": 157659.72, \"change\": -44303.18, \"change_pct\": -0.281}, {\"metric\": \"orders\", \"label\": \"订单数\", \"unit\": \"count\", \"current\": 259, \"base\": 350, \"change\": -91, \"change_pct\": -0.26}, {\"metric\": \"aov\", \"label\": \"客单价\", \"unit\": \"money\", \"current\": 444.27, \"base\": 455.61, \"change\": -11.34, \"change_pct\": -0.0249}, {\"metric\": \"active_customers\", \"label\": \"活跃客户数\", \"unit\": \"count\", \"current\": 212, \"base\": 260, \"change\": -48, \"change_pct\": -0.1846}, {\"metric\": \"new_customers\", \"label\": \"新客数\", \"unit\": \"count\", \"current\": 21, \"base\": 17, \"change\": 4, \"change_pct\": 0.2353}, {\"metric\": \"returning_customers\", \"label\": \"老客数\", \"unit\": \"count\", \"current\": 191, \"base\": 243, \"change\": -52, \"change_pct\": -0.214}, {\"metric\": \"cancel_rate\", \"label\": \"取消率\", \"unit\": \"rate\", \"current\": 0.0148, \"base\": 0.0113, \"change\": 0.0035, \"change_pct\": null}, {\"metric\": \"trading_days\", \"label\": \"交易天数\", \"unit\": \"count\", \"current\": 5, \"base\": 6, \"change\": -1, \"change_pct\": -0.1667}], \"definitions\": {\"gmv\": \"商品销售额（下单口径）：数量 × 单价之和，含之后被取消的订单\", \"net_sales\": \"GMV − 取消金额\", \"orders\": \"不同发票号个数\", \"aov\": \"GMV ÷ 订单数\", \"active_customers\": \"当周有购买的可识别客户数（不含缺失客户 ID）\", \"new_customers\": \"首次购买落在当周的客户；越靠近数据起点，越可能把老客算成新客\", \"returning_customers\": \"活跃客户数 − 新客数\", \"cancel_rate\": \"取消金额 ÷ GMV；分子分母不一定是同一批订单\", \"trading_days\": \"当周有销售的日期数\"}, \"notes\": [\"rate 类指标的 change 是百分点变化（0.01 = 1 个百分点），不计算变化百分比。\"], \"sample_size\": {\"current_orders\": 259, \"base_orders\": 350}, \"warnings\": []}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01a1123d49647475af10ea57",
+      "content": "{\"tool\": \"decompose_gmv\", \"period\": {\"current\": \"2011-W22\", \"base\": \"2011-W21\", \"compare\": \"wow\", \"compare_label\": \"环比（上一周）\"}, \"identity\": \"GMV = 活跃客户数 × 人均订单数 × 可识别客户客单价 + 缺客户 ID 的 GMV\", \"method\": \"连环替代法，默认顺序：活跃客户数 → 人均订单数 → 客单价\", \"base\": {\"active_customers\": 260, \"orders_per_customer\": 1.2462, \"identified_aov\": 439.7, \"unidentified_gmv\": 16999.49, \"gmv\": 159463.82}, \"current\": {\"active_customers\": 212, \"orders_per_customer\": 1.1226, \"identified_aov\": 423.63, \"unidentified_gmv\": 14241.88, \"gmv\": 115065.0}, \"total_change\": -44398.82, \"contributions\": [{\"factor\": \"active_customers\", \"label\": \"活跃客户数\", \"chain\": -26301.11, \"shapley\": -24548.6, \"range_across_orders\": [-26301.11, -22827.88], \"share_of_total_change\": 0.5529}, {\"factor\": \"orders_per_customer\", \"label\": \"人均订单数\", \"chain\": -11513.5, \"shapley\": -12590.53, \"range_across_orders\": [-14120.33, -11092.5], \"share_of_total_change\": 0.2836}, {\"factor\": \"identified_aov\", \"label\": \"可识别客户客单价\", \"chain\": -3826.6, \"shapley\": -4502.08, \"range_across_orders\": [-5209.33, -3826.6], \"share_of_total_change\": 0.1014}, {\"factor\": \"unidentified_gmv\", \"label\": \"缺客户 ID 的 GMV\", \"chain\": -2757.61, \"shapley\": -2757.61, \"range_across_orders\": [-2757.61, -2757.61], \"share_of_total_change\": 0.0621}], \"check\": {\"contributions_sum_to_total\": true}, \"notes\": [\"chain 是默认顺序下的贡献；shapley 是 6 种顺序的平均，与顺序无关；两者相差大时，说明结论对顺序敏感。\", \"share_of_total_change 按 shapley 计算；因子反向变化时占比可能超过 100% 或为负。\"], \"warnings\": []}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01a1123d49647475af10ea58",
+      "content": "{\"tool\": \"data_quality_overview\", \"data_range\": {\"first\": \"2009-12-01 07:45:00\", \"last\": \"2011-12-09 12:50:00\"}, \"clean_totals\": {\"sales_rows\": 1003357, \"orders\": 39516, \"customers\": 5852, \"gmv\": 19643861.64, \"cancelled_rows\": 17915, \"cancelled_amount\": 716462.57, \"net_sales\": 18927399.07, \"gmv_missing_customer\": 2575278.9, \"gmv_missing_customer_share\": 0.13109840352143715, \"orders_missing_customer\": 2922}, \"definitions\": {\"gmv\": \"商品销售额（下单口径）：数量 × 单价之和，含之后被取消的订单\", \"net_sales\": \"GMV − 取消金额\", \"cancelled_amount\": \"当周 C 开头发票中的商品行金额（取正）；可能对应更早下的订单\", \"aov\": \"GMV ÷ 订单数\", \"active_customers\": \"当周有购买的可识别客户数（不含缺失客户 ID）\", \"new_customers\": \"首次购买落在当周的客户；越靠近数据起点，越可能把老客算成新客\"}, \"rules\": [{\"id\": \"R01\", \"name\": \"两个工作表重叠期的记录\", \"action\": \"删除第 1 表中的重叠记录，保留第 2 表的\", \"rows\": 22523}, {\"id\": \"R02\", \"name\": \"坏账调整单（发票号 A 开头）\", \"action\": \"删除\", \"rows\": 6}, {\"id\": \"R03\", \"name\": \"非商品编码（运费、手续费、人工调整、测试、礼品卡）\", \"action\": \"不计入商品 GMV，按类别单独汇总\", \"rows\": 5913}, {\"id\": \"R04\", \"name\": \"取消/退货单（发票号 C 开头）\", \"action\": \"不计入 GMV（下单口径），单独计为取消金额\", \"rows\": 19494}, {\"id\": \"R05\", \"name\": \"非取消单但数量 ≤ 0\", \"action\": \"删除\", \"rows\": 3457}, {\"id\": \"R06\", \"name\": \"单价 ≤ 0\", \"action\": \"删除\", \"rows\": 6207}, {\"id\": \"R07\", \"name\": \"完全重复行\", \"action\": \"默认删除（保留第一条）；报告写明影响金额，删错会让 GMV 偏低\", \"rows\": 11812}, {\"id\": \"R08\", \"name\": \"缺少客户 ID\", \"action\": \"计入 GMV 和订单数；不计入活跃客户、复购、人均订单\", \"rows\": 243007}, {\"id\": \"R09\", \"name\": \"极端大额行\", \"action\": \"仅标记，列入人工复核清单\", \"rows\": 38}, {\"id\": \"R10\", \"name\": \"国家不明确\", \"action\": \"仅标记；按国家分析时单独成组\", \"rows\": 817}], \"sheet_overlap_identical\": true, \"coverage\": {\"weeks\": 106, \"partial_weeks\": [\"2009-W49\", \"2011-W49\"], \"low_trading_weeks\": [{\"week\": \"2009-W52\", \"monday\": \"2009-12-21\", \"trading_days\": 3}, {\"week\": \"2009-W53\", \"monday\": \"2009-12-28\", \"trading_days\": 0}, {\"week\": \"2010-W52\", \"monday\": \"2010-12-27\", \"trading_days\": 0}], \"closures\": [{\"last_open\": \"2009-12-23\", \"reopen\": \"2010-01-04\", \"gap_days\": 12}, {\"last_open\": \"2010-04-01\", \"reopen\": \"2010-04-06\", \"gap_days\": 5}, {\"last_open\": \"2010-12-23\", \"reopen\": \"2011-01-04\", \"gap_days\": 12}, {\"last_open\": \"2011-04-21\", \"reopen\": \"2011-04-26\", \"gap_days\": 5}]}, \"extreme_lines\": [{\"invoice\": \"581483\", \"description\": \"PAPER CRAFT , LITTLE BIRDIE\", \"amount\": 168469.6, \"invoice_date\": \"2011-12-09 09:15:00\", \"cancelled_within_1d\": true, \"offset_by_manual_within_1d\": false}, {\"invoice\": \"C581484\", \"description\": \"PAPER CRAFT , LITTLE BIRDIE\", \"amount\": -168469.6, \"invoice_date\": \"2011-12-09 09:27:00\", \"cancelled_within_1d\": false, \"offset_by_manual_within_1d\": false}, {\"invoice\": \"C541433\", \"description\": \"MEDIUM CERAMIC TOP STORAGE JAR\", \"amount\": -77183.6, \"invoice_date\": \"2011-01-18 10:17:00\", \"cancelled_within_1d\": false, \"offset_by_manual_within_1d\": false}, {\"invoice\": \"541431\", \"description\": \"MEDIUM CERAMIC TOP STORAGE JAR\", \"amount\": 77183.6, \"invoice_date\": \"2011-01-18 10:01:00\", \"cancelled_within_1d\": true, \"offset_by_manual_within_1d\": false}, {\"invoice\": \"556444\", \"description\": \"PICNIC BASKET WICKER 60 PIECES\", \"amount\": 38970.0, \"invoice_date\": \"2011-06-10 15:28:00\", \"cancelled_within_1d\": false, \"offset_by_manual_within_1d\": true}, {\"invoice\": \"530715\", \"description\": \"ROTATING SILVER ANGELS T-LIGHT HLDR\", \"amount\": 15818.4, \"invoice_date\": \"2010-11-04 11:36:00\", \"cancelled_within_1d\": false, \"offset_by_manual_within_1d\": false}]}"
+    },
+    {
+      "content": "GMV 环比确实降了 27.84%，但有个关键线索：**当周只有 5 个交易天，上周有 6 天**。我再拆维度看变化来自哪里。",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_01a1123d574576eabd1d7abc",
+          "function": {
+            "arguments": "{\"week\":\"2011-W22\",\"compare\":\"wow\",\"dimension\":\"country\",\"metric\":\"gmv\",\"top_n\":10}",
+            "name": "drilldown"
+          },
+          "type": "function"
+        },
+        {
+          "id": "call_01a1123d574576eabd1d7abd",
+          "function": {
+            "arguments": "{\"week\":\"2011-W22\",\"compare\":\"wow\",\"dimension\":\"customer_type\",\"metric\":\"gmv\",\"top_n\":5}",
+            "name": "drilldown"
+          },
+          "type": "function"
+        },
+        {
+          "id": "call_01a1123d574576eabd1d7abe",
+          "function": {
+            "arguments": "{\"week\":\"2011-W22\",\"compare\":\"wow\",\"dimension\":\"product\",\"metric\":\"gmv\",\"top_n\":10}",
+            "name": "drilldown"
+          },
+          "type": "function"
+        },
+        {
+          "id": "call_01a1123d574576eabd1d7abf",
+          "function": {
+            "arguments": "{\"week\":\"2011-W22\",\"compare\":\"yoy\",\"metrics\":[\"gmv\",\"orders\",\"active_customers\",\"trading_days\"]}",
+            "name": "metric_summary"
+          },
+          "type": "function"
+        }
+      ],
+      "reasoning_content": "Key finding: 2011-W22 has trading_days = 5 vs 6 in W21. And there's a closure: last_open 2011-04-21, reopen 2011-04-26, gap 5 days. 2011-W22 — ISO week 22 of 2011: May 30 – June 5. Hmm, let me check. Actually 2011-W22 Monday: ISO week 1 of 2011 starts Jan 3 (Monday). W1: Jan 3-9, W2: Jan 10-16, W3: 17-23, W4: 24-30, W5: Jan31-Feb6, W6: Feb7-13, W7: 14-20, W8: 21-27, W9: Feb28-Mar6, W10: Mar7-13, W11: 14-20, W12: 21-27, W13: Mar28-Apr3, W14: Apr4-10, W15: Apr11-17, W16: Apr18-24, W17: Apr25-May1, W18: May2-8, W19: May9-15, W20: May16-22, W21: May23-29, W22: May30-Jun5.\n\nSo the closure Apr 21 → Apr 26 affects W16/W17, not W22. So the trading-day drop in W22 (5 vs 6) is not the listed closure. Which day was missing? The tool doesn't tell us. Let me check drilldown by country/customer_type/product to see where the change came from.\n\nLet's do drilldown on gmv by country, customer_type, product. Also maybe check yoy for W22 to see whether it's seasonal.\n\nLet me run these in parallel."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01a1123d574576eabd1d7abc",
+      "content": "{\"tool\": \"drilldown\", \"period\": {\"current\": \"2011-W22\", \"base\": \"2011-W21\", \"compare\": \"wow\", \"compare_label\": \"环比（上一周）\"}, \"metric\": \"gmv\", \"metric_label\": \"GMV\", \"dimension\": \"country\", \"dimension_label\": \"国家\", \"definition\": \"商品销售额（下单口径）：数量 × 单价之和，含之后被取消的订单\", \"total\": {\"base\": 159463.82, \"current\": 115065.0, \"change\": -44398.82}, \"segments\": [{\"segment\": \"United Kingdom\", \"base\": 137820.66, \"current\": 96176.99, \"change\": -41643.67, \"change_pct\": -0.3022, \"share_of_total_change\": 0.9379, \"base_orders\": 315, \"current_orders\": 232, \"small_sample\": false}, {\"segment\": \"Netherlands\", \"base\": 10372.88, \"current\": 6265.62, \"change\": -4107.26, \"change_pct\": -0.396, \"share_of_total_change\": 0.0925, \"base_orders\": 2, \"current_orders\": 5, \"small_sample\": true}, {\"segment\": \"EIRE\", \"base\": 1451.79, \"current\": 0.0, \"change\": -1451.79, \"change_pct\": -1.0, \"share_of_total_change\": 0.0327, \"base_orders\": 4, \"current_orders\": 0, \"small_sample\": true}, {\"segment\": \"Spain\", \"base\": 20.4, \"current\": 1346.89, \"change\": 1326.49, \"change_pct\": 65.024, \"share_of_total_change\": -0.0299, \"base_orders\": 1, \"current_orders\": 2, \"small_sample\": true}, {\"segment\": \"Poland\", \"base\": 1247.57, \"current\": 25.0, \"change\": -1222.57, \"change_pct\": -0.98, \"share_of_total_change\": 0.0275, \"base_orders\": 2, \"current_orders\": 1, \"small_sample\": true}, {\"segment\": \"Cyprus\", \"base\": 0.0, \"current\": 1109.32, \"change\": 1109.32, \"change_pct\": null, \"share_of_total_change\": -0.025, \"base_orders\": 0, \"current_orders\": 1, \"small_sample\": true}, {\"segment\": \"Austria\", \"base\": 923.58, \"current\": 0.0, \"change\": -923.58, \"change_pct\": -1.0, \"share_of_total_change\": 0.0208, \"base_orders\": 1, \"current_orders\": 0, \"small_sample\": true}, {\"segment\": \"Switzerland\", \"base\": 0.0, \"current\": 746.4, \"change\": 746.4, \"change_pct\": null, \"share_of_total_change\": -0.0168, \"base_orders\": 0, \"current_orders\": 1, \"small_sample\": true}, {\"segment\": \"France\", \"base\": 2805.71, \"current\": 3487.35, \"change\": 681.64, \"change_pct\": 0.2429, \"share_of_total_change\": -0.0154, \"base_orders\": 8, \"current_orders\": 4, \"small_sample\": true}, {\"segment\": \"Italy\", \"base\": 0.0, \"current\": 587.45, \"change\": 587.45, \"change_pct\": null, \"share_of_total_change\": -0.0132, \"base_orders\": 0, \"current_orders\": 1, \"small_sample\": true}], \"others\": {\"description\": \"前 10 名以外的 6 个分组合计；不等于只剔除某一个分组后的结果\", \"segments\": 6, \"base\": 4821.23, \"current\": 5319.98, \"change\": 498.75, \"share_of_total_change\": -0.0112}, \"segment_count\": 16, \"check\": {\"segments_sum_to_total\": true}, \"warnings\": [\"部分分组订单数少于 30，变化可能是偶然波动，不宜单独下结论。\"]}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01a1123d574576eabd1d7abd",
+      "content": "{\"tool\": \"drilldown\", \"period\": {\"current\": \"2011-W22\", \"base\": \"2011-W21\", \"compare\": \"wow\", \"compare_label\": \"环比（上一周）\"}, \"metric\": \"gmv\", \"metric_label\": \"GMV\", \"dimension\": \"customer_type\", \"dimension_label\": \"新老客\", \"definition\": \"商品销售额（下单口径）：数量 × 单价之和，含之后被取消的订单\", \"total\": {\"base\": 159463.82, \"current\": 115065.0, \"change\": -44398.82}, \"segments\": [{\"segment\": \"老客\", \"base\": 137421.07, \"current\": 93603.39, \"change\": -43817.68, \"change_pct\": -0.3189, \"share_of_total_change\": 0.9869, \"base_orders\": 303, \"current_orders\": 216, \"small_sample\": false}, {\"segment\": \"未知\", \"base\": 16999.49, \"current\": 14241.88, \"change\": -2757.61, \"change_pct\": -0.1622, \"share_of_total_change\": 0.0621, \"base_orders\": 26, \"current_orders\": 21, \"small_sample\": true}, {\"segment\": \"新客\", \"base\": 5043.26, \"current\": 7219.73, \"change\": 2176.47, \"change_pct\": 0.4316, \"share_of_total_change\": -0.049, \"base_orders\": 21, \"current_orders\": 22, \"small_sample\": true}], \"others\": null, \"segment_count\": 3, \"check\": {\"segments_sum_to_total\": true}, \"warnings\": [\"部分分组订单数少于 30，变化可能是偶然波动，不宜单独下结论。\"]}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01a1123d574576eabd1d7abe",
+      "content": "{\"tool\": \"drilldown\", \"period\": {\"current\": \"2011-W22\", \"base\": \"2011-W21\", \"compare\": \"wow\", \"compare_label\": \"环比（上一周）\"}, \"metric\": \"gmv\", \"metric_label\": \"GMV\", \"dimension\": \"product\", \"dimension_label\": \"商品\", \"definition\": \"商品销售额（下单口径）：数量 × 单价之和，含之后被取消的订单\", \"total\": {\"base\": 159463.82, \"current\": 115065.0, \"change\": -44398.82}, \"segments\": [{\"segment\": \"22349\", \"description\": \"DOG BOWL CHASING BALL DESIGN\", \"base\": 3160.08, \"current\": 11.25, \"change\": -3148.83, \"change_pct\": -0.9964, \"share_of_total_change\": 0.0709, \"base_orders\": 1, \"current_orders\": 2, \"small_sample\": true}, {\"segment\": \"22197\", \"description\": \"SMALL POPCORN HOLDER\", \"base\": 3331.18, \"current\": 422.63, \"change\": -2908.55, \"change_pct\": -0.8731, \"share_of_total_change\": 0.0655, \"base_orders\": 20, \"current_orders\": 19, \"small_sample\": true}, {\"segment\": \"22350\", \"description\": \"ILLUSTRATED CAT BOWL\", \"base\": 2439.58, \"current\": 20.26, \"change\": -2419.32, \"change_pct\": -0.9917, \"share_of_total_change\": 0.0545, \"base_orders\": 4, \"current_orders\": 2, \"small_sample\": true}, {\"segment\": \"47566\", \"description\": \"PARTY BUNTING\", \"base\": 4652.41, \"current\": 2327.02, \"change\": -2325.39, \"change_pct\": -0.4998, \"share_of_total_change\": 0.0524, \"base_orders\": 47, \"current_orders\": 45, \"small_sample\": false}, {\"segment\": \"22702\", \"description\": \"BLACK AND WHITE CAT BOWL\", \"base\": 2131.2, \"current\": 0.0, \"change\": -2131.2, \"change_pct\": -1.0, \"share_of_total_change\": 0.048, \"base_orders\": 1, \"current_orders\": 0, \"small_sample\": true}, {\"segment\": \"22470\", \"description\": \"HEART OF WICKER LARGE\", \"base\": 2562.85, \"current\": 637.65, \"change\": -1925.2, \"change_pct\": -0.7512, \"share_of_total_change\": 0.0434, \"base_orders\": 22, \"current_orders\": 23, \"small_sample\": true}, {\"segment\": \"21770\", \"description\": \"OPEN CLOSED METAL SIGN\", \"base\": 1913.94, \"current\": 118.8, \"change\": -1795.14, \"change_pct\": -0.9379, \"share_of_total_change\": 0.0404, \"base_orders\": 10, \"current_orders\": 11, \"small_sample\": true}, {\"segment\": \"22700\", \"description\": \"BLACK AND WHITE DOG BOWL\", \"base\": 1791.43, \"current\": 2.95, \"change\": -1788.48, \"change_pct\": -0.9984, \"share_of_total_change\": 0.0403, \"base_orders\": 2, \"current_orders\": 1, \"small_sample\": true}, {\"segment\": \"21137\", \"description\": \"BLACK RECORD COVER FRAME\", \"base\": 0.0, \"current\": 1708.56, \"change\": 1708.56, \"change_pct\": null, \"share_of_total_change\": -0.0385, \"base_orders\": 0, \"current_orders\": 4, \"small_sample\": true}, {\"segment\": \"22469\", \"description\": \"HEART OF WICKER SMALL\", \"base\": 2253.17, \"current\": 736.41, \"change\": -1516.76, \"change_pct\": -0.6732, \"share_of_total_change\": 0.0342, \"base_orders\": 31, \"current_orders\": 37, \"small_sample\": false}], \"others\": {\"description\": \"前 10 名以外的 2017 个分组合计；不等于只剔除某一个分组后的结果\", \"segments\": 2017, \"base\": 135227.98, \"current\": 109079.47, \"change\": -26148.51, \"share_of_total_change\": 0.5889}, \"segment_count\": 2027, \"check\": {\"segments_sum_to_total\": true}, \"warnings\": [\"部分分组订单数少于 30，变化可能是偶然波动，不宜单独下结论。\"]}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01a1123d574576eabd1d7abf",
+      "content": "{\"tool\": \"metric_summary\", \"period\": {\"current\": \"2011-W22\", \"base\": \"2010-W22\", \"compare\": \"yoy\", \"compare_label\": \"同比（去年同一周）\"}, \"metrics\": [{\"metric\": \"gmv\", \"label\": \"GMV\", \"unit\": \"money\", \"current\": 115065.0, \"base\": 106601.91, \"change\": 8463.09, \"change_pct\": 0.0794}, {\"metric\": \"orders\", \"label\": \"订单数\", \"unit\": \"count\", \"current\": 259, \"base\": 276, \"change\": -17, \"change_pct\": -0.0616}, {\"metric\": \"active_customers\", \"label\": \"活跃客户数\", \"unit\": \"count\", \"current\": 212, \"base\": 205, \"change\": 7, \"change_pct\": 0.0341}, {\"metric\": \"trading_days\", \"label\": \"交易天数\", \"unit\": \"count\", \"current\": 5, \"base\": 5, \"change\": 0, \"change_pct\": 0.0}], \"definitions\": {\"gmv\": \"商品销售额（下单口径）：数量 × 单价之和，含之后被取消的订单\", \"orders\": \"不同发票号个数\", \"active_customers\": \"当周有购买的可识别客户数（不含缺失客户 ID）\", \"trading_days\": \"当周有销售的日期数\"}, \"notes\": [\"rate 类指标的 change 是百分点变化（0.01 = 1 个百分点），不计算变化百分比。\"], \"sample_size\": {\"current_orders\": 259, \"base_orders\": 276}, \"warnings\": []}"
+    },
+    {
+      "content": "关键线索出现了：**W22 只有 5 个交易天，而 W21 有 6 天；去年同期的 2010-W22 也是 5 天**。我再看看前后周，确认是不是“多一天基数”的错觉。",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_01a1123d67da75bf91046467",
+          "function": {
+            "arguments": "{\"compare\":\"wow\",\"metrics\":[\"gmv\",\"orders\",\"active_customers\",\"trading_days\"],\"week\":\"2011-W21\"}",
+            "name": "metric_summary"
+          },
+          "type": "function"
+        },
+        {
+          "id": "call_01a1123d67da75bf91046468",
+          "function": {
+            "arguments": "{\"compare\":\"wow\",\"metrics\":[\"gmv\",\"orders\",\"active_customers\",\"trading_days\"],\"week\":\"2011-W23\"}",
+            "name": "metric_summary"
+          },
+          "type": "function"
+        }
+      ],
+      "reasoning_content": "Key insight: The trading_days = 5 in W22 vs 6 in W21. Yoy: 2010-W22 also had 5 trading days. So W21 (2011) had 6 days (extra trading day), and 2010-W22 had 5 days. So the wow comparison is against an extra trading day — apples to oranges. That's the key: the -27.84% is inflated by the base week having an extra trading day.\n\nBut also yoy GMV is +7.94%, active customers +3.41%, orders -6.16%. So the week isn't actually broken — it's up 7.94% year over year.\n\nHmm, but is the trading day explanation sufficient? GMV fell 44,398.82 over a lost day. W22 daily GMV avg = 115065/5 = 23013; W21 = 159463.82/6 = 26577. Per-day, the drop is about 13.4%. I shouldn't compute that myself — the tools didn't provide per-day GMV. I need to be careful: rule says don't do my own calculations. So I should say \"工具未提供\" for per-day figures.\n\nCan I get more info? Let me check whether 2011-W23 or surrounding weeks to see the pattern. Let's check W21 vs W20, and W23 vs W22. That would show whether it's a one-day issue or trend.\n\nLet me call metric_summary for W21 wow and W23 wow. Also maybe drilldown yoy for country. Let's do 3 calls.\n\nActually I have budget: used 8 calls. Max 15. Let me do 2-3 more."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01a1123d67da75bf91046467",
+      "content": "{\"tool\": \"metric_summary\", \"period\": {\"current\": \"2011-W21\", \"base\": \"2011-W20\", \"compare\": \"wow\", \"compare_label\": \"环比（上一周）\"}, \"metrics\": [{\"metric\": \"gmv\", \"label\": \"GMV\", \"unit\": \"money\", \"current\": 159463.82, \"base\": 210335.39, \"change\": -50871.57, \"change_pct\": -0.2419}, {\"metric\": \"orders\", \"label\": \"订单数\", \"unit\": \"count\", \"current\": 350, \"base\": 450, \"change\": -100, \"change_pct\": -0.2222}, {\"metric\": \"active_customers\", \"label\": \"活跃客户数\", \"unit\": \"count\", \"current\": 260, \"base\": 347, \"change\": -87, \"change_pct\": -0.2507}, {\"metric\": \"trading_days\", \"label\": \"交易天数\", \"unit\": \"count\", \"current\": 6, \"base\": 6, \"change\": 0, \"change_pct\": 0.0}], \"definitions\": {\"gmv\": \"商品销售额（下单口径）：数量 × 单价之和，含之后被取消的订单\", \"orders\": \"不同发票号个数\", \"active_customers\": \"当周有购买的可识别客户数（不含缺失客户 ID）\", \"trading_days\": \"当周有销售的日期数\"}, \"notes\": [\"rate 类指标的 change 是百分点变化（0.01 = 1 个百分点），不计算变化百分比。\"], \"sample_size\": {\"current_orders\": 350, \"base_orders\": 450}, \"warnings\": []}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01a1123d67da75bf91046468",
+      "content": "{\"tool\": \"metric_summary\", \"period\": {\"current\": \"2011-W23\", \"base\": \"2011-W22\", \"compare\": \"wow\", \"compare_label\": \"环比（上一周）\"}, \"metrics\": [{\"metric\": \"gmv\", \"label\": \"GMV\", \"unit\": \"money\", \"current\": 214478.31, \"base\": 115065.0, \"change\": 99413.31, \"change_pct\": 0.864}, {\"metric\": \"orders\", \"label\": \"订单数\", \"unit\": \"count\", \"current\": 406, \"base\": 259, \"change\": 147, \"change_pct\": 0.5676}, {\"metric\": \"active_customers\", \"label\": \"活跃客户数\", \"unit\": \"count\", \"current\": 333, \"base\": 212, \"change\": 121, \"change_pct\": 0.5708}, {\"metric\": \"trading_days\", \"label\": \"交易天数\", \"unit\": \"count\", \"current\": 6, \"base\": 5, \"change\": 1, \"change_pct\": 0.2}], \"definitions\": {\"gmv\": \"商品销售额（下单口径）：数量 × 单价之和，含之后被取消的订单\", \"orders\": \"不同发票号个数\", \"active_customers\": \"当周有购买的可识别客户数（不含缺失客户 ID）\", \"trading_days\": \"当周有销售的日期数\"}, \"notes\": [\"rate 类指标的 change 是百分点变化（0.01 = 1 个百分点），不计算变化百分比。\"], \"sample_size\": {\"current_orders\": 406, \"base_orders\": 259}, \"warnings\": [\"当期 2011-W23 含极端大额行：发票 556444（PICNIC BASKET WICKER 60 PIECES）金额 38,970.00，被人工调整冲销（GMV 和净销售额都含它，净销售额偏高）。\"]}"
+    },
+    {
+      "content": "# 2011-W22 GMV 环比分析（基期：2011-W21）\n\n## 1. 结论\n\nGMV 从 159,463.82 降到 115,065.00，减少 44,398.82，环比 **-27.84%**，与\"降了近三成\"一致。但**这大概率不是业务故障**：两个关键对照都指向\"基数问题和统计口径问题\"，而非真实流失——① 当周只有 **5 个交易天**，上周有 6 天；② 同比看 W22 的 GMV 反而是**上涨的**（115,065.00 vs 106,601.91，**+7.94%**），且去年 2010-W22 同样只有 5 个交易天。\n\n## 2. 主要原因（按贡献排序）\n\n**① 少了一个交易天，\"环比三成\"被放大（口径因素，最需要先排除）**\n- `metric_summary`：trading_days 5（W22） vs 6（W21），change -1（-16.67%）\n- 同工具同比对照：2010-W22 也是 5 天 vs 2011-W22 的 5 天，交易天数 change = 0\n- ⚠️ 工具未提供日均 GMV，也未提供 W22 具体缺的是哪一天，因此无法量化\"这一天大概值多少钱\"，需要人工核对\n\n**② 下滑其实从 W20 就开始了，不是 W22 突然掉的（`metric_summary`）**\n- W21：210,335.39 → 159,463.82，**-24.19%**（两周都是 6 个交易天，不受天数影响）\n- W22：继续降到 115,065.00\n- W23：反弹到 214,478.31，**+86.4%**（6 个交易天）\n- 所以真实形态是\"两周下滑 + 一周强力反弹\"，W22 只是在低位\n\n**③ 若只看用户侧因子，活跃客户数是最大单一贡献（`decompose_gmv`）**\n- 活跃客户数 260 → 212，Shapley 贡献 **-24,548.60**，占总变化 **55.29%**（环比 -18.46%）\n- 人均订单数 1.2462 → 1.1226，贡献 **-12,590.53**，占 **28.36%**\n- 可识别客单价 439.70 → 423.63，贡献 **-4,502.08**，占 **10.14%**\n- 缺客户 ID 的 GMV 16,999.49 → 14,241.88，贡献 **-2,757.61**，占 **6.21%**\n- 四项合计等于总变化（工具 check：contributions_sum_to_total = true）\n\n**④ 降幅集中在英国老客（`drilldown`）**\n- 国家：United Kingdom 137,820.66 → 96,176.99，**-41,643.67**，占总变化 **93.79%**，订单 315 → 232\n- 新老客：老客 137,421.07 → 93,603.39，**-43,817.68**，占总变化 **98.69%**；新客反而 +2,176.47（+43.16%），但订单仅 21→22，**样本不足**\n- ⚠️ 除英国外其余 15 个国家几乎全是小样本（orders < 30），工具明确警告不宜单独下结论；欧洲多国合计仅占很小比重\n\n**⑤ 商品层面没有单一\"爆款断供\"（`drilldown`）**\n- 前 10 名商品中只有 PARTY BUNTING（订单 47→45）和 HEART OF WICKER SMALL（订单 31→37）达到 30 单以上，其余全部小样本\n- \"others\"（另外 2,017 个商品）合计 **-26,148.51**，占总变化 **58.89%**——说明下降是**长尾普遍性的**，不是几个 SKU 造成的\n\n## 3. 需要注意（口径与警告）\n\n- **GMV 是下单口径**，含之后被取消的订单；净销售额 113,356.54（-28.1%）与 GMV 基本同步，趋势一致\n- **取消率小幅上升**：1.48% vs 1.13%，+0.35 个百分点（百分点变化，工具不做百分比）\n- ⚠️ **W23 的反弹有杂质**：`metric_summary` 明确警告 W23 含极端大额行——发票 556444（PICNIC BASKET WICKER 60 PIECES）金额 **38,970.00**，被人工调整冲销，GMV 和净销售额都含它，**净销售额偏高**。所以\"W23 大涨\"不能当作纯粹的经营回暖来汇报\n- `data_quality_overview` 的停业清单中，2011 年最后一次是 2011-04-21 → 2011-04-26（间隔 5 天），**并未记录 W22 期间的停业**——少的那一天到底是没有营业，还是数据漏采，工具无法判断\n- 缺客户 ID 的订单全量占比 13.11%，W22 单周 unidentified GMV 为 14,241.88，活跃客户数不含这部分客户\n- 部分国家/分组订单数 < 30，`drilldown` 已标注 small_sample\n- 无对照实验，以上均为同期相关性与结构拆解，**不能判定因果**\n\n## 4. 建议下一步\n\n1. **查 W22 缺的那个交易日**（2011-W22 落在 5/30–6/5）：是仓库/网站停摆，还是数据采集漏数？这是\"少三成\"最大的一块，且决定要不要真的按事故处理。\n2. **把 W20→W22 一起看，而不是单看 W22**：真正要解释的是 W21 就已发生的 -24.19%（两天数相同，是干净的对比），W22 只是惯性延续。\n3. **盯英国老客**：占变化 93.79%/98.69%，建议单独拉英国新客获取、复购率和老客流失名单。\n4. **复核 W23 反弹**：剔除发票 556444（38,970.00）后重算 W23，看是否仍为增长。\n5. **补一列\"日均 GMV/日均订单\"**到周报，本次分析中该口径工具未提供，是最大的盲点。\n\n> 补充：如需判断某个改动是否真的带来转化提升，请提供实验组/对照组的转化数与总人数，我可以用 AB 检验工具给出显著性结论（数字不能由我编造）。",
+      "role": "assistant",
+      "reasoning_content": "Now the picture is clear:\n- W20: 210,335 (6 days)\n- W21: 159,463.82 (6 days), -24.19%\n- W22: 115,065 (5 days), -27.84%\n- W23: 214,478.31 (6 days), +86.4% — and W23 contains an extreme large line (38,970) flagged.\n\nSo the decline is a two-week slide from a high W20 base, then a rebound in W23 (partly explained by the extreme line of 38,970 which is flagged and manually offset).\n\nKey point: W22 missing a trading day — which day? Not disclosed by the tools. data_quality_overview closures list only up to 2011-04-21→04-26. So the missing day in W22 (May 30–Jun 5) is not in the official closure list. That's an open question — need to check whether it's a system/data gap or a genuine closure. Actually the tool says trading_days = number of dates with sales in that week. So one day in W22 had no sales records.\n\nYoy: GMV +7.94%, active customers +3.41%, trading days equal (5 vs 5). So W22 is actually up vs last year.\n\nLet me structure the answer.\n\nNumbers to cite:\n- metric_summary W22 wow: GMV 115,065.00 vs 159,463.82, -44,398.82, -27.84%; net_sales 113,356.54 vs 157,659.72, -28.1%; orders 259 vs 350, -26%; aov 444.27 vs 455.61, -2.49%; active customers 212 vs 260, -18.46%; new customers 21 vs 17, +23.53%; returning 191 vs 243, -21.4%; cancel rate 1.48% vs 1.13%, +0.35pp; trading days 5 vs 6.\n- decompose: active customers shapley -24,548.6 (55.29%), orders per customer -12,590.53 (28.36%), identified aov -4,502.08 (10.14%), unidentified gmv -2,757.61 (6.21%). orders_per_customer 1.2462 → 1.1226; identified_aov 439.7 → 423.63; unidentified 16,999.49 → 14,241.88.\n- country drilldown: UK -41,643.67 (93.79% of change), 315→232 orders. Others small samples. Netherlands -4,107.26 with base 2 orders / current 5 orders — small sample, note.\n- customer_type: 老客 -43,817.68 (98.69%), 新客 +2,176.47 (+43.16%, 21→22 orders small sample), 未知 -2,757.61.\n- product: top movers all small sample except PARTY BUNTING (-2,325.39, 47→45 orders) and HEART OF WICKER SMALL (-1,516.76, 31→37); others 2,017 segments -26,148.51 (58.89%).\n- yoy: GMV +7.94% (106,601.91 → 115,065.00), orders -6.16% (276→259), active customers +3.41% (205→212), trading days 5 vs 5.\n- W21 wow: GMV -24.19% vs W20 (210,335.39), both 6 trading days.\n- W23 wow: GMV +86.4% (214,478.31), trading days 6, warning about invoice 556444 amount 38,970.00.\n- data quality: closures list — last 2011-04-21 → reopen 2011-04-26, gap 5 days; no closure recorded for the W22 window. partial weeks: 2009-W49, 2011-W49. missing customer ID share overall 13.1%.\n\nCaveat: I shouldn't compute per-day averages. I can say \"工具未提供日均 GMV\". I can mention the tool doesn't provide which day was missing.\n\nNote about W23 rebound being partly driven by the 38,970 extreme line — but careful: that's in W23 GMV and net sales both, flagged, and it was offset by manual adjustment. That's a warning from metric_summary for W23.\n\nI should not do causal claims. Use \"同时发生\"\"可能的原因\".\n\nFormat:\n1. 结论\n2. 主要原因\n3. 需要注意\n4. 建议下一步\n\nAlso state which week analyzed: 2011-W22 vs base 2011-W21.\n\nLet me write it."
+    }
+  ]
+}

@@ -16,6 +16,7 @@ import duckdb
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .abtest import proportion_test, sample_size_proportions, srm_check
+from .calculator import MAX_LENGTH, calculate
 from .decompose import decompose_gmv
 from .llm import INVALID_JSON_KEY
 from .metrics import METRICS, drilldown, metric_summary
@@ -65,6 +66,13 @@ class ProportionTestArgs(_Args):
     alpha: float = Field(0.05, gt=0, lt=0.5, description="显著性水平")
 
 
+class CalculateArgs(_Args):
+    expression: str = Field(min_length=1, max_length=MAX_LENGTH, description=(
+        "算术表达式，只能用数字、+ - * / 和括号。数字照抄工具结果，不带千分位逗号和 %，百分数写成小数，"
+        "例如 (315255.39 - 309381.59) / 309381.59"))
+    purpose: str = Field(min_length=1, max_length=100, description="算的是什么，例如“剔除发票 581483 后的 GMV 环比”")
+
+
 class SampleSizeArgs(_Args):
     baseline_rate: float = Field(gt=0, lt=1, description="基线转化率，例如 0.1")
     min_detectable_effect: float = Field(description="想检测到的最小绝对提升，例如从 10% 到 12% 填 0.02")
@@ -98,6 +106,21 @@ def _load_skill(_: duckdb.DuckDBPyConnection, args: LoadSkillArgs) -> dict[str, 
         raise ValueError(f"没有名为 {args.name} 的分析流程；可用：{list(skills)}")
     return {"tool": "load_skill", "name": skill.name, "required_tools": list(skill.required_tools),
             "content": skill.body}
+
+
+def _calculate(_: duckdb.DuckDBPyConnection, args: CalculateArgs) -> dict[str, Any]:
+    """四则运算。结果保留 6 位小数：回答里按 2 位小数写的百分数也能对上出处。"""
+    return {"tool": "calculate", "expression": args.expression, "purpose": args.purpose,
+            "result": round(calculate(args.expression), 6)}
+
+
+def _sample_size(_: duckdb.DuckDBPyConnection, args: SampleSizeArgs) -> dict[str, Any]:
+    """每组样本量，同时写明用了哪些假设：回答里引用目标转化率、总样本量时都有出处。"""
+    per_group = sample_size_proportions(args.baseline_rate, args.min_detectable_effect, args.alpha, args.power)
+    return {"tool": "ab_sample_size", "per_group": per_group, "total": 2 * per_group,
+            "baseline_rate": args.baseline_rate, "min_detectable_effect": args.min_detectable_effect,
+            "target_rate": round(args.baseline_rate + args.min_detectable_effect, 6),
+            "alpha": args.alpha, "power": args.power}
 
 
 def _ab_test(_: duckdb.DuckDBPyConnection, args: ProportionTestArgs) -> dict[str, Any]:
@@ -149,9 +172,11 @@ TOOLS: dict[str, Tool] = {tool.name: tool for tool in (
          ProportionTestArgs, _ab_test),
     Tool("ab_sample_size",
          "计算 AB 实验每组所需样本量：输入基线转化率和想检测到的最小绝对提升。",
-         SampleSizeArgs,
-         lambda _, a: {"tool": "ab_sample_size", "per_group": sample_size_proportions(
-             a.baseline_rate, a.min_detectable_effect, a.alpha, a.power), "alpha": a.alpha, "power": a.power}),
+         SampleSizeArgs, _sample_size),
+    Tool("calculate",
+         "四则运算计算器。需要求和、相减、算占比、变化率或日均时调用，再引用它的 result；不要心算或估算。"
+         "参与计算的数字必须照抄之前的工具结果或用户的问题。",
+         CalculateArgs, _calculate),
 )}
 
 

@@ -154,3 +154,64 @@ def test_pp_is_percentage_points(answer: str) -> None:
     """正式评测发现：模型常用 pp 表示百分点，原来只认“个百分点”，把正确的数判成了没有出处。"""
     run = run_with(answer, {"difference": 0.012, "confidence_interval": [-0.004788, 0.016217]})
     assert check_run(run)["numbers"]["ungrounded"] == []
+
+
+def test_multi_level_heading_numbers_are_not_numbers() -> None:
+    """首份真实周报：小节编号“### 2.1”被当成数字，判为没有出处。"""
+    assert texts("### 2.1 按 Shapley 拆解\n#### 3.2.1 细节") == []
+
+
+def calc(expression: str, result: float, purpose: str = "测试") -> dict:
+    return {"role": "tool", "tool_call_id": "calc",
+            "content": json.dumps({"tool": "calculate", "expression": expression, "purpose": purpose, "result": result})}
+
+
+def with_messages(answer: str, *extra: dict, tool: dict | None = None) -> dict:
+    run = run_with(answer, TOOL if tool is None else tool)
+    run["messages"] += list(extra)
+    return run
+
+
+W49 = {"gmv": 309381.73, "extreme_line": 168469.6, "base_gmv": 138290.0}  # 示意数字
+
+
+def test_calculation_from_sourced_inputs_is_a_source() -> None:
+    """两步：先剔除大单，再用第一步的结果算环比。每一步的输入都能追溯到工具结果。"""
+    run = with_messages("剔除后 GMV 为 140,912.13，环比 +1.90%", calc("309381.73 - 168469.6", 140912.13),
+                        calc("(140912.13 - 138290) / 138290", 0.018961), tool=W49)
+    numbers = check_run(run)["numbers"]
+    assert numbers["ungrounded"] == [] and numbers["calculations"] == 2
+    assert numbers["unsupported_calculations"] == []
+
+
+def test_calculation_from_made_up_inputs_is_not_a_source() -> None:
+    """把编的数放进算式，结果也不能算有出处；后面用到这个结果的计算同样不算。"""
+    run = with_messages("剔除后 GMV 为 140,912.13，环比 +1.90%", calc("309381.73 - 168469.6", 140912.13),
+                        calc("(140912.13 - 138290) / 138290", 0.018961), tool={"gmv": 309381.73, "base_gmv": 138290.0})
+    numbers = check_run(run)["numbers"]
+    assert [m["text"] for m in numbers["ungrounded"]] == ["140,912.13", "+1.90%"]
+    assert [c["unsupported_inputs"] for c in numbers["unsupported_calculations"]] == [["168469.6"], ["140912.13"]]
+
+
+def test_percent_written_from_a_times_100_calculation() -> None:
+    """模型先乘 100（结果 1.896…），再在回答里写成 1.90%：也算有出处。100 是允许的换算常数。"""
+    run = with_messages("环比 +1.90%", calc("(140912.13 - 138290) / 138290 * 100", 1.896106),
+                        tool={"current": 140912.13, "base": 138290.0})
+    assert check_run(run)["numbers"]["ungrounded"] == []
+
+
+def test_inputs_written_as_percent_numbers_are_accepted() -> None:
+    """算式里把 0.0231 写成 2.31（百分数的数值），也能找到出处。"""
+    assert check_run(with_messages("差 1.00 个百分点", calc("2.31 - 1.31", 1.0)))["numbers"]["ungrounded"] == []
+
+
+def test_only_the_first_user_message_is_a_source() -> None:
+    """后面的“用户消息”是程序加的提示（例如核查退回时列出的数字），不能把这些数字变成有出处。"""
+    notice = {"role": "user", "content": "（系统核查）找不到出处的数字：「5,555.55」"}
+    assert [m["text"] for m in check_run(with_messages("增长 5,555.55", notice))["numbers"]["ungrounded"]] == ["5,555.55"]
+
+
+def test_slash_dates_are_not_numbers() -> None:
+    """留出题改进前的运行：“闭店为 4/21–4/25”里的 25 被当成数字判为没有出处。分数和比例不受影响。"""
+    assert texts("闭店为 4/21–4/25，截止 2011/12/09") == []
+    assert texts("480/8000 对 520/8000") == ["480", "8000", "520", "8000"]

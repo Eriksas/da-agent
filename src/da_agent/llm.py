@@ -66,8 +66,8 @@ class LLMClient(Protocol):
         ...
 
 
-class FakeLLMExhausted(RuntimeError):
-    """假模型预设的回复已经用完。"""
+class FakeLLMExhausted(LLMError):
+    """假模型预设的回复已经用完。按模型调用失败处理：剧本没写到的一轮（例如核查退回后的修正）不会让程序崩溃。"""
 
 
 @dataclass

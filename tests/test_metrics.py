@@ -8,7 +8,8 @@
 import pytest
 
 from da_agent.cleaning import connect_frame
-from da_agent.metrics import drilldown, metric_summary, week_warnings, weekly_row
+from da_agent.decompose import decompose_gmv
+from da_agent.metrics import comparison_warnings, drilldown, metric_summary, week_warnings, weekly_row
 from helpers import S2, UK, make_frame
 
 ROWS = [
@@ -151,3 +152,27 @@ def test_rate_metric_reports_point_change_not_percent() -> None:
     assert (row["base"], row["current"]) == (0.02, 0.04)
     assert row["change"] == 0.02
     assert row["change_pct"] is None
+
+
+TRADING_DAYS_WARNING = ("交易天数不同：当期 2011-W02 5 天，基期 2011-W01 4 天。GMV、订单数等总量的变化有一部分来自天数差异，"
+                        "请同时比较日均：日均 GMV 35.00 → 29.00（-17.14%）。")
+
+
+def test_per_day_metrics_and_trading_day_warning(con) -> None:
+    """W01 4 个交易日、W02 5 个：GMV 总量 +3.57%，按日均是 140/4 = 35 → 145/5 = 29。"""
+    summary = metric_summary(con, "2011-W02")
+    rows = {r["metric"]: r for r in summary["metrics"]}
+    assert (rows["gmv_per_day"]["base"], rows["gmv_per_day"]["current"]) == (35.0, 29.0)
+    assert rows["gmv_per_day"]["change_pct"] == pytest.approx(-0.1714)
+    assert (rows["orders_per_day"]["base"], rows["orders_per_day"]["current"]) == (1.0, 1.0)
+    assert TRADING_DAYS_WARNING in summary["warnings"]
+    assert TRADING_DAYS_WARNING in drilldown(con, "2011-W02")["warnings"]  # 只调用下钻或拆解时也能看到
+    assert TRADING_DAYS_WARNING in decompose_gmv(con, "2011-W02")["warnings"]
+
+
+def test_no_trading_day_warning_when_days_match_or_base_is_closed() -> None:
+    with connect_frame(make_frame([ROWS[0], ROWS[5]])) as con:  # 两周各 1 个交易日
+        assert comparison_warnings(con, "2011-W02", "2011-W01") == []
+    closed = [ROWS[0], (S2, 3, "300011", "10001", "A", 1, "2011-01-17 10:00", 1.0, "c1", UK)]  # W02 整周停业
+    with connect_frame(make_frame(closed)) as con:
+        assert comparison_warnings(con, "2011-W03", "2011-W02") == []  # 停业已经有单独的警告

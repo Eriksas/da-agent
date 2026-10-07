@@ -31,9 +31,11 @@ METRICS: dict[str, dict[str, str]] = {
     "identified_aov": {"label": "可识别客户客单价", "unit": "money", "definition": "可识别客户的 GMV ÷ 其订单数"},
     "unidentified_gmv": {"label": "缺客户 ID 的 GMV", "unit": "money", "definition": "无法归到具体客户的销售额"},
     "trading_days": {"label": "交易天数", "unit": "count", "definition": "当周有销售的日期数"},
+    "gmv_per_day": {"label": "日均 GMV", "unit": "money", "definition": "GMV ÷ 交易天数；两周交易天数不同时，比较日均更公平"},
+    "orders_per_day": {"label": "日均订单数", "unit": "number", "definition": "订单数 ÷ 交易天数"},
 }
 DEFAULT_METRICS = ("gmv", "net_sales", "orders", "aov", "active_customers", "new_customers",
-                   "returning_customers", "cancel_rate", "trading_days")
+                   "returning_customers", "cancel_rate", "trading_days", "gmv_per_day", "orders_per_day")
 ADDITIVE_METRICS = ("gmv", "net_sales", "cancelled_amount")  # 可以按分组相加的金额指标
 DIMENSIONS: dict[str, dict[str, str]] = {
     "country": {"label": "国家",
@@ -106,6 +108,8 @@ def weekly_row(con: duckdb.DuckDBPyConnection, week: str) -> dict[str, Any]:
     row["orders_per_customer"] = _ratio(row["identified_orders"], row["active_customers"])
     row["identified_aov"] = _ratio(row["identified_gmv"], row["identified_orders"])
     row["unidentified_gmv"] = row["gmv"] - row["identified_gmv"]
+    row["gmv_per_day"] = _ratio(row["gmv"], row["trading_days"])
+    row["orders_per_day"] = _ratio(row["orders"], row["trading_days"])
     return row
 
 
@@ -161,6 +165,22 @@ def week_warnings(con: duckdb.DuckDBPyConnection, week: str, *, role: str = "当
     return warnings
 
 
+def comparison_warnings(con: duckdb.DuckDBPyConnection, week: str, base: str) -> list[str]:
+    """两周放在一起比时才有的问题：交易天数不同。
+
+    week_warnings 只看单独一周（少于 4 天才提醒），5 天对 6 天这种银行假日周不会被发现，
+    但 GMV、订单数这些总量会因为少一天而下降。天数不同时，把日均的对比直接写进警告。
+    """
+    current, previous = weekly_row(con, week), weekly_row(con, base)
+    days, base_days = current["trading_days"], previous["trading_days"]
+    if days == base_days or not days or not base_days:  # 天数相同不用提醒；整周停业已有单独的警告
+        return []
+    per_day, base_per_day = current["gmv"] / days, previous["gmv"] / base_days
+    change = f"（{per_day / base_per_day - 1:+.2%}）" if base_per_day else ""
+    return [f"交易天数不同：当期 {week} {days} 天，基期 {base} {base_days} 天。GMV、订单数等总量的变化有一部分来自天数差异，"
+            f"请同时比较日均：日均 GMV {base_per_day:,.2f} → {per_day:,.2f}{change}。"]
+
+
 def data_range(con: duckdb.DuckDBPyConnection) -> dict[str, str]:
     """数据覆盖的周范围，以及最近的完整周（用户说“上周”时指这一周）。"""
     _ensure(con)
@@ -201,7 +221,8 @@ def metric_summary(con: duckdb.DuckDBPyConnection, week: str, compare: str = "wo
         "notes": ["rate 类指标的 change 是百分点变化（0.01 = 1 个百分点），不计算变化百分比。"],
         "sample_size": {"current_orders": current["orders"], "base_orders": base["orders"]},
         "warnings": week_warnings(con, week, customer_type=customer_metrics)
-                    + week_warnings(con, period["base"], role="基期", customer_type=customer_metrics),
+                    + week_warnings(con, period["base"], role="基期", customer_type=customer_metrics)
+                    + comparison_warnings(con, week, period["base"]),
     }
 
 
@@ -262,7 +283,8 @@ def drilldown(con: duckdb.DuckDBPyConnection, week: str, compare: str = "wow", m
                   "share_of_total_change": round(others_change / total_change, 4) if total_change else None}
     segment_sum = sum(seg["current"] - seg["base"] for seg in segments.values())
     warnings = (week_warnings(con, week, customer_type=dimension == "customer_type")
-                + week_warnings(con, period["base"], role="基期", customer_type=dimension == "customer_type"))
+                + week_warnings(con, period["base"], role="基期", customer_type=dimension == "customer_type")
+                + comparison_warnings(con, week, period["base"]))
     if any(r["share_of_total_change"] is not None and abs(r["share_of_total_change"]) > 1 for r in top):
         warnings.append("有分组反向变化，相互抵消后总变化较小，所以单个分组的贡献占比会超过 100% 或为负。")
     if any(r["small_sample"] for r in top):

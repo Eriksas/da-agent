@@ -1,13 +1,19 @@
 """评测模块：题集校验、异动注入、打分规则、端到端汇总。全部用小样例和假模型。"""
 
 import json
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
 
+from da_agent import cli
+from da_agent.agent import AgentRun, run_agent
+from da_agent.checks import check_run
 from da_agent.cleaning import connect_frame
 from da_agent.evaluation import (
-    Case, Connections, inject, load_cases, render_summary, rescore, run_eval, score, verify_injection,
+    HOLDOUT_PATH, Case, Connections, inject, load_cases, render_comparison, render_summary, rescore, run_eval, score,
+    score_run,
+    verify_injection,
 )
 from da_agent.llm import FakeLLM, LLMReply, ToolCall
 from helpers import make_frame
@@ -19,6 +25,26 @@ def test_real_case_file_is_valid() -> None:
     assert len(cases) == 10
     assert {case.id for case in cases} >= {"w49-trap", "out-of-range", "injected-eire"}
     assert next(c for c in cases if c.id == "injected-eire").inject == {"drop_country": "EIRE", "week": "2011-W31"}
+
+
+def test_holdout_file_is_valid_and_separate() -> None:
+    holdout = load_cases(HOLDOUT_PATH)
+    assert len(holdout) == 5
+    assert not {c.id for c in holdout} & {c.id for c in load_cases()}  # 和原题集重名的话，结果会混在一起
+
+
+def test_rescore_uses_the_case_file_recorded_in_meta(tmp_path: Path) -> None:
+    run = asdict(AgentRun(run_id="r", question="2011-W41 的 GMV 为什么下降？", model="fake", max_tool_calls=5,
+                          status="completed", answer="2011-W41 的客单价下降。"))
+    run["messages"] = [{"role": "system", "content": "s"}, {"role": "user", "content": run["question"]}]
+    run_dir = tmp_path / "runs" / "w41-why" / "agent-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run.json").write_text(json.dumps(run, ensure_ascii=False), encoding="utf-8")
+    meta = {"name": "t", "model": "fake", "repeats": 1, "cases_file": "eval/holdout.yaml", "finished_at": "now"}
+    (tmp_path / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    assert cli.main(["eval-rescore", str(tmp_path)]) == 0  # w41-why 只在留出题里：读错题集会找不到这道题
+    assert "[eval/holdout.yaml](../../holdout.yaml)" in (tmp_path / "summary.md").read_text(encoding="utf-8")
+    assert json.loads((tmp_path / "results.json").read_text(encoding="utf-8"))[0]["passed"] is True
 
 
 @pytest.mark.parametrize("text, message", [
@@ -141,3 +167,52 @@ def test_compare_with_human_counts_both_views() -> None:
     result = compare_with_human(results, review)
     assert (result["agree_substance"], result["agree_passed"], result["blind"]) == (1, 0, 1)
     assert result["by_condition"] == {"agent": {"human_passed": 1, "reviewed": 2}}
+
+
+def test_repair_is_scored_before_and_after(tmp_path: Path) -> None:
+    def make_llm(case: Case, condition: str, i: int) -> FakeLLM:
+        return FakeLLM(replies=[
+            LLMReply(content="", tool_calls=(ToolCall(id="m", name="metric_summary", arguments={"week": "2011-W02"}),)),
+            LLMReply(content="2011-W02 的客单价下降，GMV 约 999.99。"),  # 编的数字：被退回修正
+            LLMReply(content="2011-W02 的客单价下降，GMV 为 145.0。")])
+
+    summary = run_eval([CASE], ["agent"], 1, make_llm, FixtureConnections(), tmp_path, max_tool_calls=5,
+                       progress=lambda _: None)
+    stats = summary["by_condition"]["agent"]
+    assert (stats["repaired"], stats["passed_without_repair"], stats["passed"]) == (1, 0, 1)
+    markdown = render_summary(summary, {"name": "t", "model": "fake", "repeats": 1, "finished_at": "now"})
+    assert "| Agent 不带流程 | 1 | 1 | 0 | 1 |" in markdown
+    assert rescore(tmp_path, [CASE], FixtureConnections())["by_condition"] == summary["by_condition"]
+
+
+def test_draft_is_checked_only_against_what_existed_before_repair() -> None:
+    """初稿和修正稿文字相同，区别只在修正时补了一次 calculate：初稿不能借用修正阶段才有的出处。"""
+    text = "2011-W02 的客单价下降，GMV 比上周多 3.5714%。"  # 工具只给到 0.0357，4 位小数的写法找不到出处
+    llm = FakeLLM(replies=[
+        LLMReply(content="", tool_calls=(ToolCall(id="m", name="metric_summary", arguments={"week": "2011-W02"}),)),
+        LLMReply(content=text),
+        LLMReply(content="", tool_calls=(ToolCall(id="c", name="calculate",
+                                                  arguments={"expression": "(145 - 140) / 140", "purpose": "环比"}),)),
+        LLMReply(content=text)])
+    with connect_frame(make_frame(ROWS)) as con:
+        run = asdict(run_agent(CASE.question, llm=llm, con=con, max_tool_calls=5))
+    result = score_run(CASE, run, check_run(run), None)
+    assert (result["repaired"], result["passed_without_repair"], result["passed"]) == (True, False, True)
+
+
+def test_comparison_table(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def evaluate_with(answer: str, out_dir: Path) -> dict:
+        def make_llm(case: Case, condition: str, i: int) -> FakeLLM:
+            return FakeLLM(replies=[LLMReply(content="", tool_calls=(
+                ToolCall(id="m", name="metric_summary", arguments={"week": "2011-W02"}),)), LLMReply(content=answer)])
+
+        return run_eval([CASE], ["agent"], 1, make_llm, FixtureConnections(), out_dir, max_tool_calls=5,
+                        progress=lambda _: None)
+
+    before = evaluate_with("2011-W02 的 GMV 上升。", tmp_path / "before")  # 没提到客单价：不通过
+    after = evaluate_with("2011-W02 的客单价下降。", tmp_path / "after")
+    table = render_comparison(before, after)
+    assert "| Agent 不带流程 | 0/1 → 1/1 | 1/1 |" in table
+    assert "| c1 | 测试 | 0/1 → 1/1 |" in table
+    assert cli.main(["eval-compare", str(tmp_path / "before"), str(tmp_path / "after")]) == 0
+    assert "0/1 → 1/1" in capsys.readouterr().out
