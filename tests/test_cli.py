@@ -51,3 +51,28 @@ def test_bad_week_gives_message_not_traceback(capsys: pytest.CaptureFixture[str]
         pytest.skip("本地没有准备数据")
     assert cli.main(["week", "2011-W60"]) == 2
     assert "错误：2011 年没有第 60 周" in capsys.readouterr().out
+
+
+def test_ui_without_streamlit_explains_how_to_install(monkeypatch: pytest.MonkeyPatch,
+                                                       capsys: pytest.CaptureFixture[str]) -> None:
+    import importlib.util
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
+    assert cli.main(["ui"]) == 2
+    assert "uv sync --group ui" in capsys.readouterr().out
+
+
+def test_ui_listens_on_localhost_only_and_turns_off_telemetry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """实时提问用的是自己的密钥：界面只监听本机，不让局域网里的其他人调用；也不向 Streamlit 发送使用统计。"""
+    import importlib.util
+    import subprocess
+
+    launched: list[list[str]] = []
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(subprocess, "call", lambda args: launched.append(args) or 0)
+    assert cli.main(["ui", "--port", "8600", "--no-browser"]) == 0
+    args = launched[0]
+    assert args[1:4] == ["-m", "streamlit", "run"] and args[4].endswith("ui_app.py")
+    options = dict(zip(args[5::2], args[6::2], strict=True))
+    assert options["--server.address"] == "127.0.0.1" and options["--server.port"] == "8600"
+    assert options["--browser.gatherUsageStats"] == "false"

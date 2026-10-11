@@ -15,11 +15,17 @@
 格式错误的工具调用（M7b 评测发现）：模型偶尔把工具调用写成一段文字（带 <tool_call>、<invoke> 之类的标记），
 而不是按接口格式发出。程序以前会把这段乱码当成最终答案。现在识别出来后提示模型重发一次；再错就以 malformed_answer 结束，
 不把乱码当答案发布。
+
+逐步通知（M11 图形界面）：传入 on_step 时，每一步发生后调用一次，界面靠它实时显示进度。事件只有四种：
+model（第几轮开始调用模型）、tool（一次工具调用及结果）、repair（初稿被退回修正）、notice（系统提示：次数用完、格式错误）。
+回放已保存的运行时，界面从对话记录里还原出同样的事件（ui.replay_events），两边用同一套显示代码。
+回调里抛出的异常不拦截：界面的“停止”就是靠异常中断运行的。
 """
 
 import json
 import re
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -91,8 +97,9 @@ def repair_notice(ungrounded: list[dict[str, Any]]) -> str:
 
 def run_agent(question: str, *, llm: LLMClient, con: duckdb.DuckDBPyConnection, max_tool_calls: int,
               system_prompt: str | None = None, use_skills: bool = True, repair: bool = True,
-              domain: str = "ecommerce") -> AgentRun:
-    """运行一次 Agent 循环，返回完整记录。任何失败都体现在 status 里，不向外抛异常。"""
+              domain: str = "ecommerce", on_step: Callable[[dict[str, Any]], None] | None = None) -> AgentRun:
+    """运行一次 Agent 循环，返回完整记录。任何失败都体现在 status 里，不向外抛异常（on_step 自己抛的除外）。"""
+    notify = on_step or (lambda event: None)
     start = time.perf_counter()
     run = AgentRun(run_id=f"{datetime.now():%Y%m%dT%H%M%S}-{uuid4().hex[:6]}", question=question, model=llm.model,
                    max_tool_calls=max_tool_calls, use_skills=use_skills, domain=domain,
@@ -108,6 +115,7 @@ def run_agent(question: str, *, llm: LLMClient, con: duckdb.DuckDBPyConnection, 
     round_no = 0
     while round_no < max_rounds:
         round_no += 1
+        notify({"type": "model", "round": round_no})
         try:
             reply = llm.chat(run.messages, tools=specs)
         except LLMError as exc:
@@ -121,6 +129,7 @@ def run_agent(question: str, *, llm: LLMClient, con: duckdb.DuckDBPyConnection, 
             run.malformed_replies += 1
             if run.malformed_replies == 1:  # 提示重发一次
                 run.messages.append({"role": "user", "content": FORMAT_NOTICE})
+                notify({"type": "notice", "text": FORMAT_NOTICE})
                 continue
             run.status, run.error = "malformed_answer", MALFORMED_ERROR
             break
@@ -132,6 +141,7 @@ def run_agent(question: str, *, llm: LLMClient, con: duckdb.DuckDBPyConnection, 
                                   "draft_round": round_no,
                                   "ungrounded": [{"text": m["text"], "context": m["context"]} for m in ungrounded]}
                     run.messages.append({"role": "user", "content": repair_notice(ungrounded)})
+                    notify({"type": "repair", "ungrounded": run.repair["ungrounded"]})
                     limit, max_rounds = used + REPAIR_TOOL_CALLS, round_no + REPAIR_TOOL_CALLS + 1
                     continue
             run.answer = reply.content
@@ -149,9 +159,12 @@ def run_agent(question: str, *, llm: LLMClient, con: duckdb.DuckDBPyConnection, 
             run.steps.append({"round": round_no, "tool": call.name, "arguments": call.arguments, "ok": outcome.ok,
                               "error": None if outcome.ok else outcome.content["error"], "ms": outcome.duration_ms})
             run.messages.append({"role": "tool", "tool_call_id": call.id, "content": outcome.to_json()})
+            # 结果按记录里的 JSON 原样交出：和回放时从记录里读出来的完全一样
+            notify({"type": "tool", "step": run.steps[-1], "result": json.loads(run.messages[-1]["content"])})
         if used >= limit and notified_at != limit:
             notified_at, run.budget_exhausted = limit, True
             run.messages.append({"role": "user", "content": BUDGET_NOTICE})
+            notify({"type": "notice", "text": BUDGET_NOTICE})
     if run.repair is not None and run.status != "completed":  # 修正失败：保留初稿
         run.repair["error"] = run.error or run.status
         run.answer, run.status, run.error = run.repair["draft"], "completed", None
