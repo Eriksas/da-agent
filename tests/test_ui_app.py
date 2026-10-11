@@ -41,6 +41,7 @@ def test_step_by_step_replay(app: AppTest) -> None:
     button(at, "▶ 逐步播放").click().run()
     assert not at.exception
     assert at.status[0].label == "回放完成：8 次工具调用 · 调用模型 4 次 · 26.02 秒"
+    assert at.status[0].proto.expanded  # 播放完不收起：刚看完的步骤还要能看到
     assert any("指标对比（metric_summary）" in m.value for m in at.markdown)
 
 

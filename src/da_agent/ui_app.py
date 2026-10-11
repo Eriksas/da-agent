@@ -24,28 +24,6 @@ st.session_state.setdefault("running", False)
 st.session_state.setdefault("live_dir", None)
 
 
-def show_event(box: Any, event: dict[str, Any], label_prefix: str | None = None) -> None:
-    """在进度框里显示一步。实时提问和回放都用它。"""
-    kind = event["type"]
-    if kind == "model":
-        if label_prefix:
-            box.update(label=f"{label_prefix}：第 {event['round']} 轮，等模型决定下一步")
-        box.caption(f"第 {event['round']} 轮 · 调用模型")
-    elif kind == "tool":
-        step = event["step"]
-        line = (f"{'✅' if step['ok'] else '❌'} **{ui.tool_label(step['tool'])}** · `{ui.compact(step['arguments'])}`"
-                f" · {step['ms']} 毫秒")
-        box.markdown(line + ("" if step["ok"] else f"\n\n:red[{ui.to_streamlit_markdown(step['error'])}]"))
-        for warning in event["result"].get("warnings", []):
-            box.caption(f"⚠️ {ui.to_streamlit_markdown(warning)}")
-    elif kind == "repair":
-        numbers = "、".join(m["text"] for m in event["ungrounded"])
-        box.warning(f"自动核查：初稿有 {len(event['ungrounded'])} 个数字找不到出处（{ui.to_streamlit_markdown(numbers)}），"
-                    "退回模型修正 1 次")
-    else:
-        box.info(ui.to_streamlit_markdown(event["text"].removeprefix("（系统提示）")))
-
-
 def one_line(text: str) -> str:
     """表格里的引文：表格单元格也按 Markdown 显示，换行会变成列表，压成一行。"""
     return ui.to_streamlit_markdown(" ".join(text.split()))
@@ -60,9 +38,9 @@ def show_steps(run: dict[str, Any], label: str, expanded: bool = False, delay: f
     """把一次运行的全部事件放进一个进度框。delay > 0 时逐步播放。"""
     with st.status(label, expanded=expanded, state="running" if delay else "complete") as box:
         for event in ui.replay_events(run):
-            show_event(box, event, "回放中" if delay else None)
+            ui.show_event(box, event, "回放中" if delay else None)
             time.sleep(delay)
-        box.update(label=label, state="complete" if run["status"] == "completed" else "error")
+        box.update(label=label, state="complete" if run["status"] == "completed" else "error", expanded=expanded)
 
 
 def show_result(saved: ui.SavedRun) -> None:
@@ -101,7 +79,8 @@ def show_result(saved: ui.SavedRun) -> None:
             if event["type"] != "tool":
                 continue
             step, result = event["step"], event["result"]
-            title = f"第 {step['round']} 轮 · {'✅' if step['ok'] else '❌'} {ui.tool_label(step['tool'])} · {ui.compact(step['arguments'])}"
+            title = (f"第 {step['round']} 轮 · {'✅' if step['ok'] else '❌'} {ui.tool_label(step['tool'])}"
+                     f" · {ui.compact(step['arguments'])}")
             with st.expander(title):
                 for warning in result.get("warnings", []):
                     st.warning(ui.to_streamlit_markdown(warning))
@@ -186,7 +165,7 @@ def live_page() -> None:
     if running:
         with st.status("分析中：准备数据", expanded=True) as box:
             try:
-                run_dir = ui.ask(question.strip(), domain, settings, on_step=lambda e: show_event(box, e, "分析中"))
+                run_dir = ui.ask(question.strip(), domain, settings, on_step=lambda e: ui.show_event(box, e, "分析中"))
             finally:  # 中途停止（异常中断）也要让输入框恢复可用
                 st.session_state.running = False
         st.session_state.live_dir = str(run_dir)

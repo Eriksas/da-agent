@@ -3,7 +3,7 @@
 界面只在本机运行、只监听 127.0.0.1：实时提问会用你自己的密钥调用付费模型，放到公网谁都能消耗额度。
 公开展示用 GitHub Pages 上的静态网站，界面是给演示用的。
 
-- replay_events：从运行记录还原出 run_agent(on_step=...) 实时发出的事件，回放和实时提问用同一套显示代码
+- replay_events：从运行记录还原出 run_agent(on_step=...) 实时发出的事件，回放和实时提问用同一套显示代码 show_event
 - to_streamlit_markdown：把答案转成 Streamlit 能安全显示的 Markdown，找不到出处的数字按核查器记录的位置标红
 - saved_runs：可回放的运行，包括已提交的真实运行样例和本机 runs/ 下的记录
 - ask：实时提问，运行记录、核查结果和报告和命令行一样存到 runs/
@@ -51,6 +51,32 @@ def compact(arguments: dict[str, Any]) -> str:
     """工具参数的一行写法：week=2011-W48, dimension=country。"""
     return ", ".join(f"{k}={v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)}"
                      for k, v in arguments.items()) or "无参数"
+
+
+def show_event(box: Any, event: dict[str, Any], label_prefix: str | None = None) -> None:
+    """在进度框里显示一步，实时提问和回放都用它。box 是 Streamlit 的 st.status，测试里换成记录调用的假对象。
+
+    改标题时必须同时传 expanded=True：Streamlit 1.65 的 update 不传 expanded 会把进度框收起来，
+    后面的步骤都藏在折叠里（第一次真实运行时发现）。
+    """
+    kind = event["type"]
+    if kind == "model":
+        if label_prefix:
+            box.update(label=f"{label_prefix}：第 {event['round']} 轮，等模型决定下一步", expanded=True)
+        box.caption(f"第 {event['round']} 轮 · 调用模型")
+    elif kind == "tool":
+        step = event["step"]
+        line = (f"{'✅' if step['ok'] else '❌'} **{tool_label(step['tool'])}** · `{compact(step['arguments'])}`"
+                f" · {step['ms']} 毫秒")
+        box.markdown(line + ("" if step["ok"] else f"\n\n:red[{to_streamlit_markdown(step['error'])}]"))
+        for warning in event["result"].get("warnings", []):
+            box.caption(f"⚠️ {to_streamlit_markdown(warning)}")
+    elif kind == "repair":
+        numbers = "、".join(m["text"] for m in event["ungrounded"])
+        box.warning(f"自动核查：初稿有 {len(event['ungrounded'])} 个数字找不到出处（{to_streamlit_markdown(numbers)}），"
+                    "退回模型修正 1 次")
+    else:
+        box.info(to_streamlit_markdown(event["text"].removeprefix("（系统提示）")))
 
 
 def replay_events(run: dict[str, Any]) -> list[dict[str, Any]]:

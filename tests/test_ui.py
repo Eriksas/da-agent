@@ -53,6 +53,26 @@ def test_errors_raised_by_the_callback_stop_the_run() -> None:
                   max_tool_calls=5, on_step=stop)
 
 
+class Box:
+    """假的进度框：记录每次调用。"""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple, dict]] = []
+
+    def __getattr__(self, name: str):  # noqa: ANN204
+        return lambda *args, **kwargs: self.calls.append((name, args, kwargs))
+
+
+def test_progress_box_stays_open_when_its_label_changes() -> None:
+    """Streamlit 1.65 改标题时不传 expanded 会把进度框收起来，后面的步骤都看不见（第一次真实运行时发现）。"""
+    box = Box()
+    ui.show_event(box, {"type": "model", "round": 2}, "分析中")
+    assert box.calls[0] == ("update", (), {"label": "分析中：第 2 轮，等模型决定下一步", "expanded": True})
+    quiet = Box()
+    ui.show_event(quiet, {"type": "model", "round": 2})  # 一次性画出全部步骤时不改标题
+    assert [name for name, _, _ in quiet.calls] == ["caption"]
+
+
 def test_dollar_and_tilde_are_escaped_outside_code() -> None:
     """Streamlit 把 $…$ 当公式、~ 当删除线；代码块里的原样保留。"""
     text = "区间 3~5 天，约 $12 到 $15。代码 `a~b $x` 不动\n```\n$y ~z\n```"
