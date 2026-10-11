@@ -51,6 +51,8 @@ class NumberMention:
     value: float  # 换算到工具输出的单位后的值（2.31% → 0.0231）
     tolerance: float  # 按显示精度允许的误差：严格小于显示位数的 1 个单位
     context: str
+    start: int = 0  # 在原文里的位置：text == 原文[start:end]，界面用它标红找不到出处的数字
+    end: int = 0
 
 
 def _context(text: str, start: int, end: int, width: int = 30) -> str:
@@ -74,9 +76,11 @@ def extract_numbers(text: str) -> tuple[list[NumberMention], int]:
             skipped += 1
             continue
         scale = SCALES[unit]
-        mentions.append(NumberMention(text=match.group().strip(), value=abs(number) * scale,
+        shown = match.group().rstrip()  # 没有单位时，数字后面的空格也会被匹配进来
+        mentions.append(NumberMention(text=shown, value=abs(number) * scale,
                                       tolerance=10 ** -decimals * scale,  # 小于显示位数的 1 个单位：四舍五入和直接截断都接受
-                                      context=_context(text, match.start(), match.end())))
+                                      context=_context(text, match.start(), match.end()),
+                                      start=match.start(), end=match.start() + len(shown)))
     return mentions, skipped
 
 

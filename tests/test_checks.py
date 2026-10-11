@@ -18,6 +18,14 @@ def test_extracts_common_formats() -> None:
     assert texts(answer) == ["309,381.73", "+6,989.51", "+2.31%", "-1.31 个百分点", "30.9 万", "13.11%", "−13,088.20"]
 
 
+def test_mentions_record_their_position_in_the_answer() -> None:
+    """界面按位置标红：每个数字的 start/end 必须正好框住原文里的它（含单位，不含后面的空格）。"""
+    answer = "1. GMV 309,381.73 元，环比 +2.31%，取消率 -1.31 个百分点；2011-W48 约 30.9 万"
+    mentions = extract_numbers(answer)[0]
+    assert [answer[m.start:m.end] for m in mentions] == [m.text for m in mentions] == [
+        "309,381.73", "+2.31%", "-1.31 个百分点", "30.9 万"]
+
+
 def test_ignores_weeks_dates_codes_and_list_markers() -> None:
     answer = "1. 分析 2011-W48，数据截止 2011-12-09 12:50，规则 R09，发票 C581484\n## 2. 结论"
     assert texts(answer) == []

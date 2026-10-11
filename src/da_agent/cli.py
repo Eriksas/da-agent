@@ -12,6 +12,7 @@
 - `da-agent eval`：评测，同一批题目在多个对比组各跑一遍，程序打分，结果写到 eval/results/
 - `da-agent eval-compare 改进前目录 改进后目录`：对比两次评测，不调用模型
 - `da-agent weekly --advance`：按回放游标生成下一周的周报（GitHub Actions 每周运行），写到 reports/weekly/
+- `da-agent ui`：打开本机图形界面（需要可选依赖：uv sync --group ui），回放已保存的运行或实时提问
 
 过程日志用 logging；命令行给用户看的结果用 print。
 """
@@ -291,6 +292,41 @@ def build_site(out_dir: Path) -> int:
     return 0
 
 
+def _open_when_ready(url: str, port: int, attempts: int = 60) -> None:
+    """等界面服务起来再打开浏览器，避免先看到“无法连接”。"""
+    import socket
+    import time
+    import webbrowser
+
+    for _ in range(attempts):
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                webbrowser.open(url)
+                return
+        except OSError:
+            time.sleep(0.5)
+
+
+def launch_ui(port: int, open_browser: bool) -> int:
+    """启动 Streamlit 图形界面。只监听 127.0.0.1：实时提问用的是你自己的密钥，不能让局域网里的其他人调用。"""
+    import importlib.util
+    import subprocess
+    import sys
+    import threading
+
+    if importlib.util.find_spec("streamlit") is None:
+        print("图形界面需要可选依赖 Streamlit。请先安装：uv sync --group ui；之后用 uv run --group ui da-agent ui 启动")
+        return 2
+    url = f"http://localhost:{port}"
+    print(f"界面地址：{url}（只在本机可访问，按 Ctrl+C 退出）")
+    if open_browser:
+        threading.Thread(target=_open_when_ready, args=(url, port), daemon=True).start()
+    app = Path(__file__).with_name("ui_app.py")
+    return subprocess.call([sys.executable, "-m", "streamlit", "run", str(app), "--server.address", "127.0.0.1",
+                            "--server.port", str(port), "--server.headless", "true",
+                            "--browser.gatherUsageStats", "false", "--client.toolbarMode", "minimal"])
+
+
 def fetch_financials(refresh: bool) -> int:
     """下载 SEC 财报数据并生成关键科目表 data/financials/key_facts.csv。"""
     from .financials import KEY_FACTS_PATH, build_key_facts, fetch_all
@@ -424,6 +460,9 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("quality", help="生成数据质量报告")
     site_parser = commands.add_parser("build-site", help="生成项目展示网站（静态网页，用于 GitHub Pages）")
     site_parser.add_argument("--out", type=Path, default=Path("_site"), help="输出目录，默认 _site")
+    ui_parser = commands.add_parser("ui", help="打开本机图形界面：回放已保存的运行，或实时提问（需要 uv sync --group ui）")
+    ui_parser.add_argument("--port", type=int, default=8501, help="端口，默认 8501")
+    ui_parser.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
     fin_parser = commands.add_parser("fetch-financials", help="下载 SEC 财报数据，生成关键科目表（需要 SEC_USER_AGENT）")
     fin_parser.add_argument("--refresh", action="store_true", help="重新下载，即使本地已有原始数据")
     week_parser = commands.add_parser("week", help="不经过模型，输出某一周的指标、GMV 拆解和下钻")
@@ -443,6 +482,8 @@ def main(argv: list[str] | None = None) -> int:
             return fetch_financials(args.refresh)
         if args.command == "build-site":
             return build_site(args.out)
+        if args.command == "ui":
+            return launch_ui(args.port, not args.no_browser)
         if args.command == "week":
             return week(args.week, args.compare)
         if args.command == "ask":

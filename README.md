@@ -7,7 +7,7 @@
 
 > **项目网站**：<https://eriksas.github.io/da-agent/>（周报、评测、财报比率、运行回放，每周自动更新）
 >
-> 当前进度：**M7 自动周报**已上线，每周一由 GitHub Actions 生成一份，见 [reports/weekly](reports/weekly/README.md)；**M7b 准确率提升**已完成，前后对比见 [m7b-comparison.md](eval/results/m7b-comparison.md)；**M9 上市公司财报分析**已完成，同一个 Agent 换成财报领域，见[下文](#上市公司财报分析m9-产出)。完整规划见 [PROJECT_BRIEF.md](PROJECT_BRIEF.md)，**真实运行样例**见 [examples/real_runs](examples/real_runs/README.md)。
+> 当前进度：**M7 自动周报**已上线，每周一由 GitHub Actions 生成一份，见 [reports/weekly](reports/weekly/README.md)；**M7b 准确率提升**已完成，前后对比见 [m7b-comparison.md](eval/results/m7b-comparison.md)；**M9 上市公司财报分析**已完成，同一个 Agent 换成财报领域，见[下文](#上市公司财报分析m9-产出)。**M11 本机图形界面**：`da-agent ui` 回放已保存的运行或实时提问，见[下文](#本机图形界面m11-产出)。完整规划见 [PROJECT_BRIEF.md](PROJECT_BRIEF.md)，**真实运行样例**见 [examples/real_runs](examples/real_runs/README.md)。
 
 ## 架构
 
@@ -60,7 +60,7 @@ flowchart LR
 | M8 | 面试材料（README 首屏：架构图、关键结果表） | ✅ |
 | M9 | 上市公司财报分析（SEC 年报数据、4 个财报工具、分析流程、评测） | ✅ |
 | M10 | 项目展示网站（GitHub Pages，静态网页，每周随周报更新） | ✅ |
-| 之后 | 上市公司财报分析流程（可选） | 未开始 |
+| M11 | 本机图形界面（回放已保存的运行、实时提问，每一步实时显示） | ✅ |
 
 ## 本地运行
 
@@ -84,6 +84,7 @@ uv run da-agent eval --case-file eval/holdout.yaml --conditions agent,agent_skil
 uv run da-agent eval-rescore eval/results/<名称>  # 评分规则修改后，离线重新打分，不调用模型
 uv run da-agent eval-compare eval/results/<改进前> eval/results/<改进后>  # 前后对比表，不调用模型
 uv run da-agent build-site                    # 生成项目网站到 _site/（静态网页，不调用模型）
+uv sync --group ui && uv run --group ui da-agent ui  # 打开本机图形界面（http://localhost:8501）
 uv run da-agent weekly --llm fake --week 2010-W02 # 用假模型检查周报流程（输出在 runs/，不提交）
 
 uv run da-agent fetch-financials              # 下载 SEC 财报数据，重新生成关键科目表（需要 SEC_USER_AGENT；表已提交，平时不用跑）
@@ -300,6 +301,24 @@ LangGraph 是可选依赖组（`uv sync --group langgraph`），只有 CI 的对
 - **本地预览**：`uv run da-agent build-site` 后，用 `python -m http.server --directory _site` 打开。
 
 启用（只需一次）：仓库 Settings → Pages → Build and deployment → Source 选 **GitHub Actions**。
+
+## 本机图形界面（M11 产出）
+
+```bash
+uv sync --group ui               # 安装界面依赖（Streamlit，可选依赖组）
+uv run --group ui da-agent ui    # 打开 http://localhost:8501；--no-browser 不自动打开浏览器
+```
+
+![图形界面：逐步回放一次真实运行，然后看结果和核查](docs/ui-demo.gif)
+
+上图是逐步回放 2026-10-11 用真实模型（MiniMax-M3.1-Flash-Preview）跑的一次“上周 GMV 为什么变化？”：调用模型 8 次、工具 16 次，用时 41 秒。初稿有 3 个数字找不到出处，退回修正后 107/107 个数字有出处。这次真实运行发现了两个假模型测试没发现的问题，都已修复并补了测试：进度框每次改标题都会被 Streamlit 收起来，后面的步骤看不见；核查表格里的引文被当成 Markdown，半句话开头的“- ”变成了列表。
+
+- **回放**：选一次已保存的运行（已提交的真实运行样例，以及本机 `runs/` 下的记录），看从提问、调用工具、自动核查到出报告的全过程，可以逐步播放。不调用模型、不需要密钥，演示时网络或模型出问题也能用。
+- **实时提问**：选电商运营或上市公司财报，输入问题（或点示例问题），每一步调用了什么工具、参数和工具警告实时显示。结束后和命令行一样把运行记录、核查结果和报告存到 `runs/`，可以下载报告。
+- **结果页**：顶部固定标注“AI 初稿，待人工复核”。答案里找不到出处的数字标红，按核查器记录的位置标，同一个数字出现多次时只标没有出处的那一处。另有每一步的工具结果、核查明细（数字出处、需要人工复核的表述、分析流程是否走完、工具警告）和人工复核记录。
+- **只在本机运行**：只监听 127.0.0.1，关闭 Streamlit 的使用统计。实时提问用的是你自己的密钥，放到公网谁都能消耗额度；公开展示用上面的项目网站。
+- **回放和实时共用一套显示代码**：Agent 循环每走一步通过 `on_step` 回调通知界面；回放时从运行记录还原出同样的事件，测试保证两边逐条相同。界面只排版，数字全部来自运行记录和核查器；界面上现算的核查结果和已提交的 `checks.json` 一致（有测试）。
+- **代码与测试**：[ui.py](src/da_agent/ui.py)（逻辑，不依赖 Streamlit，可单独测试）、[ui_app.py](src/da_agent/ui_app.py)（页面）。页面测试用 Streamlit 自带的 AppTest 直接运行页面脚本，实时提问换成假模型，不联网；没装界面依赖时自动跳过。主流程和每周周报都不依赖 Streamlit。
 
 ## 部署到 GitHub Actions（M7）
 
