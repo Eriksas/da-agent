@@ -41,6 +41,7 @@ TOOL_LABELS = {
 CODE = re.compile(r"```.*?```|`[^`\n]+`", re.DOTALL)
 MARKDOWN_ESCAPES = str.maketrans({"$": r"\$", "~": r"\~"})
 HEADING = re.compile(r"(?m)^#{1,4}(?=[ \t])")  # 答案里的标题降两级：模型常用一级标题，会比页面上的问题还大
+MARKDOWN_SYMBOL = re.compile(r"([\\`*_{}\[\]()#+\-.!|~$<>:])")
 
 
 def tool_label(name: str) -> str:
@@ -134,6 +135,15 @@ def to_streamlit_markdown(text: str, ungrounded: Sequence[dict[str, Any]] = ()) 
         cursor = end
     parts.append(text[cursor:].translate(MARKDOWN_ESCAPES))
     return "".join(parts)
+
+
+def plain_text(text: str) -> str:
+    """引文按原样显示：压成一行，所有 Markdown 符号转义。
+
+    表格单元格也按 Markdown 显示，而引文是从答案里截出来的半句话：开头的“- ”会变成列表，
+    截断的 ** 和反引号会原样露出来（第一次真实运行的核查页里都出现过）。
+    """
+    return MARKDOWN_SYMBOL.sub(r"\\\1", " ".join(text.split()))
 
 
 @dataclass(frozen=True)

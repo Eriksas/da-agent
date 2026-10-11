@@ -81,6 +81,12 @@ def test_dollar_and_tilde_are_escaped_outside_code() -> None:
     assert "`a~b $x`" in out and "```\n$y ~z\n```" in out
 
 
+def test_quotes_in_tables_are_shown_as_plain_text() -> None:
+    """表格里的引文是截出来的半句话：开头的“- ”不能变成列表，截断的 ** 和反引号要原样显示（真实运行时出现过）。"""
+    assert ui.plain_text("- 注意：**半句\n`metric…") == r"\- 注意：\*\*半句 \`metric…"
+    assert ui.plain_text(":red[x] $1~2") == r"\:red\[x\] \$1\~2"
+
+
 def test_headings_are_demoted_two_levels_outside_code() -> None:
     out = ui.to_streamlit_markdown("# 标题\n## 小节\n正文 #1\n```\n# 注释\n```")
     assert out == "### 标题\n#### 小节\n正文 #1\n```\n# 注释\n```"

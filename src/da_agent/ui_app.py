@@ -24,11 +24,6 @@ st.session_state.setdefault("running", False)
 st.session_state.setdefault("live_dir", None)
 
 
-def one_line(text: str) -> str:
-    """表格里的引文：表格单元格也按 Markdown 显示，换行会变成列表，压成一行。"""
-    return ui.to_streamlit_markdown(" ".join(text.split()))
-
-
 def run_stats(run: dict[str, Any]) -> str:
     usage = run["usage"]
     return f"{len(run['steps'])} 次工具调用 · 调用模型 {usage['llm_calls']} 次 · {run['seconds']} 秒"
@@ -92,13 +87,14 @@ def show_result(saved: ui.SavedRun) -> None:
         st.markdown(f"**数字出处：** {numbers['grounded']}/{numbers['checked']} 个能在工具输出中找到"
                     f"（另有 {numbers['skipped_small_integers']} 个 ≤ 10 的整数不核查）")
         if numbers["ungrounded"]:
-            st.table([{"数字": m["text"], "所在句子": one_line(m["context"])} for m in numbers["ungrounded"]])
+            st.table([{"数字": ui.plain_text(m["text"]), "所在句子": ui.plain_text(m["context"])}
+                      for m in numbers["ungrounded"]])
         for calc in numbers["unsupported_calculations"]:
             st.warning(f"calculate `{calc['expression']}` 的输入 {'、'.join(calc['unsupported_inputs'])} 找不到出处，"
                        "计算结果不算出处")
         st.markdown("**需要人工复核的表述**（因果、绝对化、推测）")
         if checks["phrases"]:
-            st.table([{"类别": p["category"], "词": p["phrase"], "所在句子": one_line(p["context"])}
+            st.table([{"类别": p["category"], "词": p["phrase"], "所在句子": ui.plain_text(p["context"])}
                       for p in checks["phrases"]])
         else:
             st.caption("未发现。推理是否成立仍需人工判断。")
@@ -116,11 +112,11 @@ def show_result(saved: ui.SavedRun) -> None:
         with tabs[3]:
             st.caption("人工复核记录：自动核查查不出来的推理问题。")
             st.markdown(ui.to_streamlit_markdown(review.read_text(encoding="utf-8")))
-    left, right, _ = st.columns([1, 1, 3])
-    left.download_button("下载报告（Markdown）", render_report(run, checks), file_name=f"{run['run_id']}-report.md",
-                         mime="text/markdown", on_click="ignore")
-    right.download_button("下载完整记录（JSON）", json.dumps(run, ensure_ascii=False, indent=2),
-                          file_name=f"{run['run_id']}-run.json", mime="application/json", on_click="ignore")
+    downloads = st.container(horizontal=True)  # 按钮按文字宽度排开，不会被等分的列截断
+    downloads.download_button("下载报告（Markdown）", render_report(run, checks), file_name=f"{run['run_id']}-report.md",
+                              mime="text/markdown", on_click="ignore")
+    downloads.download_button("下载完整记录（JSON）", json.dumps(run, ensure_ascii=False, indent=2),
+                              file_name=f"{run['run_id']}-run.json", mime="application/json", on_click="ignore")
 
 
 def replay_page() -> None:
