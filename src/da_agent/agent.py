@@ -34,6 +34,7 @@ from uuid import uuid4
 
 import duckdb
 
+from .autodash.sources import source_of
 from .checks import number_check
 from .company import company_catalog
 from .llm import LLMClient, LLMError
@@ -44,7 +45,8 @@ from .tools import ToolOutcome, execute, tool_specs
 
 SYSTEM_PROMPT_PATH = ROOT / "prompts" / "agent_system.md"
 # 每个领域一份系统提示词和一组工具；循环、核查、退回修正对所有领域都一样
-SYSTEM_PROMPTS = {"ecommerce": SYSTEM_PROMPT_PATH, "company": ROOT / "prompts" / "company_system.md"}
+SYSTEM_PROMPTS = {"ecommerce": SYSTEM_PROMPT_PATH, "company": ROOT / "prompts" / "company_system.md",
+                  "dashboard": ROOT / "prompts" / "dashboard_system.md"}
 BUDGET_NOTICE = "（系统提示）工具调用次数已用完。请不要再调用工具，直接根据已有的工具结果给出最终回答。"
 FORMAT_NOTICE = ("（系统提示）上一条回复里有工具调用的文字标记，但没有按函数调用的格式发出，程序无法执行。"
                  "需要工具时请直接发起工具调用；不需要时请给出文字回答。")
@@ -66,7 +68,7 @@ class AgentRun:
     model: str
     max_tool_calls: int
     use_skills: bool = True  # 评测对比用：False 时不提供分析流程
-    domain: str = "ecommerce"  # ecommerce 电商运营 / company 上市公司财报
+    domain: str = "ecommerce"  # ecommerce 电商运营 / company 上市公司财报 / dashboard 自主搭看板
     status: str = "running"  # completed / empty_answer / llm_error / max_rounds / malformed_answer
     answer: str = ""
     error: str | None = None
@@ -87,6 +89,10 @@ def build_system_prompt(con: duckdb.DuckDBPyConnection, max_tool_calls: int, use
     skills = catalog(load_skills(domain=domain) if use_skills else {})
     if domain == "company":
         return template.format(companies=company_catalog(con), max_tool_calls=max_tool_calls, skills_catalog=skills)
+    if domain == "dashboard":
+        source = source_of(con)
+        return template.format(source_label=source.label, source_description=source.description,
+                               max_tool_calls=max_tool_calls, skills_catalog=skills)
     return template.format(**data_range(con), max_tool_calls=max_tool_calls, skills_catalog=skills)
 
 

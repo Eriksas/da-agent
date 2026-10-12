@@ -16,6 +16,9 @@ import duckdb
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .abtest import proportion_test, sample_size_proportions, srm_check
+from .autodash.compile import compile_dashboard, preview_chart
+from .autodash.sources import profile_table
+from .autodash.spec import Chart, DashboardSpec, Metric
 from .calculator import MAX_LENGTH, calculate
 from .company import RATIOS, company_overview, dupont, financial_summary, peer_compare
 from .decompose import decompose_gmv
@@ -97,6 +100,24 @@ class SampleSizeArgs(_Args):
     min_detectable_effect: float = Field(description="想检测到的最小绝对提升，例如从 10% 到 12% 填 0.02")
     alpha: float = Field(0.05, gt=0, lt=0.5, description="显著性水平")
     power: float = Field(0.8, gt=0, lt=1, description="统计把握度")
+
+
+class PreviewChartArgs(_Args):
+    metrics: list[Metric] = Field(min_length=1, max_length=6, description="这张图用到的指标定义（ratio 要连同它引用的两个指标一起给）")
+    chart: Chart = Field(description="要预览的图")
+
+
+class SubmitDashboardArgs(DashboardSpec):
+    pass
+
+
+def _submit_dashboard(con: duckdb.DuckDBPyConnection, spec: SubmitDashboardArgs) -> dict[str, Any]:
+    """校验并编译整个方案。通过后返回每张图的自动提示；数据本身由程序存进看板，不再交给模型。"""
+    compiled = compile_dashboard(con, spec)
+    default = compiled["slices"][compiled["default_slice"]]
+    return {"tool": "submit_dashboard", "accepted": True, "slices": len(compiled["slices"]),
+            "charts": [{"id": c["id"], "type": c["type"], "notes": default[c["id"]]["notes"]} for c in compiled["charts"]],
+            "message": "看板方案已通过检查并生成。请用中文简短总结：给谁看、有哪些图、读者要注意的数据问题。"}
 
 
 def _quality_overview(con: duckdb.DuckDBPyConnection, _: NoArgs) -> dict[str, Any]:
@@ -207,6 +228,18 @@ TOOLS: dict[str, Tool] = {tool.name: tool for tool in (
          "杜邦分析：ROE = 归母净利率 × 总资产周转率 × 权益乘数，并把 ROE 相对上一财年的变化拆到三个因子上"
          "（连环替代法，并给出与顺序无关的 Shapley 值）。用于回答“ROE 为什么变了”。",
          CompanyArgs, lambda con, a: dupont(con, a.company, a.fiscal_year)),
+    Tool("profile_table",
+         "看板用的数据表概况：每列的类型、取值个数、缺失比例、范围、常见取值和占比，以及聚合时必须遵守的规则（rules）。"
+         "设计看板前先调用。",
+         NoArgs, lambda con, _: profile_table(con)),
+    Tool("preview_chart",
+         "预览一张图的数据（不加筛选）：每个点的数值、合计、占比、最大最小、最近一期变化，以及自动发现的数据问题（notes）。"
+         "insight 里的数字只能用这里返回的数。方案有问题时返回修改意见。",
+         PreviewChartArgs, lambda con, a: preview_chart(con, a.metrics, a.chart)),
+    Tool("submit_dashboard",
+         "提交整个看板方案：标题、读者和目标、指标、图（2–10 张，至少 1 张 kpi）、筛选器、数据说明。"
+         "程序校验后计算所有数字并生成看板；不通过时返回逐条修改意见，改完再提交。",
+         SubmitDashboardArgs, _submit_dashboard),
     Tool("peer_compare",
          "多家公司的比率对比（增速、利润率、ROE、资产负债率、现金流质量等）。只比比率，不比金额：各公司币种和财年截止日不同。",
          PeerArgs, lambda con, a: peer_compare(con, a.companies or None, a.fiscal_year, a.ratios or None)),
@@ -216,16 +249,36 @@ DOMAIN_TOOLS: dict[str, tuple[str, ...]] = {
     "ecommerce": ("metric_summary", "decompose_gmv", "drilldown", "data_quality_overview", "load_skill",
                   "ab_proportion_test", "ab_sample_size", "calculate"),
     "company": ("company_overview", "financial_summary", "dupont", "peer_compare", "load_skill", "calculate"),
+    "dashboard": ("profile_table", "preview_chart", "submit_dashboard", "load_skill", "calculate"),
 }
 
 
-def _drop_titles(schema: Any) -> Any:
-    """去掉 pydantic 自动生成的 title 字段：对模型没用，只会多占 token。"""
+def _drop_titles(schema: Any, property_names: bool = False) -> Any:
+    """去掉 pydantic 自动生成的 title 字段：对模型没用，只会多占 token。
+
+    properties 下面的键是参数名，不是 title 字段：看板方案就有一个叫 title 的参数，不能误删。
+    """
     if isinstance(schema, dict):
-        return {key: _drop_titles(value) for key, value in schema.items() if key != "title"}
+        return {key: _drop_titles(value, property_names=key == "properties" and not property_names)
+                for key, value in schema.items() if key != "title" or property_names}
     if isinstance(schema, list):
         return [_drop_titles(item) for item in schema]
     return schema
+
+
+def _inline_refs(schema: dict[str, Any]) -> dict[str, Any]:
+    """把 $defs / $ref 展开成内联的结构：嵌套的参数（看板方案）也能被只支持简单 JSON Schema 的接口读懂。"""
+    defs = schema.get("$defs", {})
+
+    def walk(node: Any) -> Any:
+        if isinstance(node, dict):
+            if "$ref" in node:
+                return walk(defs[node["$ref"].split("/")[-1]])
+            return {key: walk(value) for key, value in node.items() if key != "$defs"}
+        if isinstance(node, list):
+            return [walk(item) for item in node]
+        return node
+    return walk(schema)
 
 
 def tool_specs(domain: str = "ecommerce") -> list[dict[str, Any]]:
@@ -233,7 +286,7 @@ def tool_specs(domain: str = "ecommerce") -> list[dict[str, Any]]:
     if domain not in DOMAIN_TOOLS:
         raise ValueError(f"未知领域：{domain}；可选：{list(DOMAIN_TOOLS)}")
     return [{"type": "function", "function": {"name": tool.name, "description": tool.description,
-                                              "parameters": _drop_titles(tool.args_model.model_json_schema())}}
+                                              "parameters": _drop_titles(_inline_refs(tool.args_model.model_json_schema()))}}
             for tool in (TOOLS[name] for name in DOMAIN_TOOLS[domain])]
 
 
