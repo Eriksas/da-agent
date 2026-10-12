@@ -219,6 +219,16 @@ def test_build_dashboard_end_to_end(tmp_path: Path) -> None:
     assert "人工改过的标题" in rerender(run_dir, run_dir / "edited.json").read_text(encoding="utf-8")
 
 
+def test_final_spec_is_the_last_accepted_submission() -> None:
+    """通过之后又提交了一个没通过的方案：看板用最后一次通过的，不用最后一次提交的。"""
+    accepted = spec(title="第一版").model_dump()
+    run = {"steps": [{"tool": "submit_dashboard", "ok": True, "arguments": accepted},
+                     {"tool": "preview_chart", "ok": True, "arguments": {}},
+                     {"tool": "submit_dashboard", "ok": False, "arguments": {"title": "第二版"}}]}
+    assert final_spec(run).title == "第一版"
+    assert final_spec({"steps": run["steps"][1:]}) is None
+
+
 def test_page_treats_model_text_as_untrusted(con) -> None:
     out = compile_dashboard(con, spec(title="<script>alert(1)</script>"))
     out["charts"][3]["why"] = "</script><script>alert(2)</script>"
