@@ -56,6 +56,20 @@ def test_cohort_retention(data: dict) -> None:
     assert cohorts["2011-02"]["retention"] == []  # 范围里看不到之后的月份
 
 
+def test_cohort_members_must_start_in_the_filtered_market() -> None:
+    """c1 1 月在英国首购、2 月在法国下单：看海外时，c1 不属于海外 1 月的新客，不能算进它的留存（否则留存会超过 100%）。"""
+    rows = [
+        (S2, 2, "200001", "10001", "A", 1, "2011-01-04 10:00", 10.0, "c1", UK),
+        (S2, 3, "200002", "10001", "A", 1, "2011-02-08 10:00", 10.0, "c1", "France"),
+        (S2, 4, "200003", "10002", "B", 1, "2011-01-05 10:00", 10.0, "c2", "France"),
+        (S2, 5, "200004", "10002", "B", 1, "2011-02-09 10:00", 10.0, "c2", "France"),
+    ]
+    with connect_frame(make_frame(rows)) as con:
+        slices = build_dashboard_data(con)["slices"]
+    assert slices["all/intl"]["cohorts"][0] == {"cohort": "2011-01", "size": 1, "retention": [1.0]}  # 只有 c2
+    assert slices["all/uk"]["cohorts"][0] == {"cohort": "2011-01", "size": 1, "retention": [0.0]}  # c1 2 月没在英国买
+
+
 def test_heatmap_counts_each_order_once_at_its_first_line(data: dict) -> None:
     hours, heat = data["hours"], data["slices"]["all/all"]["heatmap"]
     assert hours == list(range(9, 16))
