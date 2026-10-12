@@ -5,7 +5,7 @@
 
 **运营周报与指标异动分析 Agent。** 给一份运营数据和一个业务问题（如“上周 GMV 为什么下降？”），模型负责选择分析工具，Python 负责计算每一个数字，最终报告里的数字都能回查到工具输出。
 
-> **项目网站**：<https://eriksas.github.io/da-agent/>（周报、评测、财报比率、运行回放，每周自动更新）
+> **项目网站**：<https://eriksas.github.io/da-agent/>（[数据看板](https://eriksas.github.io/da-agent/dashboard.html)、周报、评测、财报比率、运行回放，每周自动更新）
 >
 > 当前进度：**M7 自动周报**已上线，每周一由 GitHub Actions 生成一份，见 [reports/weekly](reports/weekly/README.md)；**M7b 准确率提升**已完成，前后对比见 [m7b-comparison.md](eval/results/m7b-comparison.md)；**M9 上市公司财报分析**已完成，同一个 Agent 换成财报领域，见[下文](#上市公司财报分析m9-产出)。**M11 本机图形界面**：`da-agent ui` 回放已保存的运行或实时提问，见[下文](#本机图形界面m11-产出)。完整规划见 [PROJECT_BRIEF.md](PROJECT_BRIEF.md)，**真实运行样例**见 [examples/real_runs](examples/real_runs/README.md)。
 
@@ -61,6 +61,7 @@ flowchart LR
 | M9 | 上市公司财报分析（SEC 年报数据、4 个财报工具、分析流程、评测） | ✅ |
 | M10 | 项目展示网站（GitHub Pages，静态网页，每周随周报更新） | ✅ |
 | M11 | 本机图形界面（回放已保存的运行、实时提问，每一步实时显示） | ✅ |
+| M12 | 电商运营数据看板（网站页面，按时间和市场筛选，8 张图 + 指标卡） | ✅ |
 
 ## 本地运行
 
@@ -83,6 +84,7 @@ uv run da-agent eval --repeats 2              # 评测：10 道题 × 3 个对�
 uv run da-agent eval --case-file eval/holdout.yaml --conditions agent,agent_skill  # 留出题（M7b）
 uv run da-agent eval-rescore eval/results/<名称>  # 评分规则修改后，离线重新打分，不调用模型
 uv run da-agent eval-compare eval/results/<改进前> eval/results/<改进后>  # 前后对比表，不调用模型
+uv run da-agent dashboard-data                # 重新生成数据看板的数字 reports/dashboard/dashboard.json（需要先 prepare-data）
 uv run da-agent build-site                    # 生成项目网站到 _site/（静态网页，不调用模型）
 uv sync --group ui && uv run --group ui da-agent ui  # 打开本机图形界面（http://localhost:8501）
 uv run da-agent weekly --llm fake --week 2010-W02 # 用假模型检查周报流程（输出在 runs/，不提交）
@@ -301,6 +303,17 @@ LangGraph 是可选依赖组（`uv sync --group langgraph`），只有 CI 的对
 - **本地预览**：`uv run da-agent build-site` 后，用 `python -m http.server --directory _site` 打开。
 
 启用（只需一次）：仓库 Settings → Pages → Build and deployment → Source 选 **GitHub Actions**。
+
+## 数据看板（M12 产出）
+
+网址：<https://eriksas.github.io/da-agent/dashboard.html>。Agent 分析的这份电商数据（UCI Online Retail II，2009-12 至 2011-12）本身长什么样。
+
+- **筛选**：时间（全部 / 2010 年 / 2011 年）× 市场（全部 / 英国 / 海外），一排放在顶部，对整页生效；2011 年显示和 2010 年同期（1 月 1 日至 12 月 9 日）的对比。筛选写在网址里，可以直接分享某个视图。
+- **内容**：指标卡（GMV、净销售额、订单数、客单价、活跃客户、复购客户占比、取消率）、每月 GMV、GMV 按新老客拆分、星期 × 小时下单热力图、海外市场、商品 Top 10、商品集中度曲线、新客留存（按首购月分组）、清洗规则命中行数。每张图上方一句结论，由数据现算。
+- **数字从哪来**：[dashboard.py](src/da_agent/dashboard.py) 用 SQL 从清洗后的数据算出 9 份切片（3 个时间 × 3 个市场），存成 [dashboard.json](reports/dashboard/dashboard.json)（约 90 KB，已提交）；网页只负责画图。口径和分析工具一致，例如 GMV 按下单口径、净销售额扣除取消。
+- **数字之间对得上**：`check_dashboard_data` 检查各月加起来等于全年、英国 + 海外等于全部、新客 + 老客 + 缺客户 ID 等于当月 GMV、热力图格子加起来等于订单数等；总数和另一条代码路径算出的[数据质量报告](reports/data_quality.md)一致。这些检查在 CI 里对已提交的 JSON 运行。
+- **做的过程中发现的数据问题**：有一张订单从 11:59 录到 12:00，按行统计会在热力图里算两次，改成按订单第一行的时间；一笔 80,995 件、12 分钟后就被取消的订单，按下单口径会让一个商品排进 Top 5，所以商品排名用净销售额，并在图下说明。
+- **图表**：不用第三方图表库，SVG 由原生 JavaScript 画出。配色按 dataviz 方法选：分类色前 3 个经校验器检查，深浅两种模式都通过；顺序色阶在深色模式下反向。每张图都有悬停提示（也能用 Tab 键聚焦）和表格视图，商品名等来自数据的文字一律按纯文本写入页面。
 
 ## 本机图形界面（M11 产出）
 

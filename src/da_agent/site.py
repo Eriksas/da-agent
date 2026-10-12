@@ -5,6 +5,7 @@ GitHub Pages 只能放静态文件：这里不运行 Agent、不调用模型、�
 
 页面：
 - index.html：项目介绍、架构图、关键结果
+- dashboard.html：电商运营数据看板（M12，数字来自 reports/dashboard/dashboard.json，见 dashboard.py）
 - weekly/：自动周报（每周一由 GitHub Actions 生成，网站随后自动更新）
 - evals.html：评测结果
 - company.html：上市公司财报比率
@@ -22,6 +23,7 @@ from typing import Any
 import markdown
 
 from .company import RATIOS, company_overview, connect_financials, financial_summary
+from .dashboard import load_dashboard_data
 from .paths import ROOT
 
 REPO_URL = "https://github.com/Eriksas/da-agent"
@@ -29,7 +31,8 @@ BLOB = f"{REPO_URL}/blob/main/"
 RESULTS = ROOT / "eval" / "results"
 WEEKLY = ROOT / "reports" / "weekly"
 REAL_RUNS = ROOT / "examples" / "real_runs"
-NAV = (("index.html", "首页"), ("weekly/index.html", "自动周报"), ("evals.html", "评测"),
+ASSETS = Path(__file__).parent / "site_assets"
+NAV = (("index.html", "首页"), ("dashboard.html", "数据看板"), ("weekly/index.html", "自动周报"), ("evals.html", "评测"),
        ("company.html", "财报分析"), ("runs/index.html", "运行回放"))
 CHART_FROM = 2020  # 财报小多图的起始财年
 COMPANY_RATIOS = ("revenue_growth", "gross_margin", "operating_margin", "net_margin", "roe", "debt_ratio",
@@ -146,8 +149,11 @@ def render_markdown(text: str, link_base: str | None = None) -> str:
     return markdown.markdown(source, extensions=["tables", "fenced_code", "sane_lists"])
 
 
-def page(title: str, body: str, depth: int, active: str, scripts: str = "") -> str:
-    """完整的 HTML 页面：统一的页头导航和页脚。depth 是页面所在的目录层数，用来拼相对链接。"""
+def page(title: str, body: str, depth: int, active: str, scripts: str = "", wide: bool = False, style: str = "") -> str:
+    """完整的 HTML 页面：统一的页头导航和页脚。depth 是页面所在的目录层数，用来拼相对链接。
+
+    wide：正文加宽（看板用）；style：这个页面额外的样式。
+    """
     up = "../" * depth
     nav = "".join(f'<a href="{up}{href}"{" aria-current=page" if href == active else ""}>{label}</a>'
                   for href, label in NAV)
@@ -157,11 +163,11 @@ def page(title: str, body: str, depth: int, active: str, scripts: str = "") -> s
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{esc(title)} · da-agent</title>
-<style>{CSS}</style>
+<style>{CSS}{style}</style>
 </head>
 <body>
 <header><div class="bar"><a class="brand" href="{up}index.html">da-agent</a><nav>{nav}</nav></div></header>
-<main>
+<main{' class="wide"' if wide else ''}>
 {body}
 </main>
 <footer><div class="bar">
@@ -368,6 +374,7 @@ def index_page() -> str:
 </ul>
 <h2>看什么</h2>
 <ul>
+<li><a href="dashboard.html">数据看板</a>：Agent 分析的这份电商数据长什么样，按时间和市场筛选。</li>
 <li><a href="weekly/index.html">自动周报</a>：用公开的历史交易数据按周回放，每周一自动生成一份。</li>
 <li><a href="evals.html">评测</a>：直接问模型和 Agent 的对比、对症改进前后的对比、留出题。</li>
 <li><a href="company.html">财报分析</a>：阿里巴巴、京东、拼多多、亚马逊的关键比率（SEC 公开年报）。</li>
@@ -534,6 +541,66 @@ def company_page() -> str:
     return page("财报分析", body, 0, "company.html")
 
 
+DASHBOARD_CARDS = (  # （编号, 标题, 是否占满一行）；结论、图、表由 dashboard.js 按筛选填进去
+    ("card-monthly", "每月 GMV", True),
+    ("card-customers", "GMV 里有多少来自老客", True),
+    ("card-hours", "什么时候下单", False),
+    ("card-countries", "海外市场", False),
+    ("card-products", "卖得最好的 10 个商品", False),
+    ("card-pareto", "销售额集中在少数商品上吗", False),
+    ("card-cohorts", "新客之后还回来买吗", True),
+    ("card-cleaning", "数据是怎么清洗的", True),
+)
+
+
+def dashboard_page() -> str:
+    """电商运营数据看板：筛选条 + 指标卡 + 8 张图。数字全部来自 dashboard.json，嵌在页面里，由 dashboard.js 画图。"""
+    data = load_dashboard_data()
+    # 嵌进 <script> 的 JSON 里不能出现 “</”：商品名来自原始数据，把 < 写成 Unicode 转义，不会提前结束脚本
+    payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
+
+    def radios(name: str, options: list[dict[str, Any]]) -> str:
+        return "".join(f'<label><input type="radio" name="{name}" value="{esc(o["id"])}"{" checked" if i == 0 else ""}>'
+                       f'<span>{esc(o["label"])}</span></label>' for i, o in enumerate(options))
+
+    def card(card_id: str, title: str) -> str:
+        return (f'<section class="card dash-card" id="{card_id}"><div class="card-head"><h2>{esc(title)}</h2>'
+                '<button type="button" class="view-toggle" aria-pressed="false">看表格</button></div>'
+                '<p class="insight"></p><div class="chart-host"></div><div class="extras"></div>'
+                '<div class="table-host table-wrap" hidden></div><p class="note"></p></section>')
+
+    sections, pair = [], []
+    for card_id, title, full in DASHBOARD_CARDS:
+        if full:
+            sections.append(card(card_id, title))
+        else:
+            pair.append(card(card_id, title))
+            if len(pair) == 2:
+                sections.append(f'<div class="dash-grid">{"".join(pair)}</div>')
+                pair = []
+    body = f"""
+<h1>电商运营数据看板</h1>
+<p class="lead">一家英国线上礼品批发零售商 {esc(data["data_start"])} 至 {esc(data["data_end"][:10])} 的全部交易
+（UCI Online Retail II，原始约 107 万行）。数字由 Python 从清洗后的数据算出，和分析 Agent 的工具口径一致；
+每个数字都在 <a href="{BLOB}reports/dashboard/dashboard.json">dashboard.json</a> 里，生成代码见
+<a href="{BLOB}src/da_agent/dashboard.py">dashboard.py</a>。</p>
+<div class="filters" role="group" aria-label="筛选（对整页生效）">
+<fieldset><legend>时间</legend><div class="seg">{radios("period", data["periods"])}</div></fieldset>
+<fieldset><legend>市场</legend><div class="seg">{radios("market", data["markets"])}</div></fieldset>
+<span class="filter-note" id="period-note"></span>
+</div>
+<noscript><p class="card">看板的图表需要 JavaScript。全部数字也可以直接看
+<a href="{BLOB}reports/dashboard/dashboard.json">dashboard.json</a>。</p></noscript>
+<div class="kpis" id="kpis"></div>
+{"".join(sections)}
+<p class="small muted">数据生成于 {esc(data["generated_at"])}。悬停或用 Tab 键聚焦可以看具体数字；每张图都能切换成表格。</p>
+<script id="dashboard-data" type="application/json">{payload}</script>
+"""
+    script = f"<script>{(ASSETS / 'dashboard.js').read_text(encoding='utf-8')}</script>"
+    return page("数据看板", body, 0, "dashboard.html", script, wide=True,
+                style=(ASSETS / "dashboard.css").read_text(encoding="utf-8"))
+
+
 def runs_index_page(runs: list[tuple[Path, dict[str, Any]]]) -> str:
     rows = []
     for folder, run in runs:
@@ -585,8 +652,8 @@ def run_page(folder: Path, run: dict[str, Any]) -> str:
 
 def build_site(out_dir: Path) -> list[Path]:
     """生成整个网站，返回写出的文件。"""
-    files: dict[str, str] = {"index.html": index_page(), "evals.html": evals_page(), "company.html": company_page(),
-                             "weekly/index.html": weekly_index_page()}
+    files: dict[str, str] = {"index.html": index_page(), "dashboard.html": dashboard_page(), "evals.html": evals_page(),
+                             "company.html": company_page(), "weekly/index.html": weekly_index_page()}
     for row in weekly_rows():
         files[f"weekly/{row['week']}.html"] = weekly_report_page(row["week"])
     runs = _real_runs()
