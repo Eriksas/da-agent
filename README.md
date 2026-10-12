@@ -308,6 +308,8 @@ LangGraph 是可选依赖组（`uv sync --group langgraph`），只有 CI 的对
 
 网址：<https://eriksas.github.io/da-agent/dashboard.html>。Agent 分析的这份电商数据（UCI Online Retail II，2009-12 至 2011-12）本身长什么样。
 
+![数据看板首屏：2011 年、全部市场](docs/dashboard.png)
+
 - **筛选**：时间（全部 / 2010 年 / 2011 年）× 市场（全部 / 英国 / 海外），一排放在顶部，对整页生效；2011 年显示和 2010 年同期（1 月 1 日至 12 月 9 日）的对比。筛选写在网址里，可以直接分享某个视图。
 - **内容**：指标卡（GMV、净销售额、订单数、客单价、活跃客户、复购客户占比、取消率）、每月 GMV、GMV 按新老客拆分、星期 × 小时下单热力图、海外市场、商品 Top 10、商品集中度曲线、新客留存（按首购月分组）、清洗规则命中行数。每张图上方一句结论，由数据现算。
 - **数字从哪来**：[dashboard.py](src/da_agent/dashboard.py) 用 SQL 从清洗后的数据算出 9 份切片（3 个时间 × 3 个市场），存成 [dashboard.json](reports/dashboard/dashboard.json)（约 90 KB，已提交）；网页只负责画图。口径和分析工具一致，例如 GMV 按下单口径、净销售额扣除取消。

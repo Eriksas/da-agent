@@ -380,7 +380,7 @@
     const quietest = byDay.indexOf(Math.min(...byDay));
     fill('card-hours', {
       insight: total ? `最忙的是${WEEKDAYS[peak[0]]} ${hours[peak[1]]}:00–${hours[peak[1]] + 1}:00（${num(counts[peak[0]][peak[1]])} 单）；` +
-        `${WEEKDAYS[quietest]}最少，全期只有 ${num(byDay[quietest])} 单。` : '',
+        `${WEEKDAYS[quietest]}最少，这段时间一共只有 ${num(byDay[quietest])} 单。` : '',
       chart: total ? host => drawHeatmap(host, {
         rowLabels: WEEKDAYS, colLabels: hours.map(String), colEvery: hours.length > 12 ? 2 : 1, values: counts, max,
         title: '星期 × 小时的订单数', cellH: 32,

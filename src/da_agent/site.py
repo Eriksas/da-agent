@@ -166,11 +166,11 @@ def page(title: str, body: str, depth: int, active: str, scripts: str = "", wide
 <style>{CSS}{style}</style>
 </head>
 <body>
-<header><div class="bar"><a class="brand" href="{up}index.html">da-agent</a><nav>{nav}</nav></div></header>
+<header><div class="bar{' wide' if wide else ''}"><a class="brand" href="{up}index.html">da-agent</a><nav>{nav}</nav></div></header>
 <main{' class="wide"' if wide else ''}>
 {body}
 </main>
-<footer><div class="bar">
+<footer><div class="bar{' wide' if wide else ''}">
 网页由 GitHub Actions 根据仓库里的数据自动生成，不运行模型、不含密钥；每个数字都可以在
 <a href="{REPO_URL}">GitHub 仓库</a>的结果文件里找到。电商数据：UCI Online Retail II（CC BY 4.0）的历史回放；
 财报数据：SEC EDGAR 公开年报。只做数据分析，不构成投资建议。
