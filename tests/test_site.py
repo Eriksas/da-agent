@@ -35,7 +35,7 @@ def test_relative_links_point_to_github() -> None:
 
 def test_all_pages_are_built(site: Path) -> None:
     names = {p.relative_to(site).as_posix() for p in site.rglob("*.html")}
-    assert {"index.html", "evals.html", "company.html", "weekly/index.html", "runs/index.html",
+    assert {"index.html", "dashboard.html", "evals.html", "company.html", "weekly/index.html", "runs/index.html",
             "weekly/2010-W02.html"} <= names
     assert len([n for n in names if n.startswith("runs/") and n != "runs/index.html"]) == 4  # 4 次真实运行
     assert (site / ".nojekyll").exists()

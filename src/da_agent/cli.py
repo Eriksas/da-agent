@@ -12,6 +12,7 @@
 - `da-agent eval`：评测，同一批题目在多个对比组各跑一遍，程序打分，结果写到 eval/results/
 - `da-agent eval-compare 改进前目录 改进后目录`：对比两次评测，不调用模型
 - `da-agent weekly --advance`：按回放游标生成下一周的周报（GitHub Actions 每周运行），写到 reports/weekly/
+- `da-agent dashboard-data`：从清洗后的数据重新生成看板数字（reports/dashboard/dashboard.json），网站的数据看板页用它
 - `da-agent ui`：打开本机图形界面（需要可选依赖：uv sync --group ui），回放已保存的运行或实时提问
 
 过程日志用 logging；命令行给用户看的结果用 print。
@@ -283,6 +284,26 @@ def weekly_report(week: str | None, llm_kind: str, advance: bool) -> int:
     return 0
 
 
+def dashboard_data() -> int:
+    """从清洗后的数据重新生成看板数字 reports/dashboard/dashboard.json，并检查数字之间是否对得上。不调用模型。"""
+    from .cleaning import connect
+    from .dashboard import build_dashboard_data, check_dashboard_data, write_dashboard_data
+    from .dataset import PARQUET_PATH
+
+    if not PARQUET_PATH.exists():
+        raise SystemExit("还没有准备数据，请先运行：da-agent prepare-data")
+    with connect(PARQUET_PATH) as con:
+        data = build_dashboard_data(con)
+    problems = check_dashboard_data(data)
+    for problem in problems:
+        print(f"对不上：{problem}")
+    if problems:
+        return 1
+    path = write_dashboard_data(data)
+    print(f"看板数字：{path}（{len(data['slices'])} 份切片，数字之间全部对得上）")
+    return 0
+
+
 def build_site(out_dir: Path) -> int:
     """生成项目展示网站（静态网页，GitHub Pages 托管）。不调用模型。"""
     from .site import build_site as build
@@ -460,6 +481,7 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("quality", help="生成数据质量报告")
     site_parser = commands.add_parser("build-site", help="生成项目展示网站（静态网页，用于 GitHub Pages）")
     site_parser.add_argument("--out", type=Path, default=Path("_site"), help="输出目录，默认 _site")
+    commands.add_parser("dashboard-data", help="重新生成数据看板的数字 reports/dashboard/dashboard.json（需要先 prepare-data）")
     ui_parser = commands.add_parser("ui", help="打开本机图形界面：回放已保存的运行，或实时提问（需要 uv sync --group ui）")
     ui_parser.add_argument("--port", type=int, default=8501, help="端口，默认 8501")
     ui_parser.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
@@ -482,6 +504,8 @@ def main(argv: list[str] | None = None) -> int:
             return fetch_financials(args.refresh)
         if args.command == "build-site":
             return build_site(args.out)
+        if args.command == "dashboard-data":
+            return dashboard_data()
         if args.command == "ui":
             return launch_ui(args.port, not args.no_browser)
         if args.command == "week":
