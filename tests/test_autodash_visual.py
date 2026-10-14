@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from da_agent.autodash.compile import DashboardProblems, bin_labels, compile_dashboard, preview_chart
+from da_agent.autodash.compile import (DashboardProblems, bin_labels, claim_problems, compile_dashboard,
+                                       preview_chart)
 from da_agent.autodash.sources import column_types, connect_source, source_of
 from da_agent.autodash.spec import Chart, DashboardSpec, Metric, check_spec
 
@@ -45,7 +46,7 @@ def csv_path(tmp_path: Path) -> Path:
 def _preview(path: Path, chart: dict, metrics: list[dict] = METRICS) -> dict:
     with connect_source(str(path)) as con:
         return preview_chart(con, [Metric.model_validate(m) for m in metrics],
-                             Chart.model_validate({"id": "c", "title": "测试图", "why": "测试", **chart}))
+                             Chart.model_validate({"id": "c", "title": "测试图", "why": "测试"} | chart))
 
 
 def _compile(path: Path, charts: list[dict], **extra: object) -> dict:
@@ -196,3 +197,59 @@ def test_each_metric_keeps_its_own_unit(csv_path: Path) -> None:
     out = _compile(csv_path, [KPI, {"id": "t", "title": "明细", "type": "table", "metrics": ["records", "rate"],
                                     "x": {"column": "segment"}, "why": "查数"}])
     assert out["charts"][1]["metric_units"] == {"records": None, "rate": None}
+
+
+# ---------- 结论里“最高、最低”的说法、标题里的“前 N”（M13f） ----------
+def _rows(pairs: list[tuple[str, float]]) -> dict:
+    return {"rows": [{"x": x, "s": None, "values": [v]} for x, v in pairs]}
+
+
+EDU = _rows([("illiterate", 0.2222), ("unknown", 0.145), ("university.degree", 0.1372), ("basic.9y", 0.0782)])
+
+
+def _claims(insight: str, data: dict, *, kind: str = "bar", additive: bool = False, fmt: str = "percent") -> list[str]:
+    chart = Chart.model_validate({"id": "c", "title": "测试图", "type": kind, "why": "测试", "insight": insight,
+                                  "metrics": ["records", "rate"] if kind == "scatter" else ["rate"],
+                                  "x": {"column": "segment"}})
+    return claim_problems(chart, data, additive, fmt)
+
+
+def test_superlatives_must_match_the_chart() -> None:
+    """M13e 的一次运行写“university.degree 13.7% 最高”，其实 illiterate 和 unknown 都更高。"""
+    wrong = _claims("university.degree 13.7%（1,670 / 12,168）最高、basic.9y 7.8%（473 / 6,045）最低", EDU)
+    assert wrong == ["图 c 的 insight 说 university.degree 最高，但图里最高的依次是 illiterate 22.2%、unknown 14.5%、"
+                     "university.degree 13.7%；改正，或者写明比较的范围（例如“样本 100 条以上的分组里”）"]
+    assert _claims("illiterate 最高 22.2%，basic.9y 最低 7.8%", EDU) == []
+    assert _claims("样本 1,000 条以上的分组里 university.degree 最高", EDU) == []  # 写明了范围
+    assert _claims("新访客最高", EDU) == []  # 认不出是哪个分组时不核对
+    assert _claims("university.degree 和 unknown 都比 basic.9y 高，最高的两个是 illiterate、unknown", EDU) == []
+
+
+def test_superlative_checks_know_months_and_what_the_metric_is() -> None:
+    months = _rows([("Feb", 0.0163), ("May", 0.1085), ("Nov", 0.2535)])
+    assert _claims("11 月最高 25.4%，2 月最低", months) == []
+    assert _claims("5 月最高", months)[0].startswith("图 c 的 insight 说 May 最高")
+    # 比率图上“量最大的 May”说的是另一个量，只核对“最高、最低”；计数图上“最多”就是这个指标
+    assert _claims("量最大的 May 转化 10.9%", months) == []
+    counts = _rows([("Feb", 184), ("May", 3364), ("Nov", 2998)])
+    assert _claims("Nov 记录最多", counts, additive=True, fmt="number") == [
+        "图 c 的 insight 说 Nov 最多，但图里最多的依次是 May 3,364、Nov 2,998、Feb 184；改正，或者写明比较的范围（例如“样本 100 条以上的分组里”）"]
+    ties = _rows([("a", 0.5), ("b", 0.5), ("c", 0.1)])
+    assert _claims("b 最高", ties) == []  # 并列最高也算对
+    scatter = {"rows": [{"x": "2", "s": None, "values": [3913, 0.2165]}, {"x": "8", "s": None, "values": [343, 0.277]},
+                        {"x": "13", "s": None, "values": [738, 0.0583]}]}
+    assert _claims("来源 2 规模最大，来源 8 转化最高 27.7%，来源 13 最低", scatter, kind="scatter") == []
+    assert len(_claims("来源 2 转化最高", scatter, kind="scatter")) == 1  # 散点图核对纵轴
+
+
+def test_wrong_superlatives_are_sent_back_on_submit(csv_path: Path) -> None:
+    with pytest.raises(DashboardProblems, match="说 a 最高，但图里最高的依次是 b 66.7%"):
+        _compile(csv_path, [KPI, {"id": "s", "title": "各分组购买率", "type": "bar", "metrics": ["rate"],
+                                  "x": {"column": "segment"}, "why": "对比", "insight": "a 最高"}])
+
+
+def test_titles_promising_a_top_n_must_show_that_many(csv_path: Path) -> None:
+    chart = {"type": "scatter", "metrics": ["records", "rate"], "x": {"column": "segment"}, "title": "规模和购买率（前 3）"}
+    with pytest.raises(DashboardProblems, match="标题写“前 3”，但图里有 4 个分组；设 top_n: 3"):
+        _preview(csv_path, chart)
+    assert len(_preview(csv_path, {**chart, "top_n": 3})["rows"]) == 3

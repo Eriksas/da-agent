@@ -19,6 +19,7 @@ ADDITIVE = ("sum", "count")  # 可以按分组相加的聚合：只有它们能�
 MAX_SERIES = {"line": 5, "stacked_column": 4}  # 分类色的上限：堆叠超过 4 段、线超过 5 条就读不清
 MAX_X = {"column": 36, "heatmap": 31, "table": 60, "scatter": 40}
 MAX_SECTIONS = 5
+MAX_SUBMIT_CHARTS = 9  # 新提交的方案最多几张图（含 kpi）；DashboardSpec 本身允许 10 张，旧方案能照常重新生成
 REFERENCE_TYPES = ("bar", "column", "line", "scatter")  # 能画整体参考线的图
 HIGHLIGHT_TYPES = ("bar", "column", "scatter")  # 能突出几个分组的图
 

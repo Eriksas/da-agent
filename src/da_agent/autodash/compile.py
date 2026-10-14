@@ -579,6 +579,73 @@ def highlight_problems(c: Chart, data: dict[str, Any]) -> list[str]:
     return [f"图 {c.id}：highlight 里这些取值在图里没有 {missing}；图里的取值：{labels[:15]}{hint}"]
 
 
+SUPERLATIVES = {"最高": "max", "最低": "min", "最多": "max", "最少": "min", "最大": "max", "最小": "min"}
+# 句子里有这些词，说明“最高”是在一部分分组里比（“样本 100 条以上的分组里最高”“前 10 个来源中最低”），不核对
+QUALIFIERS = ("除", "以外", "之外", "其中", "当中", "中最", "里最", "以上", "以下", "以内", "之一", "次高", "次低",
+              "第二", "前", "样本", "合并", "排除", "剔除")
+
+
+def _mentions(text: str, alias: str) -> bool:
+    """text 里是否单独提到了这个取值（不算数字或单词的一部分：标签 8 不匹配 8.8% 或 ≥81）。"""
+    return re.search(rf"(?<![0-9A-Za-z_.\-–]){re.escape(alias)}(?![0-9A-Za-z_.%–])", text) is not None
+
+
+def claim_problems(c: Chart, data: dict[str, Any], additive: bool, fmt: str) -> list[str]:
+    """insight 里“X 最高 / 最低”的说法要和这张图的数据一致（M13e 复核：“university.degree 13.7% 最高”，
+    其实 unknown 14.5%、illiterate 22.2% 都更高）。只核对能确定的：一句里只提到一个分组、只有一种说法、没有限定范围。
+    比率图只核对“最高、最低”（“量最大的 may”说的是另一个量）；散点图核对纵轴。"""
+    if not c.insight or c.series is not None or c.type not in ("bar", "column", "scatter"):
+        return []
+    vi = 1 if c.type == "scatter" else 0
+    rows = [r for r in data["rows"] if not r.get("other") and r["values"][vi] is not None]
+    if len(rows) < 2:
+        return []
+    words = ("最高", "最低") if c.type == "scatter" or not additive else tuple(SUPERLATIVES)
+    aliases: dict[str, str] = {}
+    for r in rows:
+        label = str(r["x"])
+        aliases[label] = label
+        month = MONTH_NUMBER.get(label.strip().lower())
+        if month:  # 标签是 Nov，结论写“11 月”
+            aliases[f"{month}月"] = aliases[f"{month} 月"] = label
+    show = (lambda v: f"{v * 100:.1f}%") if fmt == "percent" else (lambda v: f"{v:,}")
+    ranked = sorted(rows, key=lambda r: -r["values"][vi])
+    best = {"max": ranked[0]["values"][vi], "min": ranked[-1]["values"][vi]}
+    problems = []
+    text = re.sub(r"[（(][^）)]*[）)]", "", c.insight)  # 括号里一般是分子分母、样本量
+    for sentence in re.split(r"[。；;]", text):
+        if any(q in sentence for q in QUALIFIERS):
+            continue
+        for clause in re.split(r"[，,、]", sentence):
+            found = [w for w in words if w in clause]
+            kinds = {SUPERLATIVES[w] for w in found}
+            if len(kinds) != 1 or re.search(r"(?:最高|最低|最多|最少|最大|最小)的?\s*(?:两|二|三|几|\d)", clause):
+                continue
+            labels = {label for alias, label in aliases.items() if _mentions(clause, alias)}
+            if len(labels) != 1:
+                continue
+            label, kind = labels.pop(), kinds.pop()
+            value = next(r["values"][vi] for r in rows if str(r["x"]) == label)
+            if value != best[kind]:
+                order = ranked if kind == "max" else ranked[::-1]
+                actual = "、".join(f"{r['x']} {show(r['values'][vi])}" for r in order[:3])
+                word = found[0]  # 照用结论里的说法：“最多”“最高”
+                problems.append(f"图 {c.id} 的 insight 说 {label} {word}，但图里{word}的依次是 {actual}；"
+                                f"改正，或者写明比较的范围（例如“样本 100 条以上的分组里”）")
+    return problems
+
+
+def title_problems(c: Chart, data: dict[str, Any]) -> list[str]:
+    """标题写“前 10”，图里就该正好有 10 个分组（M13e 复核：标题写前 10，没设 top_n，画了 20 个点）。"""
+    m = re.search(r"(?:前|[Tt]op)\s*(\d+)", c.title)
+    if not m or c.type not in ("bar", "scatter"):
+        return []
+    shown = [r for r in data["rows"] if not r.get("other")]
+    if len(shown) == int(m.group(1)):
+        return []
+    return [f"图 {c.id} 的标题写“{m.group(0)}”，但图里有 {len(shown)} 个分组；设 top_n: {m.group(1)}，或者改标题"]
+
+
 def ungrounded_numbers(text: str, data: dict[str, Any]) -> list[str]:
     """结论句里在这张图的数据中找不到出处的数字（和报告核查用同一个数字提取规则）。"""
     pool = _pool(data)
@@ -630,6 +697,9 @@ def compile_dashboard(con: duckdb.DuckDBPyConnection, spec: DashboardSpec) -> di
             insight_problems.append(f"图 {c.id} 的 insight 里这些数字在这张图的数据中找不到出处：{bad}；"
                                     "改成 preview_chart 返回的原数，或删掉")
         insight_problems += highlight_problems(c, slices[default][c.id])
+        insight_problems += title_problems(c, slices[default][c.id])
+        first = metrics[c.metrics[1 if c.type == "scatter" else 0]]
+        insight_problems += claim_problems(c, slices[default][c.id], is_additive(first, metrics), first.format)
     if insight_problems:
         raise DashboardProblems(insight_problems)
     return {
@@ -663,7 +733,7 @@ def preview_chart(con: duckdb.DuckDBPyConnection, metrics: list[Metric], chart: 
     if problems:
         raise DashboardProblems(problems)
     data = compiler.chart_data(chart, by_id)
-    problems = highlight_problems(chart, data)
+    problems = highlight_problems(chart, data) + title_problems(chart, data)
     if problems:
         raise DashboardProblems(problems)
     rows = data["rows"]
