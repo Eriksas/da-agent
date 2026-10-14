@@ -62,7 +62,7 @@ flowchart LR
 | M10 | 项目展示网站（GitHub Pages，静态网页，每周随周报更新） | ✅ |
 | M11 | 本机图形界面（回放已保存的运行、实时提问，每一步实时显示） | ✅ |
 | M12 | 电商运营数据看板（网站页面，按时间和市场筛选，8 张图 + 指标卡） | ✅ |
-| M13 | Agent 根据数据自主搭看板（模型写方案，程序校验、算数、画图）；真实模型评测、Tableau 导出待做 | 进行中 |
+| M13 | Agent 根据数据自主搭看板（模型写方案，程序校验、算数、画图）；3 份数据上的真实模型评测（含 2 份盲测）已完成，Tableau 导出待做 | 进行中 |
 
 ## 本地运行
 
@@ -353,7 +353,13 @@ uv run da-agent build-dashboard data/raw/bank-marketing/bank-additional-full.csv
 - **比率带分子和分母**：比率图的每个点和比率指标卡都带上分子、分母，结论可以写“11.3%（4,640 / 41,188）”，小样本的分组一眼能看出；页面的提示框、表格和指标卡也显示它们。
 - **一行代表什么**：`profile_table` 算出哪些列能唯一标识一行、有多少完全重复的行。没有数据说明也没有唯一列时，直接告诉模型无法判断，按“记录数”说，不要断言。
 
-还没做：Online Shoppers 等更多数据集、导出成 Tableau 工作簿（可行性已经在本机 Tableau Public 2026.1 上验证过）。方案的表达能力有意做得有限：新客留存这类需要按客户先算首购时间的分析，现在的方案写不出来。
+**第二份盲测：Online Shoppers（M13d）**：UCI Online Shoppers Purchasing Intention（12,330 行网站访问记录，CC BY 4.0），设置和 Bank Marketing 相同，评分表同样在第一次运行前冻结。真实模型跑 3 次，3 次都独立完成，评分表各项都满足（PageValues、SpecialDay 两个陷阱 Agent 没碰，没有检验到）。M13c 的改进：月份 3 次都按日历排，比率结论 3 次都写了分子分母且没有因此被退回，3 次的说明都写“按记录数计算、无法确认同一访客是否重复出现”（但有一次把每条记录的平均值叫成了“人均”）。复核还发现两个对任何数据都有效的程序问题：结论写“11 月”而数据是 Nov 会被当成没有出处（3 次都遇到），整数编码列的 keep 写成数字会被退回。见[复核记录](examples/dashboard_runs/online-shoppers-review.md)。
+
+```bash
+uv run da-agent fetch-dataset online-shoppers
+```
+
+还没做：导出成 Tableau 工作簿（可行性已经在本机 Tableau Public 2026.1 上验证过）。方案的表达能力有意做得有限：新客留存这类需要按客户先算首购时间的分析，现在的方案写不出来。
 
 ## 本机图形界面（M11 产出）
 
@@ -398,6 +404,7 @@ uv run --group ui da-agent ui    # 打开 http://localhost:8501；--no-browser �
 ## 数据与致谢
 
 - 数据：[UCI Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii)，许可证 CC BY 4.0。原始文件不提交到本仓库。
+- 看板盲测数据（只在本机下载，不提交）：[UCI Bank Marketing](https://archive.ics.uci.edu/dataset/222/bank+marketing)（Moro, Rita & Cortez, 2014）、[UCI Online Shoppers Purchasing Intention](https://archive.ics.uci.edu/dataset/468/online+shoppers+purchasing+intention+dataset)（Sakar & Kastro, 2018, https://doi.org/10.24432/C5F88Q），许可证都是 CC BY 4.0。
 - 灵感来源：[li-xiu-qi/data_analysis_agent](https://github.com/li-xiu-qi/data_analysis_agent)（MIT）的“自然语言需求 → 分析 → 报告”工作流。本项目从零实现，架构不同：模型只能调用预先写好并经过测试的分析工具，不执行模型生成的代码。
 
 ## 许可证
