@@ -18,6 +18,12 @@ def test_extracts_common_formats() -> None:
     assert texts(answer) == ["309,381.73", "+6,989.51", "+2.31%", "-1.31 个百分点", "30.9 万", "13.11%", "−13,088.20"]
 
 
+def test_year_months_are_labels_not_numbers() -> None:
+    """“2009-12 至 2011-12”“2011 年 11 月”是时间，不是要核查的数字（M13 第一次真实运行里误判过）。"""
+    assert texts("2009-12 至 2011-12 累计 GMV 1,452,116，2011 年 11 月最高，2011 年全年") == ["1,452,116"]
+    assert texts("2010-2011 两年、编号 2011-123") == ["2010", "2011", "2011", "123"]  # 不是年月的写法照常核查
+
+
 def test_mentions_record_their_position_in_the_answer() -> None:
     """界面按位置标红：每个数字的 start/end 必须正好框住原文里的它（含单位，不含后面的空格）。"""
     answer = "1. GMV 309,381.73 元，环比 +2.31%，取消率 -1.31 个百分点；2011-W48 约 30.9 万"

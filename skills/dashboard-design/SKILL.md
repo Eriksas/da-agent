@@ -46,6 +46,7 @@ metadata:
 | 不同单位放在一起 | profile 的 rules（currency）；提交时被退回 | 比率（ratio）可以跨公司比；金额按公司分开看或用筛选器 |
 | 去重计数不能相加 | 指标是 count_distinct | 热力图、分组的格子加起来会比总数多（一张订单可能跨两个小时），insight 不写格子之和 |
 | 下单口径含取消 | 电商的销售行包含之后被取消的订单 | 同时放取消金额或取消率，或在 notes 里说明 |
+| 排名被取消的大单撑高 | notes 里写某个分组的销售“后来被取消”了一大半 | 类别排名改用净销售额（difference：销售 − 取消），或在 insight 里写明 |
 | 缺失值 | profile 的 null_share（例如 customer_id） | 按客户统计的指标会偏少，在 notes 里写明 |
 
 ## 4. insight 写法

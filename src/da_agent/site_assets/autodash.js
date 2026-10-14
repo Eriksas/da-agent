@@ -11,16 +11,17 @@
   const sliceKey = () => DATA.filters.map(f => state[f.id]).join('|') || 'all';
   const isDefault = () => sliceKey() === DATA.default_slice;
 
-  // 数字格式：金额带单位并按万、亿缩写；比率按百分比；其他按千分位
+  // 数字格式：金额带单位，1 万以上按万、亿缩写；计数等其他数字 100 万以内写全（39,516 而不是“4万”）；比率按百分比
   function formatter(chart, full = false) {
     const metric = DATA.metrics[chart.metrics[0]];
     const unit = chart.unit || '';
     if (metric.format === 'percent') return v => (v == null ? '—' : pct(v, full ? 2 : 1));
+    const shortFrom = metric.format === 'money' ? 1e4 : 1e6;
     return v => {
       if (v == null) return '—';
       const a = Math.abs(v);
       if (!full && a >= 1e8) return unit + (v / 1e8).toLocaleString('en-US', {maximumFractionDigits: 2}) + '亿';
-      if (!full && a >= 1e4) return unit + (v / 1e4).toLocaleString('en-US', {maximumFractionDigits: 1}) + '万';
+      if (!full && a >= shortFrom) return unit + (v / 1e4).toLocaleString('en-US', {maximumFractionDigits: 1}) + '万';
       return unit + Number(v).toLocaleString('en-US', {maximumFractionDigits: 2});
     };
   }

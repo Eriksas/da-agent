@@ -33,6 +33,8 @@ class Source:
     pin_by: dict[str, tuple[str, ...]] = field(default_factory=dict)
     unit_column: dict[str, str] = field(default_factory=dict)
     units: dict[str, str] = field(default_factory=dict)
+    # 会被之后的记录抵消的数值：列 → (分类列, 原记录的取值, 抵消记录的取值)。电商的销售会被之后的取消抵消
+    offsets: dict[str, tuple[str, str, str]] = field(default_factory=dict)
 
 
 def _connect_retail() -> duckdb.DuckDBPyConnection:
@@ -85,7 +87,8 @@ SOURCES: dict[str, Source] = {
          "quantity": "数量（取正数）", "price": "单价（英镑）", "amount": "金额 = 数量 × 单价（英镑，取正数）",
          "customer_id": "客户 ID，缺失表示游客或未登记客户", "country": "客户所在国家"},
         _connect_retail, time_column="invoice_time",
-        pin_by={"amount": ("line_type",), "quantity": ("line_type",)}, units={"amount": "£", "price": "£"}),
+        pin_by={"amount": ("line_type",), "quantity": ("line_type",)}, units={"amount": "£", "price": "£"},
+        offsets={"amount": ("line_type", "销售", "取消")}),
     "financials": Source(
         "financials", "上市公司年报关键科目（SEC）", "financial_facts",
         "阿里巴巴、京东、拼多多、亚马逊 FY2017 起的年报关键科目，长表：每行是一家公司一个财年的一个科目。"
@@ -162,6 +165,9 @@ def profile_table(con: duckdb.DuckDBPyConnection) -> dict[str, Any]:
     rules += [f"{value} 的单位在 {unit} 列：同一张图里只能出现一种单位；比较不同单位的分组时只比比率"
               for value, unit in source.unit_column.items()]
     rules += [f"{column} 的单位是 {unit}" for column, unit in source.units.items()]
+    rules += [f"{value}（{by} = {orig}）可能被之后 {by} = {offset} 的记录抵消：按下单口径给类别排名时，"
+              f"大部分被抵消的分组会被高估，preview 的 notes 会提示；看真实成交用 difference（{orig} − {offset}）"
+              for value, (by, orig, offset) in source.offsets.items()]
     return {"tool": "profile_table", "source": source.name, "label": source.label, "table": source.table,
             "description": source.description, "rows": rows, "time_column": source.time_column,
             "columns": columns, "rules": rules}

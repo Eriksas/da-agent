@@ -20,11 +20,12 @@ import duckdb
 from ..checks import extract_numbers
 from ..cleaning import fetch_one, fetch_rows
 from .sources import Source, column_types, source_of
-from .spec import (ADDITIVE, MAX_SERIES, MAX_X, Chart, DashboardSpec, Dimension, Metric, chart_problems,
-                   check_spec, metric_problems)
+from .spec import (MAX_SERIES, MAX_X, Chart, DashboardSpec, Dimension, Metric, base_metrics, chart_problems,
+                   check_spec, is_additive, metric_problems)
 
 WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 DOMINANT_SHARE = 0.6
+OFFSET_ALERT = 0.5  # 一个分组的销售额有一半以上被之后的取消抵消时，提醒按下单口径会高估它
 MAX_FILTER_OPTIONS = 6
 MAX_SLICES = 60
 PREVIEW_ROWS = 40
@@ -71,17 +72,24 @@ def _metric_sql(m: Metric, metrics: dict[str, Metric], params: list[Any]) -> str
     if m.agg in ("ratio", "difference"):
         left = _metric_sql(metrics[m.left], metrics, params)
         right = _metric_sql(metrics[m.right], metrics, params)
-        return f"(({left}) / nullif(({right}), 0))" if m.agg == "ratio" else f"(({left}) - ({right}))"
+        if m.agg == "ratio":
+            return f"(({left}) / nullif(({right}), 0))"
+        # 差值的一边没有记录时按 0 算：没有取消的商品，净销售额就是销售额，不能变成空值从排名里消失
+        return f"(coalesce(({left}), 0) - coalesce(({right}), 0))"
     col = _q(m.column) if m.column else ""
     base = {"sum": f"sum({col})", "count": "count(*)", "count_distinct": f"count(DISTINCT {col})",
             "avg": f"avg({col})", "min": f"min({col})", "max": f"max({col})"}[m.agg]
     if not m.where:
         return base
-    conditions = []
-    for column, values in m.where.items():
+    return f"{base} FILTER (WHERE {_conditions(m.where, params)})"
+
+
+def _conditions(where: dict[str, list[str]], params: list[Any]) -> str:
+    parts = []
+    for column, values in where.items():
         params += values
-        conditions.append(f"CAST({_q(column)} AS VARCHAR) IN ({', '.join('?' * len(values))})")
-    return f"{base} FILTER (WHERE {' AND '.join(conditions)})"
+        parts.append(f"CAST({_q(column)} AS VARCHAR) IN ({', '.join('?' * len(values))})")
+    return " AND ".join(parts)
 
 
 def _label(dim: Dimension | None, value: Any) -> str | None:
@@ -133,6 +141,11 @@ class Compiler:
         for i, metric_id in enumerate(chart.metrics):
             select.append(f"{_metric_sql(metrics[metric_id], metrics, params)} AS m{i}")
         where = self._where(list(slice_filters), params)
+        # 只用指标真正统计的那些行来分组：否则只有取消、没有销售的时段也会变成一个值为 0 的格子
+        # （M13 第一次真实运行里出现过“周四 21 时 0 笔”）。各指标的条件取并集，不影响每个指标自己的 FILTER
+        bases = base_metrics(chart.metrics, metrics)
+        if bases and all(m.where for m in bases):
+            where += " AND (" + " OR ".join(f"({_conditions(m.where, params)})" for m in bases) + ")"
         sql = f"SELECT {', '.join(select)} FROM {self.table} WHERE {where}"
         if group:
             sql += f" GROUP BY {', '.join(group)}"
@@ -229,9 +242,9 @@ class Compiler:
     def unit_of(self, c: Chart, metrics: dict[str, Metric]) -> str | None:
         """图上数字的单位：比率没有单位；金额用固定单位或单位列里唯一的那个。"""
         m = metrics[c.metrics[0]]
-        if m.format == "percent" or m.agg == "ratio":
+        if m.format == "percent" or (m.agg == "ratio" and m.format != "money"):
             return None
-        base = metrics[m.left] if m.agg == "difference" else m
+        base = metrics[m.left] if m.agg in ("ratio", "difference") else m  # 金额 ÷ 单数（客单价）用分子的单位
         if base.column in self.source.units:
             return self.source.units[base.column]
         unit_col = self.source.unit_column.get(base.column or "")
@@ -256,7 +269,7 @@ class Compiler:
         if c.type in ("bar", "table"):  # 指标用 where 限定后，其余分组的值全是空的：类别图里不显示这些分组
             out = [r for r in out if any(v is not None for v in r["values"])]
         metric = metrics[c.metrics[0]]
-        additive = metric.agg in ADDITIVE
+        additive = is_additive(metric, metrics)
         if c.type == "bar":
             out.sort(key=lambda r: (-(r["values"][0] or 0), str(r["x"])))
             total = sum(r["values"][0] or 0 for r in out)
@@ -296,6 +309,7 @@ class Compiler:
             lo = min((r for r in out if r["values"][0] is not None and not r.get("other")), key=lambda r: r["values"][0])
             facts["max"] = {"x": hi["x"], "s": hi["s"], "value": hi["values"][0]}
             facts["min"] = {"x": lo["x"], "s": lo["s"], "value": lo["values"][0]}
+        notes += self._offset_notes(c, metrics, out, slice_filters)
         partial = self._mark_partial(c, out)
         if partial:
             notes.append(f"{'、'.join(partial)} 只覆盖了部分时间（数据范围 {self._range_text()}），不能和完整的周期直接比")
@@ -316,6 +330,32 @@ class Compiler:
             r.pop("_x", None)
             r.pop("_s", None)
         return result
+
+    def _offset_notes(self, c: Chart, metrics: dict[str, Metric], rows: list[dict[str, Any]],
+                      slice_filters: list[tuple[Dimension, str]]) -> list[str]:
+        """类别图里，某个分组的销售额大部分被之后的取消抵消了：按下单口径排名会高估它（M13 第一次真实运行里，
+        商品 Top 10 的第 3 名全部被取消、第 8 名 94.8% 被取消）。在这些分组的行上记下被抵消的金额和占比。"""
+        m = metrics[c.metrics[0]]
+        offset = self.source.offsets.get(m.column or "")
+        if c.type not in ("bar", "column", "table") or c.x is None or c.x.grain is not None or offset is None:
+            return []
+        by, orig, against = offset
+        if m.agg != "sum" or m.where.get(by) != [orig]:
+            return []
+        probe = Metric(id="zz_offset", label="抵消", agg="sum", column=m.column, where={**m.where, by: [against]})
+        offsets = {_label(c.x, r["x"]): r["m0"] or 0 for r in self.query(
+            c.model_copy(update={"metrics": ["zz_offset"], "series": None}), {"zz_offset": probe}, slice_filters)}
+        notes = []
+        for r in rows:
+            value, off = r["values"][0], offsets.get(r["x"], 0)
+            if r.get("other") or not value or not off:
+                continue
+            r["offset"], r["offset_share"] = _num(off), round(off / value, 4)
+            if r["offset_share"] >= OFFSET_ALERT:
+                unit = self.source.units.get(m.column or "", "")
+                notes.append(f"{r['x']} 的{m.label}有 {r['offset_share']:.1%} 后来被{against}（{unit}{off:,.2f}），"
+                             f"按下单口径排名会高估它；看真实成交改用 difference（{orig} − {against}）")
+        return notes[:3]
 
     @staticmethod
     def _fill_months(c: Chart, rows: list[dict[str, Any]], additive: bool) -> list[dict[str, Any]]:

@@ -11,7 +11,7 @@ from da_agent.autodash.build import build_dashboard, final_spec, rerender
 from da_agent.autodash.compile import DashboardProblems, compile_dashboard, preview_chart, ungrounded_numbers
 from da_agent.autodash.render import render_dashboard
 from da_agent.autodash.sources import column_types, connect_source, profile_table
-from da_agent.autodash.spec import Chart, DashboardSpec, Metric, check_spec
+from da_agent.autodash.spec import Chart, DashboardSpec, Dimension, Metric, check_spec
 from da_agent.cleaning import connect_frame
 from da_agent.dataset import PARQUET_PATH
 from da_agent.llm import FakeLLM
@@ -145,6 +145,45 @@ def test_heatmap_orders_weekdays_naturally(con) -> None:
     data = out["slices"]["all"]["when"]
     assert data["series_order"] == ["周一", "周二", "周三", "周四"]
     assert sum(r["values"][0] for r in data["rows"]) == 6
+
+
+def _small(rows: list[tuple]):  # noqa: ANN202
+    connection = connect_frame(make_frame(rows))
+    sources._retail_view(connection)
+    return connection
+
+
+def test_groups_come_only_from_rows_the_metric_counts() -> None:
+    """只有取消、没有销售的时段不能变成值为 0 的格子（M13 第一次真实运行里出现过“周四 21 时 0 笔”）。"""
+    with _small([(S2, 2, "300001", "10001", "A", 1, "2011-01-03 10:00", 10.0, "c1", UK),
+                 (S2, 3, "C300002", "10001", "A", -1, "2011-01-03 21:00", 10.0, "c1", UK)]) as small:
+        chart = Chart(id="h", title="按小时", type="column", metrics=["orders"],
+                      x=Dimension(column="invoice_time", grain="hour"), why="测试")
+        assert [r["x"] for r in preview_chart(small, [Metric.model_validate(ORDERS)], chart)["rows"]] == ["10 时"]
+
+
+def test_rankings_flag_groups_whose_sales_were_mostly_cancelled() -> None:
+    """商品排名里，一个商品的销售额大部分被取消了：按下单口径会高估它（第一次真实运行里，Top 10 有两件是这样）。"""
+    rows = [(S2, 2, "400001", "20001", "大单", 100, "2011-01-03 10:00", 1.0, "c1", UK),
+            (S2, 3, "C400002", "20001", "大单", -90, "2011-01-03 10:12", 1.0, "c1", UK),
+            (S2, 4, "400003", "20002", "正常", 60, "2011-01-04 10:00", 1.0, "c2", UK)]
+    bar = Chart(id="p", title="商品排名", type="bar", metrics=["gmv"], x=Dimension(column="description"), why="测试")
+    with _small(rows) as small:
+        result = preview_chart(small, [Metric.model_validate(GMV)], bar)
+        flagged = {r["x"]: r.get("offset_share") for r in result["rows"]}
+        assert flagged == {"大单": 0.9, "正常": None}
+        assert any("大单 的GMV有 90.0% 后来被取消" in n for n in result["notes"])
+        net = Metric(id="net", label="净销售额", agg="difference", left="gmv", right="cancelled", format="money")
+        result = preview_chart(small, [Metric.model_validate(GMV), Metric.model_validate(CANCELLED), net],
+                               bar.model_copy(update={"metrics": ["net"]}))
+        assert [(r["x"], r["values"][0]) for r in result["rows"]] == [("正常", 60), ("大单", 10)]  # 净额排名
+        assert result["facts"]["total"] == 70  # 销售 − 取消可以相加，有合计和占比
+
+
+def test_money_ratios_take_the_numerator_unit(con) -> None:
+    aov = Metric(id="aov", label="客单价", agg="ratio", left="gmv", right="orders", format="money")
+    kpi = Chart(id="a", title="客单价", type="kpi", metrics=["aov"], why="测试")
+    assert preview_chart(con, [Metric.model_validate(GMV), Metric.model_validate(ORDERS), aov], kpi)["unit"] == "£"
 
 
 def test_missing_values_are_sent_back(con) -> None:

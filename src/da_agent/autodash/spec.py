@@ -75,7 +75,7 @@ class DashboardSpec(_Model):
     notes: list[str] = Field(default_factory=list, max_length=6, description="给读者的数据说明，例如口径和局限")
 
 
-def _base_metrics(ids: list[str], metrics: dict[str, Metric]) -> list[Metric]:
+def base_metrics(ids: list[str], metrics: dict[str, Metric]) -> list[Metric]:
     """图里用到的基础指标：ratio / difference 展开成它引用的两个。"""
     out = []
     for i in ids:
@@ -87,6 +87,13 @@ def _base_metrics(ids: list[str], metrics: dict[str, Metric]) -> list[Metric]:
         else:
             out.append(m)
     return out
+
+
+def is_additive(m: Metric, metrics: dict[str, Metric]) -> bool:
+    """能不能按分组相加：sum、count，以及两个可加指标的差（净销售额 = 销售 − 取消）。"""
+    if m.agg == "difference":
+        return all(side in metrics and metrics[side].agg in ADDITIVE for side in (m.left, m.right))
+    return m.agg in ADDITIVE
 
 
 def _dimension_problems(dim: Dimension, where: str, types: dict[str, str], source: Source) -> list[str]:
@@ -165,7 +172,7 @@ def chart_problems(c: Chart, metrics: dict[str, Metric], types: dict[str, str], 
         problems.append(f"{where}：{c.type} 要给 series")
     if c.type in ("kpi", "column", "bar", "table") and c.series is not None:
         problems.append(f"{where}：{c.type} 不用 series；要按组拆开请用 line、stacked_column 或 heatmap")
-    if c.type == "stacked_column" and metric.agg not in ADDITIVE:
+    if c.type == "stacked_column" and not is_additive(metric, metrics):
         problems.append(f"{where}：堆叠柱的各段要能相加，{metric.id} 是 {metric.agg}，不能堆叠；"
                         "改用 line 分组，或换成 sum / count 指标")
     if c.type == "bar":
@@ -178,7 +185,7 @@ def chart_problems(c: Chart, metrics: dict[str, Metric], types: dict[str, str], 
     if c.type == "line" and c.x is not None and c.x.grain is None and types.get(c.x.column) != "integer":
         problems.append(f"{where}：折线的横轴要是时间；类别比较用 bar")
     grouped = {d.column for d in (c.x, c.series) if d is not None}
-    for m in _base_metrics(c.metrics, metrics):
+    for m in base_metrics(c.metrics, metrics):
         pins = source.pin_by.get(m.column or "")
         if pins and not grouped & set(pins) and not any(len(m.where.get(p, [])) == 1 for p in pins):
             problems.append(f"{where}：指标 {m.id} 聚合的 {m.column} 含义取决于 {pins[0]}，"
