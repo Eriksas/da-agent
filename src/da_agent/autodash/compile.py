@@ -447,6 +447,9 @@ def _num(value: Any) -> float | int | None:
     return round(float(value), 4)
 
 
+MONTH_NUMBER = {alias.lower(): i for i, aliases in enumerate(MONTH_NAMES, 1) for alias in aliases}
+
+
 def _calendar(values: list[Any]) -> dict[Any, int] | None:
     """取值全部能认出是月份（或全部是星期）时，返回 取值 → 日历位置；否则 None。"""
     for names in (MONTH_NAMES, WEEKDAY_NAMES):
@@ -485,6 +488,8 @@ def _pool(data: dict[str, Any]) -> list[float]:
         elif isinstance(value, str):
             pool.extend(m.value for m in extract_numbers(value)[0])
             pool.extend(float(x) for x in re.findall(r"\d+", value))
+            if value.strip().lower() in MONTH_NUMBER:  # 标签是 Nov 时，结论写“11 月”也有出处（盲测里 3 次都因此被退回）
+                pool.append(float(MONTH_NUMBER[value.strip().lower()]))
         elif isinstance(value, dict):
             for v in value.values():
                 walk(v)

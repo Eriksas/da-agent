@@ -1,4 +1,4 @@
-"""对任何数据都起作用的改进（M13c）：分类的先后、比率带分子分母、一行代表什么。
+"""对任何数据都起作用的改进（M13c、M13d）：分类的先后、比率带分子分母、一行代表什么、整数取值、月份名称的出处。
 
 用一份没有任何说明的小 CSV：程序只能看取值本身。
 """
@@ -7,21 +7,22 @@ from pathlib import Path
 
 import pytest
 
-from da_agent.autodash.compile import DashboardProblems, _calendar, compile_dashboard, preview_chart
+from da_agent.autodash.compile import (DashboardProblems, _calendar, compile_dashboard, preview_chart,
+                                       ungrounded_numbers)
 from da_agent.autodash.sources import connect_source, profile_table
 from da_agent.autodash.spec import Chart, DashboardSpec, Metric
 
-CSV = """month;day_of_week;education;y;duration
-mar;mon;illiterate;yes;100
-mar;tue;basic.4y;no;200
-may;mon;basic.4y;no;300
-may;wed;high.school;yes;400
-may;wed;high.school;no;150
-jun;tue;university.degree;yes;250
-jun;fri;university.degree;no;120
-dec;fri;high.school;yes;330
-dec;mon;basic.4y;no;90
-jun;tue;university.degree;yes;250
+CSV = """month;day_of_week;education;y;duration;traffic
+mar;mon;illiterate;yes;100;2
+mar;tue;basic.4y;no;200;1
+may;mon;basic.4y;no;300;2
+may;wed;high.school;yes;400;3
+may;wed;high.school;no;150;2
+jun;tue;university.degree;yes;250;13
+jun;fri;university.degree;no;120;1
+dec;fri;high.school;yes;330;2
+dec;mon;basic.4y;no;90;3
+jun;tue;university.degree;yes;250;13
 """
 
 METRICS = [
@@ -112,3 +113,29 @@ def test_profile_says_when_the_row_grain_is_unknown(csv_path: Path, tmp_path: Pa
         identity = profile_table(con)["row_identity"]
     assert identity["unique_columns"] == ["id"] and identity["duplicate_rows"] == 0
     assert "唯一标识" in identity["note"] and "记录数" not in identity["note"]
+
+
+def test_values_of_integer_coded_columns_can_be_written_as_numbers(csv_path: Path) -> None:
+    """流量来源这类整数编码的列，模型会写 keep: [2, 13]、where: {"traffic": [2]}（Online Shoppers 盲测里 4 次被退回）。"""
+    rows = _preview(csv_path, {"type": "bar", "metrics": ["records"],
+                               "x": {"column": "traffic", "keep": [2, 13], "other_label": "其他来源"}})["rows"]
+    assert {r["x"]: r["values"][0] for r in rows} == {"2": 4, "13": 2, "其他来源": 4}
+    with connect_source(str(csv_path)) as con:
+        kpi = preview_chart(con, [Metric.model_validate({"id": "t2", "label": "来源 2", "agg": "count",
+                                                          "where": {"traffic": [2]}})],
+                            Chart.model_validate({"id": "k", "title": "来源 2 的记录", "type": "kpi", "metrics": ["t2"],
+                                                  "why": "测试"}))
+    assert kpi["facts"]["value"] == 4
+    with pytest.raises(ValueError, match="valid string"):  # 真假值不转：转成 True 也对不上数据里的写法
+        Chart.model_validate({"id": "c", "title": "测试图", "type": "bar", "metrics": ["records"], "why": "测试",
+                              "x": {"column": "traffic", "keep": [True]}})
+
+
+def test_month_numbers_are_grounded_by_month_name_labels() -> None:
+    """标签是 Nov 时，结论写“11 月”也有出处（Online Shoppers 盲测 3 次都因此被退回）；没有这个月份就仍然退回。"""
+    data = {"rows": [{"x": "Nov", "values": [0.2535]}, {"x": "December", "values": [0.1251]},
+                     {"x": "十月", "values": [0.2095]}]}
+    assert ungrounded_numbers("11 月最高 25.4%，12 月 12.5%，10 月 21.0%", data) == []
+    assert ungrounded_numbers("11 月最高", {"rows": [{"x": "Oct", "values": [0.2]}, {"x": "Dec", "values": [0.1]}]}) \
+        == ["11"]  # ≤ 10 的整数本来就不核查，所以用 11 月检验
+    assert ungrounded_numbers("11 月", {"rows": [{"x": "Novak", "values": [1]}]}) == ["11"]  # 只认整个标签是月份
