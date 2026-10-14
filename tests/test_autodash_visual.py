@@ -223,6 +223,9 @@ def test_superlatives_must_match_the_chart() -> None:
     assert _claims("样本 1,000 条以上的分组里 university.degree 最高", EDU) == []  # 写明了范围
     assert _claims("新访客最高", EDU) == []  # 认不出是哪个分组时不核对
     assert _claims("university.degree 和 unknown 都比 basic.9y 高，最高的两个是 illiterate、unknown", EDU) == []
+    assert _claims("最高的两个是 unknown、illiterate", EDU) == []  # 说的是“最高的两个”，不是 unknown 最高
+    assert _claims("basic.9y 与 unknown 合计最高", EDU) == []  # 一句里有两个分组，不知道说的是谁
+    assert _claims("unknown 不是最高", EDU) == []  # 否定句不核对
 
 
 def test_superlative_checks_know_months_and_what_the_metric_is() -> None:
@@ -240,6 +243,9 @@ def test_superlative_checks_know_months_and_what_the_metric_is() -> None:
                         {"x": "13", "s": None, "values": [738, 0.0583]}]}
     assert _claims("来源 2 规模最大，来源 8 转化最高 27.7%，来源 13 最低", scatter, kind="scatter") == []
     assert len(_claims("来源 2 转化最高", scatter, kind="scatter")) == 1  # 散点图核对纵轴
+    # 标签 8 不能匹配 8.8% 里的 8：否则这句就有两个分组、跳过核对，漏掉“3 最低”这个错误
+    traffic = _rows([("8", 0.277), ("3", 0.0877), ("13", 0.0583)])
+    assert len(_claims("来源 3 最低 8.8%", traffic)) == 1
 
 
 def test_wrong_superlatives_are_sent_back_on_submit(csv_path: Path) -> None:
