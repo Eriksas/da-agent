@@ -62,6 +62,7 @@ flowchart LR
 | M10 | 项目展示网站（GitHub Pages，静态网页，每周随周报更新） | ✅ |
 | M11 | 本机图形界面（回放已保存的运行、实时提问，每一步实时显示） | ✅ |
 | M12 | 电商运营数据看板（网站页面，按时间和市场筛选，8 张图 + 指标卡） | ✅ |
+| M13 | Agent 根据数据自主搭看板（模型写方案，程序校验、算数、画图）；真实模型评测、Tableau 导出待做 | 进行中 |
 
 ## 本地运行
 
@@ -85,6 +86,8 @@ uv run da-agent eval --case-file eval/holdout.yaml --conditions agent,agent_skil
 uv run da-agent eval-rescore eval/results/<名称>  # 评分规则修改后，离线重新打分，不调用模型
 uv run da-agent eval-compare eval/results/<改进前> eval/results/<改进后>  # 前后对比表，不调用模型
 uv run da-agent dashboard-data                # 重新生成数据看板的数字 reports/dashboard/dashboard.json（需要先 prepare-data）
+uv run da-agent build-dashboard financials --goal "给研究员看四家平台的盈利能力"  # Agent 自主搭看板（retail 需要先 prepare-data）
+uv run da-agent render-dashboard runs/<运行编号>  # 不调用模型，按 spec.json（可以手工改）重新生成看板
 uv run da-agent build-site                    # 生成项目网站到 _site/（静态网页，不调用模型）
 uv sync --group ui && uv run --group ui da-agent ui  # 打开本机图形界面（http://localhost:8501）
 uv run da-agent weekly --llm fake --week 2010-W02 # 用假模型检查周报流程（输出在 runs/，不提交）
@@ -316,6 +319,28 @@ LangGraph 是可选依赖组（`uv sync --group langgraph`），只有 CI 的对
 - **数字之间对得上**：`check_dashboard_data` 检查各月加起来等于全年、英国 + 海外等于全部、新客 + 老客 + 缺客户 ID 等于当月 GMV、热力图格子加起来等于订单数等；总数和另一条代码路径算出的[数据质量报告](reports/data_quality.md)一致。这些检查在 CI 里对已提交的 JSON 运行。
 - **做的过程中发现的数据问题**：有一张订单从 11:59 录到 12:00，按行统计会在热力图里算两次，改成按订单第一行的时间；一笔 80,995 件、12 分钟后就被取消的订单，按下单口径会让一个商品排进 Top 5，所以商品排名用净销售额，并在图下说明。
 - **图表**：不用第三方图表库，SVG 由原生 JavaScript 画出。配色按 dataviz 方法选：分类色前 3 个经校验器检查，深浅两种模式都通过；顺序色阶在深色模式下反向。每张图都有悬停提示（也能用 Tab 键聚焦）和表格视图，商品名等来自数据的文字一律按纯文本写入页面。
+
+## Agent 自主搭看板（M13 产出，进行中）
+
+给一份数据和一个读者（“给研究员看四家平台的盈利能力”），Agent 自己决定放哪些指标和图，生成一个和 M12 同样规格的看板页面。
+
+```bash
+uv run da-agent build-dashboard financials --goal "给研究员看四家平台的盈利能力"
+uv run da-agent build-dashboard financials --llm fake --script fixtures/fake_llm/dashboard_financials.json  # 假模型演示，不需要密钥
+```
+
+- **模型出方案，程序算数和画图**：模型只能提交一份看板方案（JSON）：指标是对哪一列做什么聚合（sum、count、count_distinct、avg、ratio……）、图是什么类型（kpi、line、column、stacked_column、bar、heatmap、table）、横轴和分组是什么、为什么放这张图、看出了什么。SQL 由程序按方案拼出来，列名只能是表里已有的列，取值一律走参数；模型不写 SQL，也不写画图代码。
+- **三个工具**：`profile_table`（每列的类型、取值、缺失和必须遵守的规则）、`preview_chart`（先看一张图的数据）、`submit_dashboard`（提交方案，不通过就退回逐条修改意见）。分析流程 [dashboard-design](skills/dashboard-design/SKILL.md) 写了选图规则和陷阱清单。
+- **语义标注由我们写，校验器强制执行**：电商的 `amount` 要看 `line_type`（销售还是取消），财报的 `value` 要看 `item`（营业收入还是总资产），聚合时必须限定或分组；财报金额的币种在 `currency` 列，人民币和美元不能放在同一个坐标轴上比较（比率可以）。
+- **程序自动发现的数据陷阱**写在每张图下面：不完整的周期（数据截止在 12 月 9 日）、一家独大（英国占 85.5%）、排名图截掉了多少个分组。
+- **结论里的数字有出处**：每张图的 insight 里的数字，必须能在这张图自己的数据里找到（和报告核查用同一套数字提取规则），找不到就退回。
+- **可复现、可人工改**：看板方案就是运行记录里最后一次通过检查的提交；改 `spec.json` 后用 `render-dashboard` 重新生成，不调用模型。
+- **和手工看板对得上**：同样口径的方案编译出来的数字（总 GMV、每月 GMV、取消率、2011 年英国 GMV）和 M12 的 dashboard.json 一致（有测试）。热力图用去重订单数时，格子加起来比订单数多 1：有一张订单从 11:59 录到 12:00，去重计数本来就不能跨格子相加，分析流程里写了这一条。
+- **图表组件和 M12 共用**：M12 的画图代码抽成了 [charts.js](src/da_agent/site_assets/charts.js)，两个看板用同一套。
+
+**第一次真实运行（2026-10-14，样本量 1）**：模型独立完成，9 张图、被退回 4 次都自己改好，按运行前冻结的[评分表](eval/dashboard_rubric.md)各项都满足；但人工复核发现商品 Top 10 里有两件是被取消的大单（Agent 按下单口径排名），另有 3 处程序问题。程序问题已修复，并新增一条自动提示（排名里大部分被取消的分组），用同一份方案不调用模型重新生成做了对比。见[复核记录](examples/dashboard_runs/20261014T140646-959e2b/review.md)。
+
+还没做：多次运行的评测、导出成 Tableau 工作簿（可行性已经在本机 Tableau Public 2026.1 上验证过）。方案的表达能力有意做得有限：新客留存这类需要按客户先算首购时间的分析，现在的方案写不出来。
 
 ## 本机图形界面（M11 产出）
 

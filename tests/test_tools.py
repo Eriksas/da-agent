@@ -23,14 +23,23 @@ def test_specs_are_valid_function_definitions() -> None:
     assert [s["function"]["name"] for s in specs] == list(DOMAIN_TOOLS["ecommerce"])  # 默认是电商，顺序不变
     company = [s["function"]["name"] for s in tool_specs("company")]
     assert company == ["company_overview", "financial_summary", "dupont", "peer_compare", "load_skill", "calculate"]
-    assert set(DOMAIN_TOOLS["ecommerce"]) | set(company) == set(TOOLS)  # 每个工具都属于某个领域
+    dashboard = [s["function"]["name"] for s in tool_specs("dashboard")]
+    assert set(DOMAIN_TOOLS["ecommerce"]) | set(company) | set(dashboard) == set(TOOLS)  # 每个工具都属于某个领域
     with pytest.raises(ValueError, match="未知领域"):
         tool_specs("crypto")
-    for spec in specs + tool_specs("company"):
+    for spec in specs + tool_specs("company") + tool_specs("dashboard"):
         assert spec["type"] == "function"
         assert spec["function"]["description"]
         assert spec["function"]["parameters"]["type"] == "object"
-        assert '"title"' not in json.dumps(spec)  # 自动生成的 title 已去掉
+        assert '"title": "' not in json.dumps(spec, ensure_ascii=False)  # 自动生成的 title 已去掉
+
+
+def test_parameters_named_title_are_kept() -> None:
+    """看板方案和图都有一个叫 title 的参数：去掉自动生成的 title 字段时不能把它也删了（M13 发现）。"""
+    submit = next(s for s in tool_specs("dashboard") if s["function"]["name"] == "submit_dashboard")
+    params = submit["function"]["parameters"]
+    assert "title" in params["properties"] and "title" in params["required"]
+    assert "title" in params["properties"]["charts"]["items"]["properties"]
 
 
 def test_successful_call(con) -> None:

@@ -596,7 +596,8 @@ def dashboard_page() -> str:
 <p class="small muted">数据生成于 {esc(data["generated_at"])}。悬停或用 Tab 键聚焦可以看具体数字；每张图都能切换成表格。</p>
 <script id="dashboard-data" type="application/json">{payload}</script>
 """
-    script = f"<script>{(ASSETS / 'dashboard.js').read_text(encoding='utf-8')}</script>"
+    script = "".join(f"<script>{(ASSETS / name).read_text(encoding='utf-8')}</script>"
+                     for name in ("charts.js", "dashboard.js"))  # 先加载共用的图表组件
     return page("数据看板", body, 0, "dashboard.html", script, wide=True,
                 style=(ASSETS / "dashboard.css").read_text(encoding="utf-8"))
 
