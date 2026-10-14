@@ -31,6 +31,9 @@ class Dimension(_Model):
     keep: list[str] = Field(default_factory=list, max_length=6, description=(
         "只保留这几个取值，其余合并成 other_label。例如 country 只保留 United Kingdom，其余合并成“海外”"))
     other_label: str = Field("其他", max_length=12, description="合并后的名字")
+    order: list[str] = Field(default_factory=list, max_length=60, description=(
+        "分类的先后顺序，例如学历从低到高、年龄段从小到大；没列出的取值排在后面。"
+        "不填时，月份和星期自动按日历排，其余按取值排序。只用于非时间列"))
     label: str = Field("", max_length=20, description="显示名，例如“国家”；不填用列名")
 
 
@@ -110,6 +113,8 @@ def _dimension_problems(dim: Dimension, where: str, types: dict[str, str], sourc
         problems.append(f"{where}：{dim.column} 只有日期，不能按小时")
     if dim.keep and (is_time or kind == "number"):
         problems.append(f"{where}：keep 只能用在分类列上")
+    if dim.order and is_time:
+        problems.append(f"{where}：时间列按时间排序，不用 order")
     if dim.column in source.pin_by or dim.column in source.unit_column:
         problems.append(f"{where}：{dim.column} 是数值列，不能当横轴或分组")
     return problems

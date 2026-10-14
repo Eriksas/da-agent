@@ -36,6 +36,7 @@ class Source:
     units: dict[str, str] = field(default_factory=dict)
     # 会被之后的记录抵消的数值：列 → (分类列, 原记录的取值, 抵消记录的取值)。电商的销售会被之后的取消抵消
     offsets: dict[str, tuple[str, str, str]] = field(default_factory=dict)
+    row_meaning: str | None = None  # 数据说明里写明的“一行是什么”；用户给的 CSV 没有
 
 
 def _connect_retail() -> duckdb.DuckDBPyConnection:
@@ -87,7 +88,7 @@ SOURCES: dict[str, Source] = {
          "line_type": "销售 / 取消", "stock_code": "商品编码", "description": "商品名称",
          "quantity": "数量（取正数）", "price": "单价（英镑）", "amount": "金额 = 数量 × 单价（英镑，取正数）",
          "customer_id": "客户 ID，缺失表示游客或未登记客户", "country": "客户所在国家"},
-        _connect_retail, time_column="invoice_time",
+        _connect_retail, time_column="invoice_time", row_meaning="订单里的一个商品（取消单里的一个商品）",
         pin_by={"amount": ("line_type",), "quantity": ("line_type",)}, units={"amount": "£", "price": "£"},
         offsets={"amount": ("line_type", "销售", "取消")}),
     "financials": Source(
@@ -97,7 +98,8 @@ SOURCES: dict[str, Source] = {
         {"company": "公司代码", "company_name": "公司中文名", "fiscal_year": "财年（按财年结束日期所在年份）",
          "item": "科目代码", "item_label": "科目中文名", "value": "金额（原始数字，单位见 currency）",
          "currency": "币种：CNY 人民币、USD 美元", "period_end": "期末日期"},
-        _connect_financials, pin_by={"value": ("item", "item_label")}, unit_column={"value": "currency"}),
+        _connect_financials, pin_by={"value": ("item", "item_label")}, unit_column={"value": "currency"},
+        row_meaning="一家公司一个财年的一个科目"),
 }
 
 
@@ -209,4 +211,26 @@ def profile_table(con: duckdb.DuckDBPyConnection) -> dict[str, Any]:
               for value, (by, orig, offset) in source.offsets.items()]
     return {"tool": "profile_table", "source": source.name, "label": source.label, "table": source.table,
             "description": source.description, "rows": rows, "time_column": source.time_column,
-            "columns": columns, "rules": rules}
+            "row_identity": _row_identity(con, source, columns, rows), "columns": columns, "rules": rules}
+
+
+def _row_identity(con: duckdb.DuckDBPyConnection, source: Source, columns: list[dict[str, Any]],
+                  rows: int) -> dict[str, Any]:
+    """一行代表什么：哪些列能唯一标识一行、有多少完全重复的行。这些是算出来的事实，对任何数据都成立。
+
+    M13b 盲测里，3 次有 2 次把“一行是一次通话、同一客户会重复计入”的猜测写成了事实；数据里没有编号列，
+    其实无法判断。所以没有说明、也没有唯一标识时，明确告诉模型：判断不了，就按“记录”说。
+    """
+    unique = [c["name"] for c in columns if c["distinct_values"] == rows and c["null_share"] == 0]
+    distinct_rows = fetch_one(con, f'SELECT count(*) AS n FROM (SELECT DISTINCT * FROM "{source.table}")')["n"]
+    duplicates = rows - distinct_rows
+    if source.row_meaning:
+        note = f"数据说明：每行是{source.row_meaning}"
+    elif unique:
+        note = f"{'、'.join(unique)} 在每行都不同，可以唯一标识一行；一行代表什么仍要结合列名判断，不确定时不要断言"
+    else:
+        note = ("没有哪一列能唯一标识一行，也没有数据说明：无法判断一行代表一个客户、一次联系还是一笔交易。"
+                "按行计数的指标叫“记录数”，不要断言一行是什么，也不要断言同一对象会不会重复出现")
+    if duplicates:
+        note += f"；有 {duplicates} 行和其他行完全相同"
+    return {"unique_columns": unique, "duplicate_rows": duplicates, "note": note}
