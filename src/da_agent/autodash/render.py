@@ -23,6 +23,7 @@ font-size:14px;color:var(--text-2);margin:12px 0}
 .dash-card .why{color:var(--muted);font-size:13px;margin:8px 0 0}
 .dash-card .note div{color:var(--text-2);font-size:13px;margin-top:4px}
 .kpis.auto{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+.kpi .sub{color:var(--text-2);font-size:13px;margin-top:4px;font-variant-numeric:tabular-nums}
 """
 
 

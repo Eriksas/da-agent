@@ -26,6 +26,22 @@
     };
   }
 
+  // 比率的分子和分母（例如 订阅数 / 联系人数）：各用自己指标的格式，金额才带单位
+  function partsOf(chart) {
+    if (!chart.ratio_parts) return null;
+    return chart.ratio_parts.map(id => {
+      const metric = DATA.metrics[id], unit = metric.format === 'money' ? (chart.unit || '') : '';
+      return {label: metric.label,
+              format: v => (v == null ? '—' : unit + Number(v).toLocaleString('en-US', {maximumFractionDigits: 2}))};
+    });
+  }
+  const partTips = (chart, r) => {
+    const parts = partsOf(chart);
+    return parts && r.numerator !== undefined
+      ? [{value: parts[0].format(r.numerator), label: parts[0].label}, {value: parts[1].format(r.denominator), label: parts[1].label}]
+      : [];
+  };
+
   // 分组的颜色跟着分组走，不跟着排名走：按默认视图（全部数据）里的分组顺序固定下来，筛选后不会换色
   const seriesOrder = Object.fromEntries(DATA.charts.map(c => [c.id,
     DATA.slices[DATA.default_slice][c.id].series_order || []]));
@@ -43,10 +59,13 @@
   function renderKpis(slice) {
     const kpis = DATA.charts.filter(c => c.type === 'kpi');
     document.getElementById('kpis').replaceChildren(...kpis.map(c => {
-      const value = slice[c.id].rows[0].values[0];
+      const value = slice[c.id].rows[0].values[0], facts = slice[c.id].facts, parts = partsOf(c);
+      const sub = parts && facts.numerator !== undefined
+        ? h('div', {class: 'sub'}, `${parts[0].label} ${parts[0].format(facts.numerator)} / ${parts[1].label} ${parts[1].format(facts.denominator)}`)
+        : null;
       return h('div', {class: 'kpi'}, h('div', {class: 'label'}, c.title),
                h('div', {class: 'value', title: formatter(c, true)(value)}, formatter(c)(value)),
-               h('div', {class: 'note'}, c.why));
+               ...(sub ? [sub] : []), h('div', {class: 'note'}, c.why));
     }));
   }
 
@@ -60,7 +79,7 @@
         points: rows.map(r => ({key: r.x, partial: r.partial})), format: fmt, title: chart.title,
         series: [{name: metricLabel, color: token('--series-1'), values: rows.map(r => r.values[0])}],
         onTip: i => [rows[i].x + (rows[i].partial ? '（不完整）' : ''), [{value: full(rows[i].values[0]), label: metricLabel}]
-          .concat(rows[i].share != null ? [{value: pct(rows[i].share), label: '占比'}] : [])]})};
+          .concat(rows[i].share != null ? [{value: pct(rows[i].share), label: '占比'}] : [], partTips(chart, rows[i]))]})};
     }
     if (chart.type === 'stacked_column' || chart.type === 'line') {
       const {points, series} = chart.series_label ? pivot(chart, rows)
@@ -70,25 +89,29 @@
       return {
         draw: host => draw(host, {points, series, format: fmt, title: chart.title,
                                   onTip: i => [points[i].key + (points[i].partial ? '（不完整）' : ''),
-                                               series.map(sr => ({color: sr.color, value: full(sr.values[i]), label: sr.name}))]}),
+                                               series.map(sr => ({color: sr.color, value: full(sr.values[i]), label: sr.name}))
+                                                 .concat(chart.series_label ? [] : partTips(chart, rows[i]))]}),
         legend: series.length > 1 ? legendOf(series) : null,
       };
     }
     if (chart.type === 'bar') {
       return {draw: host => drawBars(host, rows.map(r => ({
         label: r.x, value: Math.max(r.values[0] || 0, 0), valueText: fmt(r.values[0]), muted: !!r.other,
-        tip: [{value: full(r.values[0]), label: metricLabel}].concat(r.share != null ? [{value: pct(r.share), label: '占比'}] : []),
+        tip: [{value: full(r.values[0]), label: metricLabel}]
+          .concat(r.share != null ? [{value: pct(r.share), label: '占比'}] : [], partTips(chart, r)),
       })))};
     }
     if (chart.type === 'heatmap') {
       const xs = [...new Set(rows.map(r => r.x))], ys = seriesOrder[chart.id].filter(n => rows.some(r => r.s === n));
       const cell = new Map(rows.map(r => [`${r.x}\u0000${r.s}`, r.values[0]]));
+      const rowAt = new Map(rows.map(r => [`${r.x}\u0000${r.s}`, r]));
       const values = ys.map(y => xs.map(x => cell.get(`${x}\u0000${y}`) ?? null));
       const max = Math.max(0, ...values.flat().filter(v => v != null));
       return {
         draw: host => drawHeatmap(host, {rowLabels: ys, colLabels: xs, colEvery: xs.length > 12 ? 2 : 1, values, max,
                                          title: chart.title, labelW: 64,
-                                         onTip: (i, j) => [`${ys[i]} · ${xs[j]}`, [{value: full(values[i][j]), label: metricLabel}]]}),
+                                         onTip: (i, j) => [`${ys[i]} · ${xs[j]}`, [{value: full(values[i][j]), label: metricLabel}]
+                                           .concat(partTips(chart, rowAt.get(`${xs[j]}\u0000${ys[i]}`) || {}))]}),
         legend: scaleLegend(fmt(0), fmt(max)),
       };
     }
@@ -97,12 +120,15 @@
 
   function tableOf(chart, rows) {
     const fmts = chart.metrics.map(id => formatter({...chart, metrics: [id]}, true));
+    const parts = rows.some(r => r.numerator !== undefined) ? partsOf(chart) : null;
     const columns = [{label: chart.x_label || ''}].concat(chart.series_label ? [{label: chart.series_label}] : [])
       .concat(chart.metrics.map(id => ({label: DATA.metrics[id].label, num: true})))
+      .concat(parts ? parts.map(p => ({label: p.label, num: true})) : [])
       .concat(rows.some(r => r.share != null) ? [{label: '占比', num: true}] : []);
     return table(columns, rows.map(r => [r.x + (r.partial ? '（不完整）' : '')]
       .concat(chart.series_label ? [r.s] : [])
       .concat(r.values.map((v, i) => fmts[i](v)))
+      .concat(parts ? [r.numerator, r.denominator].map((v, i) => (v === undefined ? '' : parts[i].format(v))) : [])
       .concat(rows.some(x => x.share != null) ? [r.share == null ? '' : pct(r.share)] : [])));
   }
 

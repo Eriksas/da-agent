@@ -60,6 +60,10 @@ def spec(**overrides: object) -> DashboardSpec:
 
 
 # ---------- 表的概况 ----------
+def test_profile_uses_the_documented_row_meaning(con) -> None:
+    assert profile_table(con)["row_identity"]["note"].startswith("数据说明：每行是订单里的一个商品")
+
+
 def test_profile_lists_values_roles_and_rules(con) -> None:
     profile = profile_table(con)
     cols = {c["name"]: c for c in profile["columns"]}
@@ -93,6 +97,8 @@ def test_static_check_catches_mistakes(con, change: dict, message: str) -> None:
       "x": {"column": "invoice_time", "grain": "month"}, "why": "测试"}, "不做双坐标轴"),
     ({"id": "t", "title": "没有粒度", "type": "line", "metrics": ["gmv"], "x": {"column": "invoice_time"}, "why": "测试"},
      "要给 grain"),
+    ({"id": "o", "title": "时间列排序", "type": "column", "metrics": ["gmv"],
+      "x": {"column": "invoice_time", "grain": "month", "order": ["2011-12"]}, "why": "测试"}, "不用 order"),
 ])
 def test_chart_rules(con, chart: dict, message: str) -> None:
     problems = check_spec(spec(charts=[KPI, {**KPI, "id": "k2", "metrics": ["cancel_rate"]},

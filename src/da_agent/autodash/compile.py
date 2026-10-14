@@ -24,6 +24,14 @@ from .spec import (MAX_SERIES, MAX_X, Chart, DashboardSpec, Dimension, Metric, b
                    check_spec, is_additive, metric_problems)
 
 WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+# 认得出的月份和星期写法（不分大小写）：取值全部能认出来时，按日历排，而不是按字母排（M13b 盲测里 apr、aug、dec……）
+MONTH_NAMES = [(f"{m}月", f"{cn}月", en[:3], en, *extra) for m, (cn, en, *extra) in enumerate([
+    ("一", "january"), ("二", "february"), ("三", "march"), ("四", "april"), ("五", "may"), ("六", "june"),
+    ("七", "july"), ("八", "august"), ("九", "september", "sept"), ("十", "october"), ("十一", "november"),
+    ("十二", "december")], 1)]
+WEEKDAY_NAMES = [(f"周{cn}", f"星期{cn}", en[:3], en, *extra) for cn, en, *extra in [
+    ("一", "monday"), ("二", "tuesday", "tues"), ("三", "wednesday"), ("四", "thursday", "thur", "thurs"),
+    ("五", "friday"), ("六", "saturday"), ("日", "sunday", "周天", "星期天")]]
 DOMINANT_SHARE = 0.6
 OFFSET_ALERT = 0.5  # 一个分组的销售额有一半以上被之后的取消抵消时，提醒按下单口径会高估它
 MAX_FILTER_OPTIONS = 6
@@ -175,6 +183,10 @@ class Compiler:
             missing = [v for v in dim.keep if v not in set(self._present(dim.column, dim.keep))]
             if missing:
                 problems.append(f"{where}：keep 里 {dim.column} 没有这些取值 {missing}；常见取值：{self._common(dim.column)}")
+            listed = [v for v in dim.order if v != dim.other_label]
+            missing = [v for v in listed if v not in set(self._present(dim.column, listed))] if listed else []
+            if missing:
+                problems.append(f"{where}：order 里 {dim.column} 没有这些取值 {missing}；常见取值：{self._common(dim.column)}")
         for i, dim in enumerate(filters):
             n = len(self.distinct(dim))
             if n > MAX_FILTER_OPTIONS + 1:
@@ -260,12 +272,18 @@ class Compiler:
                    slice_filters: list[tuple[Dimension, str]] = ()) -> dict[str, Any]:
         rows = self.query(c, metrics, slice_filters)
         notes: list[str] = []
+        parts = self._ratio_parts(c, metrics, slice_filters)
         if c.type == "kpi":
             value = rows[0]["m0"] if rows else None
-            return {"rows": [{"x": None, "s": None, "values": [_num(value)]}], "facts": {"value": _num(value)},
-                    "notes": notes}
+            facts = {"value": _num(value)}
+            if parts:  # 比率卡片带上分子和分母：结论可以写“11.3%（4,640 / 41,188）”
+                facts["numerator"], facts["denominator"] = parts.get((None, None), (None, None))
+            return {"rows": [{"x": None, "s": None, "values": [_num(value)]}], "facts": facts, "notes": notes}
         out = [{"x": _label(c.x, r["x"]), "s": _label(c.series, r.get("s")), "_x": r["x"], "_s": r.get("s"),
                 "values": [_num(r[f"m{i}"]) for i in range(len(c.metrics))]} for r in rows]
+        for r in out:  # 比率的每个点都带上分子和分母：小样本的分组能看出、也能在结论里写出样本量
+            if parts and (r["_x"], r["_s"]) in parts:
+                r["numerator"], r["denominator"] = parts[(r["_x"], r["_s"])]
         if c.type in ("bar", "table"):  # 指标用 where 限定后，其余分组的值全是空的：类别图里不显示这些分组
             out = [r for r in out if any(v is not None for v in r["values"])]
         metric = metrics[c.metrics[0]]
@@ -283,7 +301,9 @@ class Compiler:
                 notes.append(f"只显示前 {top_n} 个，共 {n} 个" + ("，其余合并成“其他”" if additive else ""))
             out = top
         else:
-            out.sort(key=lambda r: (_sort_key(r["_x"]), _sort_key(r["_s"])))
+            x_rank = _ranker(c.x, [r["_x"] for r in out])
+            s_rank = _ranker(c.series, [r["_s"] for r in out])
+            out.sort(key=lambda r: (x_rank(r["_x"]), s_rank(r["_s"])))
             out = self._fill_months(c, out, additive)
         facts: dict[str, Any] = {}
         values = [r["values"][0] for r in out if r["values"][0] is not None and not r.get("other")]
@@ -324,12 +344,22 @@ class Compiler:
         result = {"rows": out, "facts": facts, "notes": notes}
         if c.series is not None:  # 分组的顺序：keep 里的取值在前，其余按自然顺序（星期一到星期日、年份从小到大）
             raw = {r["s"]: r["_s"] for r in out}
-            kept = [v for v in c.series.keep if v in raw]
-            result["series_order"] = kept + sorted((k for k in raw if k not in kept), key=lambda k: _sort_key(raw[k]))
+            s_rank = _ranker(c.series, list(raw.values()))
+            kept = [] if c.series.order else [v for v in c.series.keep if v in raw]
+            result["series_order"] = kept + sorted((k for k in raw if k not in kept), key=lambda k: s_rank(raw[k]))
         for r in out:
             r.pop("_x", None)
             r.pop("_s", None)
         return result
+
+    def _ratio_parts(self, c: Chart, metrics: dict[str, Metric],
+                     slice_filters: list[tuple[Dimension, str]]) -> dict[tuple, tuple]:
+        """比率指标每个点的（分子，分母），按 (x, series) 的原始取值索引；不是比率就返回空。"""
+        m = metrics[c.metrics[0]]
+        if m.agg != "ratio" or len(c.metrics) > 1:
+            return {}
+        rows = self.query(c.model_copy(update={"metrics": [m.left, m.right]}), metrics, slice_filters)
+        return {(r.get("x"), r.get("s")): (_num(r["m0"]), _num(r["m1"])) for r in rows}
 
     def _offset_notes(self, c: Chart, metrics: dict[str, Metric], rows: list[dict[str, Any]],
                       slice_filters: list[tuple[Dimension, str]]) -> list[str]:
@@ -417,6 +447,27 @@ def _num(value: Any) -> float | int | None:
     return round(float(value), 4)
 
 
+def _calendar(values: list[Any]) -> dict[Any, int] | None:
+    """取值全部能认出是月份（或全部是星期）时，返回 取值 → 日历位置；否则 None。"""
+    for names in (MONTH_NAMES, WEEKDAY_NAMES):
+        lookup = {alias.lower(): i for i, aliases in enumerate(names) for alias in aliases}
+        ranks = {v: lookup.get(str(v).strip().lower()) for v in values if v is not None}
+        if ranks and all(r is not None for r in ranks.values()):
+            return ranks
+    return None
+
+
+def _ranker(dim: Dimension | None, values: list[Any]):  # noqa: ANN202
+    """一个维度上取值的先后：模型给的 order 最优先；其次月份、星期按日历；其余按取值本身。"""
+    if dim is not None and dim.order:
+        position = {v: i for i, v in enumerate(dim.order)}
+        return lambda v: (0, position[str(v)], ()) if str(v) in position else (1, 0, _sort_key(v))
+    calendar = _calendar(values) if dim is not None and dim.grain is None else None
+    if calendar:
+        return lambda v: (0, calendar.get(v, 99), _sort_key(v))
+    return lambda v: (0, 0, _sort_key(v))
+
+
 def _sort_key(value: Any) -> tuple:
     return (value is None, value if isinstance(value, (int, float)) else str(value or ""))
 
@@ -499,6 +550,8 @@ def compile_dashboard(con: duckdb.DuckDBPyConnection, spec: DashboardSpec) -> di
                    "range": compiler._range_text() if compiler.time_bounds else None},
         "metrics": {m.id: {"label": m.label, "format": m.format} for m in spec.metrics},
         "charts": [{"id": c.id, "title": c.title, "type": c.type, "metrics": c.metrics, "why": c.why,
+                    "ratio_parts": ([metrics[c.metrics[0]].left, metrics[c.metrics[0]].right]
+                                    if metrics[c.metrics[0]].agg == "ratio" else None),
                     "insight": c.insight, "unit": compiler.unit_of(c, metrics),
                     "x_label": (c.x.label or c.x.column) if c.x else None,
                     "series_label": (c.series.label or c.series.column) if c.series else None}
