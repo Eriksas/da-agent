@@ -619,7 +619,7 @@ def claim_problems(c: Chart, data: dict[str, Any], additive: bool, fmt: str) -> 
         for clause in re.split(r"[，,、]", sentence):
             found = [w for w in words if w in clause]
             kinds = {SUPERLATIVES[w] for w in found}
-            if len(kinds) != 1 or re.search(r"(?:最高|最低|最多|最少|最大|最小)的?\s*(?:两|二|三|几|\d)", clause):
+            if len(kinds) != 1 or re.search(r"(?:最高|最低|最多|最少|最大|最小)的?\s*(?:两|二|三|几|\d+)\s*[个名组类家位项种]", clause):
                 continue
             labels = {label for alias, label in aliases.items() if _mentions(clause, alias)}
             if len(labels) != 1:
