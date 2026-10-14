@@ -10,6 +10,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import duckdb
@@ -100,10 +101,45 @@ SOURCES: dict[str, Source] = {
 }
 
 
+CSV_TABLE = "csv_data"
+# 读 CSV 时不自动转成布尔：yes / no 这样的取值保留原样，模型看到的就是数据本来的写法
+CSV_TYPES = ["BIGINT", "DOUBLE", "TIMESTAMP", "DATE", "VARCHAR"]
+
+
+def csv_source(path: Path | str, label: str | None = None) -> Source:
+    """用户给的任意 CSV：一张表，没有语义标注，也没有列的说明。分隔符、类型由 DuckDB 自动识别。"""
+    path = Path(path).resolve()
+    if not path.exists():
+        raise ValueError(f"找不到 CSV 文件：{path}")
+    name = f"csv:{path.as_posix()}"
+    label = label or path.name
+    description = f"用户提供的 CSV（{path.name}），没有数据说明：列的含义只能从列名和取值判断。"
+
+    def connect() -> duckdb.DuckDBPyConnection:
+        con = duckdb.connect()
+        con.execute(f"CREATE TABLE {CSV_TABLE} AS SELECT * FROM read_csv(?, header = true, "
+                    f"auto_type_candidates = {CSV_TYPES})", [path.as_posix()])
+        con.execute("CREATE TABLE dash_source AS SELECT ? AS name, ? AS label", [name, label])
+        return con
+
+    return Source(name, label, CSV_TABLE, description, {}, connect, time_column=None)
+
+
+def _with_time_column(con: duckdb.DuckDBPyConnection, source: Source) -> Source:
+    """CSV 的时间列：第一个时间戳或日期列（没有就是 None，不能按年筛选）。"""
+    for column, kind in column_types(con, source).items():
+        if kind in ("timestamp", "date"):
+            return Source(**{**source.__dict__, "time_column": column})
+    return source
+
+
 def source_of(con: duckdb.DuckDBPyConnection) -> Source:
-    """连接属于哪份数据：看建了哪张表。"""
+    """连接属于哪份数据：CSV 看 dash_source 表里的记录，内置数据看建了哪张表。"""
     tables = {r["name"] for r in fetch_rows(con, "SELECT view_name AS name FROM duckdb_views() UNION ALL "
                                                  "SELECT table_name FROM duckdb_tables()")}
+    if "dash_source" in tables:
+        meta = fetch_one(con, "SELECT name, label FROM dash_source")
+        return _with_time_column(con, csv_source(meta["name"].removeprefix("csv:"), meta["label"]))
     for source in SOURCES.values():
         if source.table in tables:
             return source
@@ -111,8 +147,11 @@ def source_of(con: duckdb.DuckDBPyConnection) -> Source:
 
 
 def connect_source(name: str) -> duckdb.DuckDBPyConnection:
+    """内置数据用名字（retail、financials）；CSV 用 csv:路径，或者直接给一个 .csv 文件的路径。"""
+    if name.startswith("csv:") or name.lower().endswith(".csv"):
+        return csv_source(name.removeprefix("csv:")).connect()
     if name not in SOURCES:
-        raise ValueError(f"没有名为 {name} 的数据；可选：{list(SOURCES)}")
+        raise ValueError(f"没有名为 {name} 的数据；可选：{list(SOURCES)}，或者一个 .csv 文件的路径")
     return SOURCES[name].connect()
 
 

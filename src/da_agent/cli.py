@@ -13,7 +13,8 @@
 - `da-agent eval-compare 改进前目录 改进后目录`：对比两次评测，不调用模型
 - `da-agent weekly --advance`：按回放游标生成下一周的周报（GitHub Actions 每周运行），写到 reports/weekly/
 - `da-agent dashboard-data`：从清洗后的数据重新生成看板数字（reports/dashboard/dashboard.json），网站的数据看板页用它
-- `da-agent build-dashboard retail|financials --goal "给谁看、看什么"`：Agent 自己设计看板，生成 runs/<编号>/dashboard.html
+- `da-agent build-dashboard retail|financials|某个.csv --goal "给谁看、看什么"`：Agent 自己设计看板，生成 runs/<编号>/dashboard.html
+- `da-agent fetch-dataset bank-marketing`：下载外部公开数据集（检验 Agent 在没写过规则的数据上能不能搭看板）
 - `da-agent render-dashboard runs/<编号>`：不调用模型，用 spec.json（可以手工改）重新生成看板
 - `da-agent ui`：打开本机图形界面（需要可选依赖：uv sync --group ui），回放已保存的运行或实时提问
 
@@ -513,7 +514,7 @@ def main(argv: list[str] | None = None) -> int:
     site_parser = commands.add_parser("build-site", help="生成项目展示网站（静态网页，用于 GitHub Pages）")
     site_parser.add_argument("--out", type=Path, default=Path("_site"), help="输出目录，默认 _site")
     build_parser = commands.add_parser("build-dashboard", help="Agent 根据数据自己设计看板，生成 runs/<编号>/dashboard.html")
-    build_parser.add_argument("source", choices=["retail", "financials"], help="retail 电商交易；financials 上市公司财报")
+    build_parser.add_argument("source", help="retail 电商交易；financials 上市公司财报；或者一个 .csv 文件（没有任何规则和说明）")
     build_parser.add_argument("--goal", help="看板给谁看、帮他判断什么；不填用默认（业务负责人看整体情况）")
     build_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 调用真实模型（默认）；fake 按剧本回放")
     build_parser.add_argument("--script", type=Path, help="--llm fake 时使用的剧本文件")
@@ -521,6 +522,8 @@ def main(argv: list[str] | None = None) -> int:
     render_parser = commands.add_parser("render-dashboard", help="不调用模型，按 spec.json 重新生成看板（可以先手工改方案）")
     render_parser.add_argument("run_dir", type=Path, help="build-dashboard 的运行目录")
     render_parser.add_argument("--spec", type=Path, help="改过的方案文件；不填用运行目录里的 spec.json")
+    fetch_parser = commands.add_parser("fetch-dataset", help="下载外部公开数据集，例如 bank-marketing（UCI，CC BY 4.0）")
+    fetch_parser.add_argument("name", help="数据集名字：bank-marketing")
     commands.add_parser("dashboard-data", help="重新生成数据看板的数字 reports/dashboard/dashboard.json（需要先 prepare-data）")
     ui_parser = commands.add_parser("ui", help="打开本机图形界面：回放已保存的运行，或实时提问（需要 uv sync --group ui）")
     ui_parser.add_argument("--port", type=int, default=8501, help="端口，默认 8501")
@@ -548,6 +551,11 @@ def main(argv: list[str] | None = None) -> int:
             return build_dashboard(args.source, args.goal, args.llm, args.script, args.max_tool_calls)
         if args.command == "render-dashboard":
             return render_dashboard(args.run_dir, args.spec)
+        if args.command == "fetch-dataset":
+            from .external_data import fetch
+
+            print(f"数据：{fetch(args.name)}")
+            return 0
         if args.command == "dashboard-data":
             return dashboard_data()
         if args.command == "ui":

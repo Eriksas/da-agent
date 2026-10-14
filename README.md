@@ -340,7 +340,14 @@ uv run da-agent build-dashboard financials --llm fake --script fixtures/fake_llm
 
 **第一次真实运行（2026-10-14，样本量 1）**：模型独立完成，9 张图、被退回 4 次都自己改好，按运行前冻结的[评分表](eval/dashboard_rubric.md)各项都满足；但人工复核发现商品 Top 10 里有两件是被取消的大单（Agent 按下单口径排名），另有 3 处程序问题。程序问题已修复，并新增一条自动提示（排名里大部分被取消的分组），用同一份方案不调用模型重新生成做了对比。见[复核记录](examples/dashboard_runs/20261014T140646-959e2b/review.md)。
 
-还没做：多次运行的评测、导出成 Tableau 工作簿（可行性已经在本机 Tableau Public 2026.1 上验证过）。方案的表达能力有意做得有限：新客留存这类需要按客户先算首购时间的分析，现在的方案写不出来。
+**盲测：一份从没见过、也没有任何说明的 CSV（M13b）**：UCI Bank Marketing（41,188 行，CC BY 4.0），只给 CSV，不写规则、不给数据说明。评分表在第一次运行前冻结；真实模型跑 3 次，3 次都独立完成，口径都对。评分表列出的 5 个数据陷阱（pdays = 999 是“从未联系过”、unknown 是缺失值、月份没有年份、小样本的极端转化率、通话时长是事后数据），3 次都自己发现了（其中一次小样本提醒不完整）。主要问题是 3 次里有 2 次把对“一行代表什么”的猜测写成了事实。见[复核记录](examples/dashboard_runs/bank-marketing-review.md)。
+
+```bash
+uv run da-agent fetch-dataset bank-marketing   # 下载并校验 SHA256
+uv run da-agent build-dashboard data/raw/bank-marketing/bank-additional-full.csv --goal "营销负责人复盘这轮电话营销"
+```
+
+还没做：Online Shoppers 等更多数据集、导出成 Tableau 工作簿（可行性已经在本机 Tableau Public 2026.1 上验证过）。方案的表达能力有意做得有限：新客留存这类需要按客户先算首购时间的分析，现在的方案写不出来。
 
 ## 本机图形界面（M11 产出）
 
