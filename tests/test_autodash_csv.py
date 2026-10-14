@@ -74,3 +74,13 @@ def test_fetch_extracts_the_nested_archive(monkeypatch: pytest.MonkeyPatch, tmp_
     assert (tmp_path / "bank-marketing" / "bank-additional-names.txt").exists()
     with pytest.raises(ValueError, match="没有名为"):
         external_data.fetch("nope")
+
+
+def test_extract_reads_a_flat_archive(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    outer = tmp_path / "shoppers.zip"
+    with zipfile.ZipFile(outer, "w") as z:
+        z.writestr("online_shoppers_intention.csv", "Month,Revenue\nJune,FALSE\n")
+    monkeypatch.setattr(external_data, "RAW_DIR", tmp_path)
+    dataset = external_data.DATASETS["online-shoppers"]
+    (tmp_path / "online-shoppers").mkdir()
+    assert external_data.extract(dataset, outer).read_text(encoding="utf-8") == "Month,Revenue\nJune,FALSE\n"
