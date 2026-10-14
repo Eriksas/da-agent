@@ -43,6 +43,8 @@ window.DashCharts = (() => {
   const pct = (r, d = 1) => (r == null ? '—' : (r * 100).toFixed(d) + '%');
   const monthName = m => `${m.slice(0, 4)} 年 ${Number(m.slice(5))} 月`;
   const sum = xs => xs.reduce((a, b) => a + b, 0);
+  // 12px 字号下文字大约多宽：西文和数字约 7px，中文约 12px（只用来排标签，不需要精确）
+  const textWidth = text => [...String(text)].reduce((w, ch) => w + (/[\u0000-\u00ff]/.test(ch) ? 7 : 12), 0);
 
   // 坐标刻度取整：1、2、2.5、5 × 10^k
   function niceTicks(max, count = 4) {
@@ -140,10 +142,12 @@ window.DashCharts = (() => {
     if (text) label(svg, x2 + 4, yy + 4, text, {class: 'reflabel'});
   }
 
-  // 横轴标签：YYYY-MM 对齐整月；其他每隔几个标一个，保证标签之间至少 58px
+  // 横轴标签：YYYY-MM 对齐整月；其他每隔几个标一个。间距按最长的标签算（至少 28px）：
+  // “2011-12”要约 58px，“Mar”只要约 30px，半宽的图上 10 个月份也能全部标出来
   function xLabels(svg, keys, xAt, y, band) {
     const monthly = keys.every(k => /^\d{4}-\d{2}$/.test(k));
-    const every = [1, 2, 3, 6, 12].find(k => band * k >= 58) || Math.ceil(58 / band);
+    const gap = Math.max(28, Math.max(...keys.map(textWidth)) + 10);
+    const every = [1, 2, 3, 6, 12].find(k => band * k >= gap) || Math.ceil(gap / band);
     keys.forEach((k, i) => {
       const show = monthly ? (Number(k.slice(5)) - 1) % every === 0 : i % every === 0;
       if (show) label(svg, xAt(i), y, k, {class: 'tick', 'text-anchor': 'middle'});
@@ -265,10 +269,9 @@ window.DashCharts = (() => {
                    'fill-opacity': anyAccent && !p.accent ? 0.75 : 0.9, stroke: token('--surface'), 'stroke-width': 1.5}, svg);
     }
     const placed = [];
-    const widthOf = text => [...text].reduce((w, ch) => w + (/[\u0000-\u00ff]/.test(ch) ? 7 : 12), 0);
     for (const i of order) {
       if (!named.has(i)) continue;
-      const p = points[i], w = widthOf(p.label), right = x(p.x) + 9 + w <= W - 2;
+      const p = points[i], w = textWidth(p.label), right = x(p.x) + 9 + w <= W - 2;
       const box = {x1: right ? x(p.x) + 8 : x(p.x) - 8 - w, x2: right ? x(p.x) + 8 + w : x(p.x) - 8, y1: y(p.y) - 9, y2: y(p.y) + 5};
       if (placed.some(b => b.x1 < box.x2 && box.x1 < b.x2 && b.y1 < box.y2 && box.y1 < b.y2)) continue;
       placed.push(box);

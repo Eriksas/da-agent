@@ -139,3 +139,17 @@ def test_month_numbers_are_grounded_by_month_name_labels() -> None:
     assert ungrounded_numbers("11 月最高", {"rows": [{"x": "Oct", "values": [0.2]}, {"x": "Dec", "values": [0.1]}]}) \
         == ["11"]  # ≤ 10 的整数本来就不核查，所以用 11 月检验
     assert ungrounded_numbers("11 月", {"rows": [{"x": "Novak", "values": [1]}]}) == ["11"]  # 只认整个标签是月份
+
+
+def test_filter_buttons_follow_the_same_order_as_the_charts(csv_path: Path) -> None:
+    """筛选器按钮以前按字母排（fri、mon、thu……，M13e 复核发现）；现在和图一样：日历顺序、模型给的 order、“其他”放最后。"""
+    with connect_source(str(csv_path)) as con:
+        out = compile_dashboard(con, DashboardSpec.model_validate({
+            "title": "营销看板", "goal": "看整体转化", "metrics": METRICS,
+            "charts": [{"id": "k", "title": "转化率", "type": "kpi", "metrics": ["rate"], "why": "整体"},
+                       {"id": "k2", "title": "记录数", "type": "kpi", "metrics": ["records"], "why": "规模"}],
+            "filters": [{"column": "day_of_week"},
+                        {"column": "education", "keep": ["university.degree", "basic.4y"], "other_label": "Other"}]}))
+    labels = [[o["label"] for o in f["options"]] for f in out["filters"]]
+    assert labels[0] == ["全部", "mon", "tue", "wed", "fri"]
+    assert labels[1] == ["全部", "basic.4y", "university.degree", "Other"]  # Other 按字母本该排第一

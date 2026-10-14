@@ -607,7 +607,10 @@ def compile_dashboard(con: duckdb.DuckDBPyConnection, spec: DashboardSpec) -> di
         year_dim = Dimension(column=YEAR)
         axes.append([None] + [(year_dim, y) for y in years])
     for i, dim in enumerate(spec.filters):
-        values = [str(v) for v in compiler.distinct(dim)]
+        # 按钮的先后和图里一致：模型给的 order、月份星期的日历顺序；合并出来的“其他”放最后
+        raw = compiler.distinct(dim)
+        rank = _ranker(dim, raw)
+        values = [str(v) for v in sorted(raw, key=lambda v: (bool(dim.keep) and v == dim.other_label, rank(v)))]
         filters.append({"id": f"f{i}", "label": dim.label or dim.column,
                         "options": [{"id": "all", "label": "全部"}] + [{"id": v, "label": v} for v in values]})
         axes.append([None] + [(dim, v) for v in values])
