@@ -10,6 +10,7 @@ from da_agent import external_data
 from da_agent.autodash.compile import compile_dashboard
 from da_agent.autodash.sources import connect_source, profile_table, source_of
 from da_agent.autodash.spec import DashboardSpec
+from da_agent.tools import execute
 
 CSV = """age;job;pdays;emp.var.rate;y;signup_date
 30;admin.;999;1.1;no;2010-05-03
@@ -84,3 +85,34 @@ def test_extract_reads_a_flat_archive(monkeypatch: pytest.MonkeyPatch, tmp_path:
     dataset = external_data.DATASETS["online-shoppers"]
     (tmp_path / "online-shoppers").mkdir()
     assert external_data.extract(dataset, outer).read_text(encoding="utf-8") == "Month,Revenue\nJune,FALSE\n"
+
+
+def test_values_that_look_missing_are_reported(tmp_path: Path) -> None:
+    """unknown、未知这类取值会在图里单独成组；数据概况直接给出它们的占比（M13e 有一次运行没提 unknown）。"""
+    path = tmp_path / "people.csv"
+    path.write_text("job;default;city\nadmin.;no;北京\nunknown;unknown;未知\nstudent;no;上海\nadmin.;unknown;北京\n",
+                    encoding="utf-8")
+    with connect_source(str(path)) as con:
+        found = profile_table(con)["possible_missing"]
+    assert sorted((f["column"], f["value"], f["rows"]) for f in found) == [
+        ("city", "未知", 1), ("default", "unknown", 2), ("job", "unknown", 1)]
+    assert next(f for f in found if f["column"] == "default")["share"] == 0.5
+
+
+def test_argument_errors_come_with_the_right_shape(csv_path: Path) -> None:
+    """预览时把指标定义写进 chart.metrics、漏掉顶层 metrics（M13e 里 8 次）：报错直接给出正确写法。"""
+    with connect_source(str(csv_path)) as con:
+        bad = execute(con, "preview_chart", {"chart": {"id": "c", "title": "测试图", "type": "kpi", "why": "测试",
+                                                       "metrics": [{"id": "n", "label": "人数", "agg": "count"}]}})
+    assert not bad.ok and "metrics: Field required" in bad.content["error"]
+    assert "chart.metrics 只写指标 id" in bad.content["error"]
+
+
+def test_submissions_are_capped_at_nine_charts_but_old_plans_still_render(csv_path: Path) -> None:
+    metrics = [{"id": "n", "label": "人数", "agg": "count"}]
+    plan = {"title": "营销转化", "goal": "看转化情况", "metrics": metrics,
+            "charts": [{"id": f"k{i}", "title": "人数卡片", "type": "kpi", "metrics": ["n"], "why": "测试"} for i in range(10)]}
+    with connect_source(str(csv_path)) as con:
+        bad = execute(con, "submit_dashboard", plan)
+        assert not bad.ok and "图最多 9 张" in bad.content["error"]
+        assert compile_dashboard(con, DashboardSpec.model_validate(plan))["charts"]  # 以前 10 张图的方案照常生成
