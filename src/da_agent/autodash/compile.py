@@ -70,6 +70,10 @@ def _dim_sql(dim: Dimension, params: list[Any]) -> str:
             return f"isodow({col})"
         case "hour":
             return f"hour({col})"
+    if dim.bins:  # 分段：取值是段的序号 0..k，标签由 Compiler 按分界点和列的类型生成
+        params += list(dim.bins)
+        cases = " ".join(f"WHEN {col} < ? THEN {i}" for i in range(len(dim.bins)))
+        return f"CASE WHEN {col} IS NULL THEN NULL {cases} ELSE {len(dim.bins)} END"
     if dim.keep:
         params += [*dim.keep, dim.other_label]
         return f"CASE WHEN {col} IN ({', '.join('?' * len(dim.keep))}) THEN CAST({col} AS VARCHAR) ELSE ? END"
@@ -112,6 +116,23 @@ def _label(dim: Dimension | None, value: Any) -> str | None:
     return str(value)
 
 
+def _edge(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else f"{value:g}"
+
+
+def bin_labels(edges: list[float], integer: bool, lo: float | None, hi: float | None) -> list[str]:
+    """分段的标签。整数列（分界点也是整数）写成 ≤0、1–5、6–20、≥21；小数列写成 <60、60–300、≥300（左闭右开）。
+    最小值正好落在第一段的上限、最大值正好等于最后一个分界点时，直接写那个数。"""
+    if integer and all(float(e).is_integer() for e in edges):
+        e = [int(x) for x in edges]
+        first = str(e[0] - 1) if lo is not None and lo == e[0] - 1 else f"≤{e[0] - 1}"
+        middle = [str(a) if a == b - 1 else f"{a}–{b - 1}" for a, b in zip(e, e[1:])]
+        last = str(e[-1]) if hi is not None and hi == e[-1] else f"≥{e[-1]}"
+        return [first, *middle, last]
+    return [f"<{_edge(edges[0])}", *(f"{_edge(a)}–{_edge(b)}" for a, b in zip(edges, edges[1:])),
+            f"≥{_edge(edges[-1])}"]
+
+
 class Compiler:
     """一份数据上的编译器：缓存表的概况，按筛选条件（slice）算图的数据。"""
 
@@ -125,6 +146,17 @@ class Compiler:
             col = _q(self.source.time_column)
             bounds = fetch_one(con, f"SELECT min({col}) AS lo, max({col}) AS hi FROM {self.table}")
         self.time_bounds = (bounds["lo"], bounds["hi"]) if bounds else None
+        self._ranges: dict[str, tuple[Any, Any]] = {}
+
+    def label(self, dim: Dimension | None, value: Any) -> str | None:
+        """取值 → 显示的标签（分段显示成范围）。"""
+        if dim is not None and dim.bins and value is not None:
+            if dim.column not in self._ranges:
+                r = fetch_one(self.con, f"SELECT min({_q(dim.column)}) AS lo, max({_q(dim.column)}) AS hi FROM {self.table}")
+                self._ranges[dim.column] = (r["lo"], r["hi"])
+            lo, hi = self._ranges[dim.column]
+            return bin_labels(dim.bins, self.types.get(dim.column) == "integer", lo, hi)[int(value)]
+        return _label(dim, value)
 
     # ---------- 查询 ----------
     def _where(self, slice_filters: list[tuple[Dimension, str]], params: list[Any]) -> str:
@@ -187,6 +219,11 @@ class Compiler:
             missing = [v for v in listed if v not in set(self._present(dim.column, listed))] if listed else []
             if missing:
                 problems.append(f"{where}：order 里 {dim.column} 没有这些取值 {missing}；常见取值：{self._common(dim.column)}")
+        for m in spec_metrics:
+            if m.format == "percent" and m.agg in ("avg", "min", "max") and m.column in self.types:
+                top = fetch_one(self.con, f"SELECT max(abs({_q(m.column)})) AS v FROM {self.table}")["v"]
+                if top is not None and top > 1:
+                    problems.append(f"指标 {m.id}：percent 用于 0–1 之间的值，{m.column} 最大是 {_num(top)}；改用 number 格式")
         for i, dim in enumerate(filters):
             n = len(self.distinct(dim))
             if n > MAX_FILTER_OPTIONS + 1:
@@ -210,7 +247,8 @@ class Compiler:
         problems = []
         if any(m not in metrics for m in c.metrics):
             return problems  # 静态校验已经报过
-        for name, dim, limit in (("series", c.series, MAX_SERIES.get(c.type)), ("x", c.x, MAX_X.get(c.type))):
+        x_limit = None if c.type == "scatter" and c.top_n else MAX_X.get(c.type)
+        for name, dim, limit in (("series", c.series, MAX_SERIES.get(c.type)), ("x", c.x, x_limit)):
             if dim is not None and limit:
                 n = len(self.distinct(dim))
                 if n > limit:
@@ -279,7 +317,7 @@ class Compiler:
             if parts:  # 比率卡片带上分子和分母：结论可以写“11.3%（4,640 / 41,188）”
                 facts["numerator"], facts["denominator"] = parts.get((None, None), (None, None))
             return {"rows": [{"x": None, "s": None, "values": [_num(value)]}], "facts": facts, "notes": notes}
-        out = [{"x": _label(c.x, r["x"]), "s": _label(c.series, r.get("s")), "_x": r["x"], "_s": r.get("s"),
+        out = [{"x": self.label(c.x, r["x"]), "s": self.label(c.series, r.get("s")), "_x": r["x"], "_s": r.get("s"),
                 "values": [_num(r[f"m{i}"]) for i in range(len(c.metrics))]} for r in rows]
         for r in out:  # 比率的每个点都带上分子和分母：小样本的分组能看出、也能在结论里写出样本量
             if parts and (r["_x"], r["_s"]) in parts:
@@ -305,8 +343,14 @@ class Compiler:
             s_rank = _ranker(c.series, [r["_s"] for r in out])
             out.sort(key=lambda r: (x_rank(r["_x"]), s_rank(r["_s"])))
             out = self._fill_months(c, out, additive)
+            out = self._fill_bins(c, out, additive)
+            if c.type == "scatter" and c.top_n and len(out) > c.top_n:
+                biggest = sorted(out, key=lambda r: -(r["values"][0] or 0))[:c.top_n]
+                notes.append(f"只画了{metrics[c.metrics[0]].label}最大的 {c.top_n} 个，共 {len(out)} 个")
+                out = [r for r in out if r in biggest]
         facts: dict[str, Any] = {}
-        values = [r["values"][0] for r in out if r["values"][0] is not None and not r.get("other")]
+        vi = 1 if c.type == "scatter" else 0  # 散点图的最大最小看纵轴指标（比率），不看规模
+        values = [r["values"][vi] for r in out if r["values"][vi] is not None and not r.get("other")]
         if additive and c.type in ("bar", "column", "stacked_column") and values:
             total = sum(r["values"][0] or 0 for r in out)
             facts["total"] = _num(total)
@@ -325,10 +369,13 @@ class Compiler:
             if grand:
                 facts["series_share"] = {k: round(v / grand, 4) for k, v in by_series.items()}
         if values:
-            hi = max((r for r in out if r["values"][0] is not None and not r.get("other")), key=lambda r: r["values"][0])
-            lo = min((r for r in out if r["values"][0] is not None and not r.get("other")), key=lambda r: r["values"][0])
-            facts["max"] = {"x": hi["x"], "s": hi["s"], "value": hi["values"][0]}
-            facts["min"] = {"x": lo["x"], "s": lo["s"], "value": lo["values"][0]}
+            shown = [r for r in out if r["values"][vi] is not None and not r.get("other")]
+            hi = max(shown, key=lambda r: r["values"][vi])
+            lo = min(shown, key=lambda r: r["values"][vi])
+            facts["max"] = {"x": hi["x"], "s": hi["s"], "value": hi["values"][vi]}
+            facts["min"] = {"x": lo["x"], "s": lo["s"], "value": lo["values"][vi]}
+        if c.reference:
+            facts["reference"] = self._reference(c, metrics, slice_filters)
         notes += self._offset_notes(c, metrics, out, slice_filters)
         partial = self._mark_partial(c, out)
         if partial:
@@ -352,6 +399,28 @@ class Compiler:
             r.pop("_s", None)
         return result
 
+    def _reference(self, c: Chart, metrics: dict[str, Metric],
+                   slice_filters: list[tuple[Dimension, str]]) -> dict[str, Any]:
+        """参考线：同一个指标不分组时的值（当前筛选下），比率还带分子分母。"""
+        metric_id = c.metrics[1] if c.type == "scatter" else c.metrics[0]
+        overall = c.model_copy(update={"type": "kpi", "x": None, "series": None, "metrics": [metric_id]})
+        rows = self.query(overall, metrics, slice_filters)
+        ref: dict[str, Any] = {"value": _num(rows[0]["m0"]) if rows else None}
+        parts = self._ratio_parts(overall, metrics, slice_filters)
+        if parts:
+            ref["numerator"], ref["denominator"] = parts.get((None, None), (None, None))
+        return ref
+
+    def _fill_bins(self, c: Chart, rows: list[dict[str, Any]], additive: bool) -> list[dict[str, Any]]:
+        """分段的横轴补上没有记录的段：分布图上空的段也要看得到（计数为 0，比率为空）。"""
+        if c.x is None or not c.x.bins or c.series is not None or c.type not in ("column", "line", "table"):
+            return rows
+        have = {r["_x"]: r for r in rows if r["_x"] is not None}
+        filled = [have.get(i) or {"x": self.label(c.x, i), "s": None, "_x": i, "_s": None,
+                                  "values": [0 if additive else None] * len(c.metrics)}
+                  for i in range(len(c.x.bins) + 1)]
+        return filled + [r for r in rows if r["_x"] is None]
+
     def _ratio_parts(self, c: Chart, metrics: dict[str, Metric],
                      slice_filters: list[tuple[Dimension, str]]) -> dict[tuple, tuple]:
         """比率指标每个点的（分子，分母），按 (x, series) 的原始取值索引；不是比率就返回空。"""
@@ -373,7 +442,7 @@ class Compiler:
         if m.agg != "sum" or m.where.get(by) != [orig]:
             return []
         probe = Metric(id="zz_offset", label="抵消", agg="sum", column=m.column, where={**m.where, by: [against]})
-        offsets = {_label(c.x, r["x"]): r["m0"] or 0 for r in self.query(
+        offsets = {self.label(c.x, r["x"]): r["m0"] or 0 for r in self.query(
             c.model_copy(update={"metrics": ["zz_offset"], "series": None}), {"zz_offset": probe}, slice_filters)}
         notes = []
         for r in rows:
@@ -500,6 +569,16 @@ def _pool(data: dict[str, Any]) -> list[float]:
     return pool
 
 
+def highlight_problems(c: Chart, data: dict[str, Any]) -> list[str]:
+    """highlight 里的取值必须是图里的某个分组（照抄预览的 x）。"""
+    labels = [r["x"] for r in data["rows"]]
+    missing = [v for v in c.highlight if v not in labels]
+    if not missing:
+        return []
+    hint = "；被 top_n 截掉的分组可以调大 top_n" if c.top_n else ""
+    return [f"图 {c.id}：highlight 里这些取值在图里没有 {missing}；图里的取值：{labels[:15]}{hint}"]
+
+
 def ungrounded_numbers(text: str, data: dict[str, Any]) -> list[str]:
     """结论句里在这张图的数据中找不到出处的数字（和报告核查用同一个数字提取规则）。"""
     pool = _pool(data)
@@ -528,7 +607,10 @@ def compile_dashboard(con: duckdb.DuckDBPyConnection, spec: DashboardSpec) -> di
         year_dim = Dimension(column=YEAR)
         axes.append([None] + [(year_dim, y) for y in years])
     for i, dim in enumerate(spec.filters):
-        values = [str(v) for v in compiler.distinct(dim)]
+        # 按钮的先后和图里一致：模型给的 order、月份星期的日历顺序；合并出来的“其他”放最后
+        raw = compiler.distinct(dim)
+        rank = _ranker(dim, raw)
+        values = [str(v) for v in sorted(raw, key=lambda v: (bool(dim.keep) and v == dim.other_label, rank(v)))]
         filters.append({"id": f"f{i}", "label": dim.label or dim.column,
                         "options": [{"id": "all", "label": "全部"}] + [{"id": v, "label": v} for v in values]})
         axes.append([None] + [(dim, v) for v in values])
@@ -547,6 +629,7 @@ def compile_dashboard(con: duckdb.DuckDBPyConnection, spec: DashboardSpec) -> di
         if bad:
             insight_problems.append(f"图 {c.id} 的 insight 里这些数字在这张图的数据中找不到出处：{bad}；"
                                     "改成 preview_chart 返回的原数，或删掉")
+        insight_problems += highlight_problems(c, slices[default][c.id])
     if insight_problems:
         raise DashboardProblems(insight_problems)
     return {
@@ -556,7 +639,10 @@ def compile_dashboard(con: duckdb.DuckDBPyConnection, spec: DashboardSpec) -> di
         "metrics": {m.id: {"label": m.label, "format": m.format} for m in spec.metrics},
         "charts": [{"id": c.id, "title": c.title, "type": c.type, "metrics": c.metrics, "why": c.why,
                     "ratio_parts": ([metrics[c.metrics[0]].left, metrics[c.metrics[0]].right]
-                                    if metrics[c.metrics[0]].agg == "ratio" else None),
+                                    if metrics[c.metrics[0]].agg == "ratio" and len(c.metrics) == 1 else None),
+                    "reference": c.reference, "highlight": c.highlight, "width": c.width, "section": c.section,
+                    "metric_units": {m: compiler.unit_of(c.model_copy(update={"metrics": [m]}), metrics)
+                                     for m in c.metrics},
                     "insight": c.insight, "unit": compiler.unit_of(c, metrics),
                     "x_label": (c.x.label or c.x.column) if c.x else None,
                     "series_label": (c.series.label or c.series.column) if c.series else None}
@@ -577,6 +663,9 @@ def preview_chart(con: duckdb.DuckDBPyConnection, metrics: list[Metric], chart: 
     if problems:
         raise DashboardProblems(problems)
     data = compiler.chart_data(chart, by_id)
+    problems = highlight_problems(chart, data)
+    if problems:
+        raise DashboardProblems(problems)
     rows = data["rows"]
     return {"tool": "preview_chart", "chart": chart.id, "type": chart.type, "unit": compiler.unit_of(chart, by_id),
             "rows": rows[:PREVIEW_ROWS], "row_count": len(rows), "facts": data["facts"], "notes": data["notes"],

@@ -3,8 +3,8 @@
 (() => {
   'use strict';
   const DATA = JSON.parse(document.getElementById('dashboard-data').textContent);
-  const {h, num, pct, token, sum, showTip, hideTip, hover, drawColumns, drawLines, drawBars, drawHeatmap, scaleLegend,
-         table, empty, legendOf} = window.DashCharts;
+  const {h, num, pct, token, sum, showTip, hideTip, hover, drawColumns, drawLines, drawBars, drawHeatmap, drawScatter,
+         refLegend, scaleLegend, table, empty, legendOf} = window.DashCharts;
   const SLOTS = ['--series-1', '--series-2', '--series-3', '--series-4', '--series-5'];
   const state = Object.fromEntries(DATA.filters.map(f => [f.id, 'all']));
 
@@ -14,7 +14,7 @@
   // 数字格式：金额带单位，1 万以上按万、亿缩写；计数等其他数字 100 万以内写全（39,516 而不是“4万”）；比率按百分比
   function formatter(chart, full = false) {
     const metric = DATA.metrics[chart.metrics[0]];
-    const unit = chart.unit || '';
+    const unit = (chart.metric_units && chart.metric_units[chart.metrics[0]]) ?? chart.unit ?? '';
     if (metric.format === 'percent') return v => (v == null ? '—' : pct(v, full ? 2 : 1));
     const shortFrom = metric.format === 'money' ? 1e4 : 1e6;
     return v => {
@@ -41,6 +41,16 @@
       ? [{value: parts[0].format(r.numerator), label: parts[0].label}, {value: parts[1].format(r.denominator), label: parts[1].label}]
       : [];
   };
+
+  // 参考线：整体值（当前筛选下，由程序算出）。图上写“整体 15.5%”，图下的图例带上分子分母
+  function referenceOf(chart, data) {
+    const ref = data.facts && data.facts.reference;
+    if (!chart.reference || !ref || ref.value == null) return null;
+    const fmt = formatter({...chart, metrics: [chart.metrics[chart.type === 'scatter' ? 1 : 0]]});
+    const parts = ref.numerator != null ? `（${num(ref.numerator)} / ${num(ref.denominator)}）` : '';
+    return {value: ref.value, text: `整体 ${fmt(ref.value)}`, legend: `虚线：整体 ${fmt(ref.value)}${parts}`};
+  }
+  const highlighted = chart => new Set(chart.highlight || []);
 
   // 分组的颜色跟着分组走，不跟着排名走：按默认视图（全部数据）里的分组顺序固定下来，筛选后不会换色
   const seriesOrder = Object.fromEntries(DATA.charts.map(c => [c.id,
@@ -74,9 +84,11 @@
     const metricLabel = DATA.metrics[chart.metrics[0]].label;
     const rows = data.rows;
     if (!rows.length) return {draw: empty('当前筛选下没有数据。')};
+    const ref = referenceOf(chart, data), hl = highlighted(chart);
     if (chart.type === 'column') {
-      return {draw: host => drawColumns(host, {
-        points: rows.map(r => ({key: r.x, partial: r.partial})), format: fmt, title: chart.title,
+      return {legend: ref ? refLegend(ref.legend) : null, draw: host => drawColumns(host, {
+        points: rows.map(r => ({key: r.x, partial: r.partial})), format: fmt, title: chart.title, reference: ref,
+        colorAt: hl.size ? i => token(hl.has(rows[i].x) ? '--series-1' : '--muted') : null,
         series: [{name: metricLabel, color: token('--series-1'), values: rows.map(r => r.values[0])}],
         onTip: i => [rows[i].x + (rows[i].partial ? '（不完整）' : ''), [{value: full(rows[i].values[0]), label: metricLabel}]
           .concat(rows[i].share != null ? [{value: pct(rows[i].share), label: '占比'}] : [], partTips(chart, rows[i]))]})};
@@ -87,19 +99,36 @@
            series: [{name: metricLabel, color: token('--series-1'), values: rows.map(r => r.values[0])}]};
       const draw = chart.type === 'line' ? drawLines : drawColumns;
       return {
-        draw: host => draw(host, {points, series, format: fmt, title: chart.title,
+        draw: host => draw(host, {points, series, format: fmt, title: chart.title, reference: chart.series_label ? null : ref,
                                   onTip: i => [points[i].key + (points[i].partial ? '（不完整）' : ''),
                                                series.map(sr => ({color: sr.color, value: full(sr.values[i]), label: sr.name}))
                                                  .concat(chart.series_label ? [] : partTips(chart, rows[i]))]}),
-        legend: series.length > 1 ? legendOf(series) : null,
+        legend: series.length > 1 ? legendOf(series) : (ref && !chart.series_label ? refLegend(ref.legend) : null),
+      };
+    }
+    if (chart.type === 'scatter') {
+      const [xm, ym] = chart.metrics.map(id => DATA.metrics[id]);
+      const fx = formatter({...chart, metrics: [chart.metrics[0]]}), fy = formatter({...chart, metrics: [chart.metrics[1]]});
+      const fxFull = formatter({...chart, metrics: [chart.metrics[0]]}, true);
+      const fyFull = formatter({...chart, metrics: [chart.metrics[1]]}, true);
+      const pts = rows.filter(r => r.values[0] != null && r.values[1] != null)
+        .map(r => ({label: r.x, x: r.values[0], y: r.values[1], accent: hl.has(r.x)}));
+      if (!pts.length) return {draw: empty('当前筛选下没有数据。')};
+      return {
+        draw: host => drawScatter(host, {points: pts, xFormat: fx, yFormat: fy, xTitle: xm.label, yTitle: ym.label,
+                                         reference: ref, title: chart.title,
+                                         onTip: i => [pts[i].label, [{value: fxFull(pts[i].x), label: xm.label},
+                                                                     {value: fyFull(pts[i].y), label: ym.label}]]}),
+        legend: ref ? refLegend(ref.legend) : null,
       };
     }
     if (chart.type === 'bar') {
-      return {draw: host => drawBars(host, rows.map(r => ({
+      return {legend: ref ? refLegend(ref.legend) : null, draw: host => drawBars(host, rows.map(r => ({
         label: r.x, value: Math.max(r.values[0] || 0, 0), valueText: fmt(r.values[0]), muted: !!r.other,
+        accent: hl.has(r.x), dim: hl.size > 0 && !hl.has(r.x) && !r.other,
         tip: [{value: full(r.values[0]), label: metricLabel}]
           .concat(r.share != null ? [{value: pct(r.share), label: '占比'}] : [], partTips(chart, r)),
-      })))};
+      })), {reference: ref})};
     }
     if (chart.type === 'heatmap') {
       const xs = [...new Set(rows.map(r => r.x))], ys = seriesOrder[chart.id].filter(n => rows.some(r => r.s === n));
@@ -147,17 +176,38 @@
     }
   }
 
-  function buildCards() {
-    const grid = document.getElementById('charts');
-    // 条形图两两并排占半行；落单的条形图和其他图都占满一行
-    const charts = DATA.charts.filter(c => c.type !== 'kpi');
+  // 半行的图两两并排：width 是 half 的图，以及 auto 时的条形图；落单的占满一行
+  function halves(charts) {
+    const wantsHalf = c => c.width === 'half' || ((c.width || 'auto') === 'auto' && c.type === 'bar');
     const half = new Set();
     for (let i = 0; i < charts.length - 1; i++) {
-      if (charts[i].type === 'bar' && charts[i + 1].type === 'bar' && !half.has(charts[i].id)) {
+      if (wantsHalf(charts[i]) && wantsHalf(charts[i + 1])) {
         half.add(charts[i].id).add(charts[i + 1].id);
+        i++;
       }
     }
-    grid.replaceChildren(...charts.map(chart => {
+    return half;
+  }
+
+  // 按 section 分区（按第一次出现的顺序），每个分区一个小标题和一个网格；没有分区时只有一个网格
+  function buildCards() {
+    const host = document.getElementById('charts');
+    const groups = [];
+    for (const chart of DATA.charts.filter(c => c.type !== 'kpi')) {
+      const title = chart.section || '';
+      let group = groups.find(g => g.title === title);
+      if (!group) groups.push(group = {title, charts: []});
+      group.charts.push(chart);
+    }
+    host.replaceChildren(...groups.flatMap(g => [
+      g.title ? h('h2', {class: 'section-title'}, g.title) : null,
+      h('div', {class: 'auto-grid'}, cardsOf(g.charts)),
+    ]).filter(Boolean));
+  }
+
+  function cardsOf(charts) {
+    const half = halves(charts);
+    return charts.map(chart => {
       const toggle = h('button', {type: 'button', class: 'view-toggle', 'aria-pressed': 'false'}, '看表格');
       const card = h('section', {class: `card dash-card${half.has(chart.id) ? '' : ' span-2'}`, id: `chart-${chart.id}`},
         h('div', {class: 'card-head'}, h('h2', {}, chart.title), toggle),
@@ -173,7 +223,7 @@
         card.querySelector('.table-host').hidden = !showTable;
       });
       return card;
-    }));
+    });
   }
 
   function buildFilters() {

@@ -192,6 +192,14 @@ def test_money_ratios_take_the_numerator_unit(con) -> None:
     assert preview_chart(con, [Metric.model_validate(GMV), Metric.model_validate(ORDERS), aov], kpi)["unit"] == "£"
 
 
+def test_each_metric_in_a_table_keeps_its_own_unit(con) -> None:
+    """表格里金额带 £，订单数不带（以前整张表都用第一个指标的单位）。"""
+    table = {"id": "t", "title": "各国明细", "type": "table", "metrics": ["gmv", "orders"], "x": {"column": "country"},
+             "why": "查数"}
+    out = compile_dashboard(con, spec(charts=[*spec().model_dump()["charts"], table]))
+    assert out["charts"][-1]["metric_units"] == {"gmv": "£", "orders": None}
+
+
 def test_missing_values_are_sent_back(con) -> None:
     with pytest.raises(DashboardProblems) as exc:
         compile_dashboard(con, spec(metrics=[GMV | {"where": {"line_type": ["Sales"]}}, ORDERS, CANCELLED, RATE]))

@@ -24,6 +24,7 @@ font-size:14px;color:var(--text-2);margin:12px 0}
 .dash-card .note div{color:var(--text-2);font-size:13px;margin-top:4px}
 .kpis.auto{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
 .kpi .sub{color:var(--text-2);font-size:13px;margin-top:4px;font-variant-numeric:tabular-nums}
+.section-title{font-size:18px;margin:32px 0 0;padding-top:14px;border-top:1px solid var(--border)}
 """
 
 
@@ -60,7 +61,7 @@ def render_dashboard(compiled: dict[str, Any], meta: dict[str, Any]) -> str:
 <div class="filters" id="filters" role="group" aria-label="筛选（对整页生效）"></div>
 <noscript><p class="card">看板的图表需要 JavaScript。</p></noscript>
 <div class="kpis auto" id="kpis"></div>
-<div class="auto-grid" id="charts"></div>
+<div id="charts"></div>
 <section class="card"><h2>数据说明</h2><ul>{notes}</ul>
 <p class="small muted">{_esc(source["description"])}</p></section>
 <script id="dashboard-data" type="application/json">{payload}</script>
