@@ -17,7 +17,7 @@ from ..paths import RUNS_DIR
 from ..report import write_review
 from .compile import compile_dashboard
 from .render import render_dashboard
-from .sources import connect_source
+from .sources import connect_source, source_of
 from .spec import DashboardSpec
 
 DEFAULT_GOAL = "业务负责人：先看整体规模和趋势，再看构成和需要注意的地方"
@@ -49,6 +49,7 @@ def build_dashboard(source: str, goal: str | None, llm: LLMClient, max_tool_call
     """返回（运行记录、运行目录、看板页面；Agent 没有提交通过的方案时页面为 None）。"""
     question = f"请为下面的读者搭一个看板。读者和目标：{goal or DEFAULT_GOAL}"
     with connect_source(source) as con:
+        source = source_of(con).name  # CSV 统一记成 csv:绝对路径，重新生成时能找到同一个文件
         run = run_agent(question, llm=llm, con=con, max_tool_calls=max_tool_calls, domain="dashboard", on_step=on_step)
     run_dir = save_run(run, runs_dir or RUNS_DIR)
     write_review(run_dir)
