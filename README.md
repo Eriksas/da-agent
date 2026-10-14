@@ -353,7 +353,7 @@ uv run da-agent build-dashboard data/raw/bank-marketing/bank-additional-full.csv
 - **比率带分子和分母**：比率图的每个点和比率指标卡都带上分子、分母，结论可以写“11.3%（4,640 / 41,188）”，小样本的分组一眼能看出；页面的提示框、表格和指标卡也显示它们。
 - **一行代表什么**：`profile_table` 算出哪些列能唯一标识一行、有多少完全重复的行。没有数据说明也没有唯一列时，直接告诉模型无法判断，按“记录数”说，不要断言。
 
-**第二份盲测：Online Shoppers（M13d）**：UCI Online Shoppers Purchasing Intention（12,330 行网站访问记录，CC BY 4.0），设置和 Bank Marketing 相同，评分表同样在第一次运行前冻结。真实模型跑 3 次，3 次都独立完成，评分表各项都满足（PageValues、SpecialDay 两个陷阱 Agent 没碰，没有检验到）。M13c 的改进：月份 3 次都按日历排，比率结论 3 次都写了分子分母且没有因此被退回，3 次的说明都写“按记录数计算、无法确认同一访客是否重复出现”（但有一次把每条记录的平均值叫成了“人均”）。复核还发现两个对任何数据都有效的程序问题：结论写“11 月”而数据是 Nov 会被当成没有出处（3 次都遇到），整数编码列的 keep 写成数字会被退回。见[复核记录](examples/dashboard_runs/online-shoppers-review.md)。
+**第二份盲测：Online Shoppers（M13d）**：UCI Online Shoppers Purchasing Intention（12,330 行网站访问记录，CC BY 4.0），设置和 Bank Marketing 相同，评分表同样在第一次运行前冻结。真实模型跑 3 次，3 次都独立完成，评分表各项都满足（PageValues、SpecialDay 两个陷阱 Agent 没碰，没有检验到）。M13c 的改进：月份 3 次都按日历排，比率结论 3 次都写了分子分母且没有因此被退回，3 次的说明都写“按记录数计算、无法确认同一访客是否重复出现”（但有一次把每条记录的平均值叫成了“人均”）。复核还发现两个对任何数据都有效的程序问题，已修复：结论写“11 月”而数据是 Nov 会被当成没有出处（3 次都遇到），整数编码列的 keep 写成数字会被退回；把当时被退回的调用原样重放，这两类退回都不再出现。见[复核记录](examples/dashboard_runs/online-shoppers-review.md)。
 
 ```bash
 uv run da-agent fetch-dataset online-shoppers
