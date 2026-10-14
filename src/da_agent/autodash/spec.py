@@ -17,7 +17,10 @@ from .sources import Source
 Grain = Literal["year", "quarter", "month", "week", "day", "weekday", "hour"]
 ADDITIVE = ("sum", "count")  # 可以按分组相加的聚合：只有它们能堆叠、能算“其他”和占比
 MAX_SERIES = {"line": 5, "stacked_column": 4}  # 分类色的上限：堆叠超过 4 段、线超过 5 条就读不清
-MAX_X = {"column": 36, "heatmap": 31, "table": 60}
+MAX_X = {"column": 36, "heatmap": 31, "table": 60, "scatter": 40}
+MAX_SECTIONS = 5
+REFERENCE_TYPES = ("bar", "column", "line", "scatter")  # 能画整体参考线的图
+HIGHLIGHT_TYPES = ("bar", "column", "scatter")  # 能突出几个分组的图
 
 
 class _Model(BaseModel):
@@ -45,6 +48,9 @@ class Dimension(_Model):
     order: list[Value] = Field(default_factory=list, max_length=60, description=(
         "分类的先后顺序，例如学历从低到高、年龄段从小到大；没列出的取值排在后面。"
         "不填时，月份和星期自动按日历排，其余按取值排序。只用于非时间列"))
+    bins: list[float] = Field(default_factory=list, max_length=10, description=(
+        "把数值列按这些分界点分段，从小到大，例如 [1, 6, 21] 把浏览页数分成 ≤0、1–5、6–20、≥21。"
+        "用来看分布（column + count）或各段的比率；分段按大小排序。只用于数值列，不和 keep、order 一起用"))
     label: str = Field("", max_length=20, description="显示名，例如“国家”；不填用列名")
 
 
@@ -59,20 +65,33 @@ class Metric(_Model):
         "只统计满足条件的行：列名 → 允许的取值，例如 {\"line_type\": [\"销售\"]}"))
     left: str | None = Field(None, description="ratio / difference 的第一个指标 id")
     right: str | None = Field(None, description="ratio / difference 的第二个指标 id")
-    format: Literal["money", "number", "percent"] = Field("number", description="显示格式；percent 用于 0–1 的比率")
+    format: Literal["money", "number", "percent"] = Field("number", description=(
+        "显示格式；percent 用于 0–1 的比率，以及 0–1 之间的值求平均（例如跳出率的平均）"))
 
 
 class Chart(_Model):
     id: str = Field(pattern=r"^[a-z][a-z0-9_]{0,30}$", description="图的代号")
     title: str = Field(min_length=2, max_length=30, description="标题，写清看什么，例如“每月 GMV”")
-    type: Literal["kpi", "line", "column", "stacked_column", "bar", "heatmap", "table"] = Field(description=(
-        "kpi 指标卡（一个数）；line 折线（随时间变化，可按 series 分几条线）；column 柱状（随时间或少量类别）；"
+    type: Literal["kpi", "line", "column", "stacked_column", "bar", "heatmap", "scatter", "table"] = Field(description=(
+        "kpi 指标卡（一个数）；line 折线（随时间变化，可按 series 分几条线）；column 柱状（随时间、少量类别或数值分段）；"
         "stacked_column 堆叠柱（随时间的构成）；bar 横向条形（类别排名，配 top_n）；heatmap 热力图（x × series 两个维度）；"
-        "table 表格（多个指标对照）"))
-    metrics: list[str] = Field(min_length=1, max_length=6, description="用到的指标 id；除 table 外只能填 1 个")
-    x: Dimension | None = Field(None, description="横轴（kpi 不填）")
+        "scatter 散点（每个分类一个点，横轴规模、纵轴比率：看规模和比率的关系，代替“数量 + 比率”的表格）；"
+        "table 表格（只用来查明细）"))
+    metrics: list[str] = Field(min_length=1, max_length=6, description=(
+        "用到的指标 id；scatter 填 2 个 [横轴指标, 纵轴指标]，table 可以填多个，其余只能填 1 个"))
+    x: Dimension | None = Field(None, description="横轴（kpi 不填）；scatter 里是每个点代表的分类")
     series: Dimension | None = Field(None, description="分组：折线的每条线、堆叠的每一段、热力图的纵轴")
-    top_n: int | None = Field(None, ge=3, le=15, description="bar 只显示前几名，其余合并成“其他”")
+    top_n: int | None = Field(None, ge=3, le=15, description=(
+        "bar 只显示前几名，其余合并成“其他”；scatter 只画横轴指标最大的几个点"))
+    reference: Literal["overall"] | None = Field(None, description=(
+        "overall：画一条整体值的虚线（同一个指标不分组时的值，程序计算），一眼看出哪些分组高于整体。"
+        "用于比率、平均值的对比（bar、column、不分组的 line；scatter 画在纵轴指标上）；sum、count 这类合计指标不能用"))
+    highlight: list[Value] = Field(default_factory=list, max_length=5, description=(
+        "要突出的分组（照抄预览结果里的 x），通常就是 insight 提到的那几个；其余变成灰色。用于 bar、column、scatter"))
+    width: Literal["auto", "full", "half"] = Field("auto", description=(
+        "占整行还是半行；auto 时相邻的两张条形图并排，其余占整行。half 的图两两并排，落单的占整行"))
+    section: str = Field("", max_length=12, description=(
+        "所属分区的小标题（例如“访客”“渠道”“时间”），同一分区的图放在一起；要分区就给每张非 kpi 的图都写，kpi 不用写"))
     why: str = Field(min_length=2, max_length=120, description="为什么放这张图：它回答哪个业务问题")
     insight: str = Field("", max_length=160, description=(
         "这张图看出了什么（按全部数据，不加筛选）。里面的数字必须来自 preview_chart 返回的数据，程序会核查"))
@@ -126,6 +145,13 @@ def _dimension_problems(dim: Dimension, where: str, types: dict[str, str], sourc
         problems.append(f"{where}：keep 只能用在分类列上")
     if dim.order and is_time:
         problems.append(f"{where}：时间列按时间排序，不用 order")
+    if dim.bins:
+        if kind not in ("number", "integer"):
+            problems.append(f"{where}：bins 只用于数值列，{dim.column} 不是数值列")
+        if any(later <= earlier for earlier, later in zip(dim.bins, dim.bins[1:])):
+            problems.append(f"{where}：bins 的分界点要从小到大、不重复（收到 {dim.bins}）")
+        if dim.keep or dim.order:
+            problems.append(f"{where}：分段后按大小排序，bins 不和 keep、order 一起用")
     if dim.column in source.pin_by or dim.column in source.unit_column:
         problems.append(f"{where}：{dim.column} 是数值列，不能当横轴或分组")
     return problems
@@ -162,8 +188,8 @@ def metric_problems(spec_metrics: list[Metric], types: dict[str, str]) -> list[s
         for column in m.where:
             if column not in types:
                 problems.append(f"{where}：where 里没有 {column} 这一列")
-        if m.format == "percent" and m.agg != "ratio":
-            problems.append(f"{where}：percent 格式只用于 ratio 指标")
+        if m.format == "percent" and m.agg not in ("ratio", "avg", "min", "max"):
+            problems.append(f"{where}：percent 格式只用于 ratio，以及 0–1 之间的值求 avg、min、max；{m.agg} 不能用")
     return problems
 
 
@@ -174,8 +200,11 @@ def chart_problems(c: Chart, metrics: dict[str, Metric], types: dict[str, str], 
     unknown = [m for m in c.metrics if m not in metrics]
     if unknown:
         return [f"{where}：指标 {unknown} 没有定义"]
-    if c.type != "table" and len(c.metrics) > 1:
-        problems.append(f"{where}：{c.type} 只能放 1 个指标；多个指标对照用 table，或者拆成几张图（不做双坐标轴）")
+    if c.type == "scatter" and len(c.metrics) != 2:
+        problems.append(f"{where}：scatter 要填 2 个指标：[横轴指标, 纵轴指标]，例如 [记录数, 转化率]")
+    elif c.type not in ("table", "scatter") and len(c.metrics) > 1:
+        problems.append(f"{where}：{c.type} 只能放 1 个指标；规模和比率一起看用 scatter，"
+                        "多个指标查明细用 table，或者拆成几张图（不做双坐标轴）")
     for name, dim in (("x", c.x), ("series", c.series)):
         if dim is not None:
             problems += _dimension_problems(dim, f"{where} 的 {name}", types, source)
@@ -186,16 +215,27 @@ def chart_problems(c: Chart, metrics: dict[str, Metric], types: dict[str, str], 
         problems.append(f"{where}：kpi 是一个数，不填 x 和 series")
     if c.type in ("stacked_column", "heatmap") and c.series is None:
         problems.append(f"{where}：{c.type} 要给 series")
-    if c.type in ("kpi", "column", "bar", "table") and c.series is not None:
+    if c.type in ("kpi", "column", "bar", "table", "scatter") and c.series is not None:
         problems.append(f"{where}：{c.type} 不用 series；要按组拆开请用 line、stacked_column 或 heatmap")
+    if c.type == "scatter" and c.x is not None and c.x.grain is not None:
+        problems.append(f"{where}：scatter 的每个点是一个分类，不按时间；随时间变化用 line 或 column")
+    if c.reference:
+        ref_metric = metrics[c.metrics[1 if c.type == "scatter" and len(c.metrics) > 1 else 0]]
+        if c.type not in REFERENCE_TYPES or (c.type == "line" and c.series is not None):
+            problems.append(f"{where}：reference 只用于 bar、column、不分组的 line 和 scatter")
+        elif is_additive(ref_metric, metrics):
+            problems.append(f"{where}：{ref_metric.id} 是合计（{ref_metric.agg}），整体值比任何一个分组都大，"
+                            "参考线没有意义；reference 用于比率、平均值")
+    if c.highlight and c.type not in HIGHLIGHT_TYPES:
+        problems.append(f"{where}：highlight 只用于 bar、column 和 scatter")
     if c.type == "stacked_column" and not is_additive(metric, metrics):
         problems.append(f"{where}：堆叠柱的各段要能相加，{metric.id} 是 {metric.agg}，不能堆叠；"
                         "改用 line 分组，或换成 sum / count 指标")
     if c.type == "bar":
         if c.x is not None and c.x.grain is not None:
             problems.append(f"{where}：bar 用来比较类别，随时间变化请用 line 或 column")
-    elif c.top_n is not None:
-        problems.append(f"{where}：只有 bar 用 top_n")
+    elif c.top_n is not None and c.type != "scatter":
+        problems.append(f"{where}：只有 bar 和 scatter 用 top_n")
     if c.type in ("line", "stacked_column") and c.x is not None and c.x.grain in ("weekday", "hour"):
         problems.append(f"{where}：{c.type} 的横轴是时间趋势；星期几、小时这类周期用 column 或 heatmap")
     if c.type == "line" and c.x is not None and c.x.grain is None and types.get(c.x.column) != "integer":
@@ -227,6 +267,14 @@ def check_spec(spec: DashboardSpec, types: dict[str, str], source: Source) -> li
         problems += _dimension_problems(dim, f"筛选器 {i + 1}", types, source)
         if dim.grain is not None:
             problems.append(f"筛选器 {i + 1}：按时间筛选请用 year_filter")
+        if dim.bins:
+            problems.append(f"筛选器 {i + 1}：筛选器不用 bins；数值分段放在图的横轴上")
+    charts = [c for c in spec.charts if c.type != "kpi"]
+    sections = list(dict.fromkeys(c.section for c in charts if c.section))
+    if sections and any(not c.section for c in charts):
+        problems.append(f"要分区就给每张非 kpi 的图都写 section；这些图没有写：{[c.id for c in charts if not c.section]}")
+    if len(sections) > MAX_SECTIONS:
+        problems.append(f"分区有 {len(sections)} 个，最多 {MAX_SECTIONS} 个：{sections}")
     if spec.year_filter and source.time_column is None:
         problems.append("这份数据没有时间戳列，不能用 year_filter；可以把年份放在横轴上")
     if not any(c.type == "kpi" for c in spec.charts):

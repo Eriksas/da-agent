@@ -90,11 +90,14 @@ window.DashCharts = (() => {
   // ---------- 图表 ----------
   // 柱状图（单系列或堆叠）：柱宽不超过 24px，顶端 4px 圆角、底部贴基线；堆叠段之间留 2px 背景色缝。
   // points：[{key, partial}]；key 是 YYYY-MM 时，横轴标签对齐到 1、4、7、10 月这类整月，否则每隔几个标一个
-  function drawColumns(host, {points, series, format, onTip, title, name = k => k, height = 240}) {
-    const W = Math.max(host.clientWidth, 280), H = height, m = {l: 64, r: 8, t: 24, b: 28};
+  // colorAt(i)：单系列时每根柱自己的颜色（突出几个分组，其余变灰）；reference：{value, text} 画一条整体值的虚线
+  function drawColumns(host, {points, series, format, onTip, title, name = k => k, height = 240, colorAt = null,
+                              reference = null}) {
+    const W = Math.max(host.clientWidth, 280), H = height, m = {l: 64, r: reference ? REF_MARGIN : 8, t: 24, b: 28};
     const pw = W - m.l - m.r, ph = H - m.t - m.b, n = points.length;
     const totals = points.map((_, i) => sum(series.map(sr => Math.max(0, sr.values[i] || 0))));
-    const ticks = niceTicks(Math.max(...totals, 1));
+    // 坐标轴按数据的最大值取整，不设下限 1：比率 0.25 要占满高度，而不是画成 0–100% 里矮矮的一截
+    const ticks = niceTicks(Math.max(...totals, reference ? reference.value : 0) || 1);
     const top = ticks[ticks.length - 1];
     const y = v => m.t + ph - (v / top) * ph;
     const svg = s('svg', {viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', 'aria-label': title});
@@ -115,7 +118,8 @@ window.DashCharts = (() => {
         if (bottom - top_ > 0.5) {
           const r = sr === shown[shown.length - 1] ? Math.min(4, (bottom - top_) / 2, bw / 2) : 0;
           s('path', {d: `M${x},${bottom}V${top_ + r}Q${x},${top_} ${x + r},${top_}H${x + bw - r}` +
-                       `Q${x + bw},${top_} ${x + bw},${top_ + r}V${bottom}Z`, fill: sr.color}, g);
+                       `Q${x + bw},${top_} ${x + bw},${top_ + r}V${bottom}Z`,
+                     fill: colorAt && series.length === 1 ? colorAt(i) : sr.color}, g);
         }
         base = top_;
       }
@@ -125,7 +129,15 @@ window.DashCharts = (() => {
                              'aria-label': `${name(p.key)}：${format(totals[i])}`}, g);
       hover(hit, () => onTip(i));
     });
+    if (reference) referenceLine(svg, m.l, W - m.r, y(reference.value), reference.text);
     host.replaceChildren(svg);
+  }
+
+  // 参考线：虚线横穿整个绘图区，文字“整体 15.5%”写在绘图区右边留出的空白里，不压在柱子和点上
+  const REF_MARGIN = 76;
+  function referenceLine(svg, x1, x2, yy, text) {
+    s('line', {x1, x2, y1: yy, y2: yy, class: 'refline'}, svg);
+    if (text) label(svg, x2 + 4, yy + 4, text, {class: 'reflabel'});
   }
 
   // 横轴标签：YYYY-MM 对齐整月；其他每隔几个标一个，保证标签之间至少 58px
@@ -139,11 +151,11 @@ window.DashCharts = (() => {
   }
 
   // 折线（可多条）：2px 线、round 连接；竖线跟随指针找到最近的横轴位置，提示里列出每条线在这一点的值
-  function drawLines(host, {points, series, format, onTip, title, name = k => k, height = 240}) {
-    const W = Math.max(host.clientWidth, 280), H = height, m = {l: 64, r: 16, t: 16, b: 28};
+  function drawLines(host, {points, series, format, onTip, title, name = k => k, height = 240, reference = null}) {
+    const W = Math.max(host.clientWidth, 280), H = height, m = {l: 64, r: reference ? REF_MARGIN : 16, t: 16, b: 28};
     const pw = W - m.l - m.r, ph = H - m.t - m.b, n = points.length;
     // 纵轴从 0 起（有负数时包含负数）：按整齐的步长向外取整，0 一定是其中一条刻度线
-    const all = series.flatMap(sr => sr.values).filter(v => v != null);
+    const all = series.flatMap(sr => sr.values).filter(v => v != null).concat(reference ? [reference.value] : []);
     const lo = Math.min(0, ...all), hi = Math.max(0, ...all);
     const tickStep = niceTicks(hi - lo || 1)[1];
     const bottom = Math.floor(lo / tickStep) * tickStep, top = Math.ceil(hi / tickStep) * tickStep || tickStep;
@@ -157,6 +169,7 @@ window.DashCharts = (() => {
       label(svg, m.l - 8, y(t) + 4, format(t), {class: 'tick', 'text-anchor': 'end'});
     }
     xLabels(svg, points.map(p => p.key), x, H - 8, pw / Math.max(n - 1, 1));
+    if (reference) referenceLine(svg, m.l, W - m.r, y(reference.value), reference.text);
     for (const sr of series) {
       let d = '';
       sr.values.forEach((v, i) => { if (v != null) d += `${d && sr.values[i - 1] != null ? 'L' : 'M'}${x(i)},${y(v)}`; });
@@ -185,14 +198,16 @@ window.DashCharts = (() => {
     host.replaceChildren(svg);
   }
 
-  // 横向条形（HTML）：数据端 4px 圆角，数值在右侧一列；长名字截断，完整名字在悬停提示和表格里
-  function drawBars(host, items) {
-    const max = Math.max(...items.map(it => it.value), 1);
+  // 横向条形（HTML）：数据端 4px 圆角，数值在右侧一列；长名字截断，完整名字在悬停提示和表格里。
+  // item.accent 突出（名字加粗）、item.dim 变灰；reference：{value} 在每一行的同一位置画虚线，连起来是一条竖线
+  function drawBars(host, items, {reference = null} = {}) {
+    const max = Math.max(...items.map(it => it.value), reference ? reference.value : 0) || 1;
     host.replaceChildren(h('div', {class: 'hbars', role: 'list'}, items.map(it => {
-      const row = h('div', {class: 'hbar' + (it.muted ? ' muted' : ''), role: 'listitem', tabindex: 0,
-                            'aria-label': `${it.label}：${it.valueText}`},
+      const cls = 'hbar' + (it.muted ? ' muted' : '') + (it.dim ? ' dim' : '') + (it.accent ? ' accent' : '');
+      const row = h('div', {class: cls, role: 'listitem', tabindex: 0, 'aria-label': `${it.label}：${it.valueText}`},
         h('span', {class: 'hbar-label'}, it.label),
-        h('span', {class: 'hbar-track'}, h('span', {class: 'hbar-fill', style: `width:${(it.value / max) * 100}%`})),
+        h('span', {class: 'hbar-track'}, h('span', {class: 'hbar-fill', style: `width:${(it.value / max) * 100}%`}),
+          reference ? h('span', {class: 'hbar-ref', style: `left:${(reference.value / max) * 100}%`}) : null),
         h('span', {class: 'hbar-value'}, it.valueText));
       hover(row, () => [it.tipTitle || it.label, it.tip]);
       return row;
@@ -218,6 +233,58 @@ window.DashCharts = (() => {
       hover(cell, () => onTip(i, j));
     }));
     host.replaceChildren(svg);
+  }
+
+  // 散点图：每个分类一个点，横轴一个指标（通常是规模）、纵轴另一个（通常是比率）；两个轴都从 0 起。
+  // 有突出的点时，只有它们用强调色并一定标名字，其余变灰；没有时，点少就全标，点多只标横轴最大的几个。
+  // 名字按顺序放，和已放的名字重叠就不放（悬停和表格里都能看到）
+  function drawScatter(host, {points, xFormat, yFormat, xTitle, yTitle, reference = null, onTip, title, height = 300}) {
+    const W = Math.max(host.clientWidth, 280), H = height, m = {l: 64, r: reference ? REF_MARGIN : 24, t: 26, b: 44};
+    const pw = W - m.l - m.r, ph = H - m.t - m.b;
+    const xt = niceTicks(Math.max(...points.map(p => p.x)) || 1);
+    const yt = niceTicks(Math.max(...points.map(p => p.y), reference ? reference.value : 0) || 1);
+    const xTop = xt[xt.length - 1], yTop = yt[yt.length - 1];
+    const x = v => m.l + (v / xTop) * pw, y = v => m.t + ph - (v / yTop) * ph;
+    const svg = s('svg', {viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', 'aria-label': title});
+    for (const t of yt) {
+      s('line', {x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), class: t ? 'grid' : 'base'}, svg);
+      label(svg, m.l - 8, y(t) + 4, yFormat(t), {class: 'tick', 'text-anchor': 'end'});
+    }
+    for (const t of xt) label(svg, x(t), m.t + ph + 18, xFormat(t), {class: 'tick', 'text-anchor': 'middle'});
+    label(svg, m.l, 14, `↑ ${yTitle}`, {class: 'axis-title'});
+    label(svg, W - m.r, H - 4, `${xTitle} →`, {class: 'axis-title', 'text-anchor': 'end'});
+    if (reference) referenceLine(svg, m.l, W - m.r, y(reference.value), reference.text);
+    const anyAccent = points.some(p => p.accent);
+    const accent = token('--series-1'), grey = token('--muted');
+    const order = points.map((p, i) => i).sort((a, b) => (points[b].accent - points[a].accent) || (points[b].x - points[a].x));
+    const named = new Set(anyAccent ? order.filter(i => points[i].accent)
+                                    : order.slice(0, points.length <= 12 ? points.length : 6));
+    for (const i of order.slice().reverse()) {  // 大的先画，突出的最后画，压在最上面
+      const p = points[i];
+      s('circle', {cx: x(p.x), cy: y(p.y), r: p.accent ? 6 : 5, fill: anyAccent && !p.accent ? grey : accent,
+                   'fill-opacity': anyAccent && !p.accent ? 0.75 : 0.9, stroke: token('--surface'), 'stroke-width': 1.5}, svg);
+    }
+    const placed = [];
+    const widthOf = text => [...text].reduce((w, ch) => w + (/[\u0000-\u00ff]/.test(ch) ? 7 : 12), 0);
+    for (const i of order) {
+      if (!named.has(i)) continue;
+      const p = points[i], w = widthOf(p.label), right = x(p.x) + 9 + w <= W - 2;
+      const box = {x1: right ? x(p.x) + 8 : x(p.x) - 8 - w, x2: right ? x(p.x) + 8 + w : x(p.x) - 8, y1: y(p.y) - 9, y2: y(p.y) + 5};
+      if (placed.some(b => b.x1 < box.x2 && box.x1 < b.x2 && b.y1 < box.y2 && box.y1 < b.y2)) continue;
+      placed.push(box);
+      label(svg, right ? x(p.x) + 8 : x(p.x) - 8, y(p.y) + 4, p.label,
+            {class: 'dot-label' + (p.accent ? ' accent' : ''), 'text-anchor': right ? 'start' : 'end'});
+    }
+    points.forEach((p, i) => {
+      const hit = s('circle', {cx: x(p.x), cy: y(p.y), r: 10, class: 'dot-hit', tabindex: 0,
+                               'aria-label': `${p.label}：${xTitle} ${xFormat(p.x)}，${yTitle} ${yFormat(p.y)}`}, svg);
+      hover(hit, () => onTip(i));
+    });
+    host.replaceChildren(svg);
+  }
+
+  function refLegend(text) {
+    return h('div', {class: 'legend'}, h('span', {}, h('b', {class: 'ref-key', 'aria-hidden': 'true'}), text));
   }
 
   function scaleLegend(minText, maxText) {
@@ -309,5 +376,5 @@ window.DashCharts = (() => {
   }
 
 
-  return {h, s, label, token, num, money, moneyShort, pct, monthName, sum, niceTicks, seqColor, showTip, hideTip, hover, drawColumns, drawLines, drawBars, drawHeatmap, scaleLegend, drawPareto, sparkline, table, empty, legendOf};
+  return {h, s, label, token, num, money, moneyShort, pct, monthName, sum, niceTicks, seqColor, showTip, hideTip, hover, drawColumns, drawLines, drawBars, drawHeatmap, drawScatter, refLegend, scaleLegend, drawPareto, sparkline, table, empty, legendOf};
 })();
