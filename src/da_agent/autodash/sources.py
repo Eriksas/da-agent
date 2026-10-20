@@ -211,7 +211,19 @@ def profile_table(con: duckdb.DuckDBPyConnection) -> dict[str, Any]:
               for value, (by, orig, offset) in source.offsets.items()]
     return {"tool": "profile_table", "source": source.name, "label": source.label, "table": source.table,
             "description": source.description, "rows": rows, "time_column": source.time_column,
-            "row_identity": _row_identity(con, source, columns, rows), "columns": columns, "rules": rules}
+            "row_identity": _row_identity(con, source, columns, rows), "possible_missing": _possible_missing(columns),
+            "columns": columns, "rules": rules}
+
+
+MISSING_LIKE = {"unknown", "unk", "n/a", "na", "null", "missing", "?", "未知", "不详", "缺失", ""}
+
+
+def _possible_missing(columns: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """看起来是缺失值的取值（unknown、未知……）：它们在图里会单独成一组，按真实分组解读会出错。
+    M13e 的一次运行没写 default 有 20.9% 是 unknown；这里直接把占比算出来，任何数据都适用。"""
+    return [{"column": c["name"], "value": v["value"], "rows": v["rows"], "share": v["row_share"]}
+            for c in columns for v in c.get("top_values", [])
+            if isinstance(v["value"], str) and v["value"].strip().lower() in MISSING_LIKE]
 
 
 def _row_identity(con: duckdb.DuckDBPyConnection, source: Source, columns: list[dict[str, Any]],

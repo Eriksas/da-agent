@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .abtest import proportion_test, sample_size_proportions, srm_check
 from .autodash.compile import compile_dashboard, preview_chart
 from .autodash.sources import profile_table
-from .autodash.spec import Chart, DashboardSpec, Metric
+from .autodash.spec import MAX_SUBMIT_CHARTS, Chart, DashboardSpec, Metric
 from .calculator import MAX_LENGTH, calculate
 from .company import RATIOS, company_overview, dupont, financial_summary, peer_compare
 from .decompose import decompose_gmv
@@ -108,7 +108,21 @@ class PreviewChartArgs(_Args):
 
 
 class SubmitDashboardArgs(DashboardSpec):
-    pass
+    # 新提交的方案最多 9 张图（含 kpi）：M13e 的 5 次运行都用满了 10 张。只限制提交，
+    # DashboardSpec 仍允许 10 张，以前的运行记录可以照常重新生成
+    charts: list[Chart] = Field(min_length=2, max_length=MAX_SUBMIT_CHARTS, description=(
+        f"图，2–{MAX_SUBMIT_CHARTS} 张（含 kpi），至少 1 张 kpi"))
+
+
+PREVIEW_HINT = (
+    '正确写法：{"metrics": [完整的指标定义，ratio 要连同它引用的两个指标], "chart": {"id": "c1", "title": "各访客类型转化率", '
+    '"type": "bar", "metrics": ["rate"], "x": {"column": "VisitorType"}, "reference": "overall", '
+    '"highlight": ["New_Visitor"], "why": "……"}}。metrics 放指标定义；chart.metrics 只写指标 id；'
+    "top_n、reference、highlight、width、section 是 chart 的字段，不写在 x 里")
+SUBMIT_HINT = (
+    "正确写法：顶层只有 title、goal、metrics、charts、filters、year_filter、notes；charts 里每一项直接是一张图"
+    '（{"id": …, "title": …, "type": …, "metrics": [指标 id], "x": {"column": …}, …}），不要再包一层 {"chart": …}；'
+    f"top_n、reference、highlight、width、section 是图的字段，不写在 x 里；图最多 {MAX_SUBMIT_CHARTS} 张（含 kpi）")
 
 
 def _submit_dashboard(con: duckdb.DuckDBPyConnection, spec: SubmitDashboardArgs) -> dict[str, Any]:
@@ -180,6 +194,7 @@ class Tool:
     description: str
     args_model: type[_Args]
     run: Callable[[duckdb.DuckDBPyConnection, Any], dict[str, Any]]
+    hint: str = ""  # 参数不合法时附在报错后面的正确写法（看板工具的参数层级多，模型常放错位置）
 
 
 TOOLS: dict[str, Tool] = {tool.name: tool for tool in (
@@ -235,11 +250,11 @@ TOOLS: dict[str, Tool] = {tool.name: tool for tool in (
     Tool("preview_chart",
          "预览一张图的数据（不加筛选）：每个点的数值、合计、占比、最大最小、最近一期变化，以及自动发现的数据问题（notes）。"
          "insight 里的数字只能用这里返回的数。方案有问题时返回修改意见。",
-         PreviewChartArgs, lambda con, a: preview_chart(con, a.metrics, a.chart)),
+         PreviewChartArgs, lambda con, a: preview_chart(con, a.metrics, a.chart), PREVIEW_HINT),
     Tool("submit_dashboard",
-         "提交整个看板方案：标题、读者和目标、指标、图（2–10 张，至少 1 张 kpi）、筛选器、数据说明。"
+         f"提交整个看板方案：标题、读者和目标、指标、图（2–{MAX_SUBMIT_CHARTS} 张，至少 1 张 kpi）、筛选器、数据说明。"
          "程序校验后计算所有数字并生成看板；不通过时返回逐条修改意见，改完再提交。",
-         SubmitDashboardArgs, _submit_dashboard),
+         SubmitDashboardArgs, _submit_dashboard, SUBMIT_HINT),
     Tool("peer_compare",
          "多家公司的比率对比（增速、利润率、ROE、资产负债率、现金流质量等）。只比比率，不比金额：各公司币种和财年截止日不同。",
          PeerArgs, lambda con, a: peer_compare(con, a.companies or None, a.fiscal_year, a.ratios or None)),
@@ -318,7 +333,7 @@ def execute(con: duckdb.DuckDBPyConnection, name: str, arguments: dict[str, Any]
         args = tool.args_model.model_validate(arguments)
     except ValidationError as exc:
         problems = "；".join(f"{'.'.join(str(p) for p in err['loc']) or '参数'}: {err['msg']}" for err in exc.errors())
-        return done(False, {"error": f"参数不合法：{problems}"})
+        return done(False, {"error": f"参数不合法：{problems}" + (f"。{tool.hint}" if tool.hint else "")})
     try:
         result = tool.run(con, args)
     except ValueError as exc:  # 工具主动拒绝，例如周不在数据范围内、基期没有客户
