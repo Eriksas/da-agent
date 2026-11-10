@@ -120,6 +120,13 @@ def test_review_run_keeps_the_last_accepted_submission() -> None:
     assert out["run"]["repair"] is None and out["run"]["domain"] == "review"  # 复核意见不走“数字出处退回修正”
 
 
+def test_a_rejected_resubmission_does_not_replace_the_accepted_one() -> None:
+    llm = FakeLLM(replies=[_call(GOOD), _call(GOOD | {"verdict": "通过"}, "s2"),  # 先交了合格的，又交了一版自相矛盾的
+                           LLMReply(content="复核完成。")])
+    review = review_run(make_run(), llm=llm)["review"]
+    assert (review["status"], review["verdict"], review["rejected_submissions"]) == ("reviewed", "有问题", 1)
+
+
 def test_review_failures_do_not_raise() -> None:
     assert review_run(make_run(answer=""), llm=FakeLLM(replies=[]))["review"]["status"] == "no_answer"
     failed = review_run(make_run(), llm=FakeLLM(replies=[LLMReply(content="我觉得没问题。")]))["review"]

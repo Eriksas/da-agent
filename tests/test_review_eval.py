@@ -5,8 +5,10 @@ from pathlib import Path
 
 import pytest
 
+from da_agent import review_eval
 from da_agent.llm import FakeLLM, LLMReply, ToolCall
 from da_agent.review_eval import (
+    Mutation,
     build_cases,
     invisible_to_number_check,
     load_plan,
@@ -30,7 +32,9 @@ TOOLS = [{"tool": "metric_summary", "metrics": [{"label": "GMV", "unit": "money"
                                                 {"label": "客单价", "unit": "money", "current": 382.17, "base": 351.2}]},
          {"tool": "drilldown", "dimension": "country", "rows": [
              {"segment": "荷兰", "base": 10798.24, "current": 104.0}, {"segment": "英国", "change_pct": 0.123},
-             {"segment": "法国", "change_pct": 0.035}]}]
+             {"segment": "法国", "change_pct": 0.035}]},
+         {"tool": "drilldown", "dimension": "customer_type", "rows": [{"segment": "老客", "orders": 200},
+                                                                      {"segment": "新客", "orders": 114}]}]
 
 
 def make_run(answer: str = ANSWER, domain: str = "ecommerce") -> dict:
@@ -47,7 +51,7 @@ def test_direction_flips_a_word_that_is_followed_by_a_number() -> None:
     assert m.after == "本周 GMV 为 120,000.00，环比上升 6.00%" and m.lines == [0]
     assert m.answer[m.spans[0][0]:m.spans[0][1]] == m.after and m.answer.count("环比上升") == 1
     # 不确定的句子、表格里的、没有紧跟数字的方向词都不改
-    assert mutate_direction("是否下降 3.50% 还不能确定。\n| 英国 | 增长 12.30% |\n这种增长没有业务含义，共 314 单。", make_run()) is None
+    assert mutate_direction("是否下降 3.50% 还不能确定。\n| 英国 | 增长 12.30% |\n这种增长值得关注，共 314 单。", make_run()) is None
     assert mutate_direction("先不要对外说增长 11.77%。", make_run()) is None
 
 
@@ -56,16 +60,19 @@ def test_swap_exchanges_two_look_alike_numbers_in_different_sentences() -> None:
     assert m.lines == [0, 3]  # 120,000.00 和 10,798.24 在两句里：都是两位小数、没有单位、相差 20% 以上
     assert "本周 GMV 为 10,798.24" in m.answer and "荷兰 GMV 从 120,000.00 降到" in m.answer
     assert invisible_to_number_check(make_run(), m.answer)  # 两个数都还在工具结果里：数字核查看不出差别
-    # 日期、比例里的数不拿来换；带正负号的也不换
-    assert mutate_swap("财年截止 12-31，样本 5000/5000。\n变化 +22.50，另一项 -11.20。", make_run()) is None
+    # 日期、比例里的数不拿来换；带正负号的不换；同一句里的两个数不换
+    assert mutate_swap("财年截止 12-31。\n样本 5000/4000。", make_run()) is None
+    assert mutate_swap("变化 +22.50。\n另一项 -11.20。", make_run()) is None
+    assert mutate_swap("GMV 从 10,798.24 涨到 120,000.00。", make_run()) is None
 
 
 def test_entity_swaps_only_within_the_same_kind_of_name() -> None:
     m = mutate_entity(ANSWER, make_run())
     assert m.before == "本周 GMV 为 120,000.00，环比下降 6.00%" and m.after == "本周 订单数 为 120,000.00，环比下降 6.00%"
-    countries = mutate_entity("荷兰的订单从 10,798.24 降到 104.00。\n英国增长 12.30%。", make_run())
-    assert countries.after.startswith("英国的订单从")  # 国家只换成国家，不会换成指标名
-    assert mutate_entity("新老客合计 314 单，英国和荷兰都在内。", make_run()) is None  # 没有可以单独替换的名字
+    countries = mutate_entity("荷兰的订单从 10,798.24 降到 104.00。\n英国增长 12.30%。\nGMV 合计 120,000.00。", make_run())
+    assert countries.after.startswith("英国的订单从")  # 国家只换成国家，不会换成指标名（GMV 在答案里出现得更早）
+    assert mutate_entity("共 314 单，英国和荷兰都在内。", make_run()) is None  # 两个名字都在这一句里：不换
+    assert mutate_entity("新老客合计 314 单。\n新客更活跃。", make_run()) is None  # “新老客”里的“老客”不是单独提到的
 
 
 def test_cause_appends_an_unsupported_reason_after_a_conclusion() -> None:
@@ -173,3 +180,23 @@ def test_cli_eval_review_with_the_fake_model(command: list[str], tmp_path: Path,
     out = capsys.readouterr().out
     assert "植入的错误：指到了 0/" in out  # 假模型一律判通过：一处都指不出来
     assert (tmp_path / "review-fake-test" / "summary.md").exists()
+
+
+def test_ambiguous_cases_stay_out_of_the_detection_rate() -> None:
+    rows = [{"kind": "direction", "status": "reviewed", "outcome": outcome, "as_error": outcome == "detected",
+             "findings": 1, "errors": 1, "tokens": 1000, "seconds": 1.0, "rejected_submissions": 0, "verdict": "有问题"}
+            for outcome in ("detected", "missed", "ambiguous")]
+    rows.append({"kind": "direction", "status": "skipped"})
+    assert summarize(rows)["seeded"]["direction"] == {"planned": 4, "skipped": 1, "failed": 0, "ambiguous": 1, "counted": 2,
+                                                      "detected": 1, "as_error": 1}
+
+
+def test_a_planted_error_the_number_check_can_see_is_dropped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """植入的必须是数字核查查不出的错。改完后核查结果变了（例如多了一个没出处的数），这份材料就不用。"""
+    (tmp_path / "base").mkdir()
+    (tmp_path / "base" / "run.json").write_text(json.dumps(make_run(), ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setitem(review_eval.MUTATORS, "cause",
+                        lambda answer, run: Mutation("cause", answer + "另有 99,999.00 没有统计。", [(0, 1)], [0], "", ""))
+    cases = {c["kind"]: c for c in build_cases({"bases": [{"id": "b", "run": "base"}]}, root=tmp_path)}
+    assert cases["cause"]["skipped"] == "改完后数字核查的结果变了（程序自己能查出来）" and "run" not in cases["cause"]
+    assert "mutation" in cases["direction"]
