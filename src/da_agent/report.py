@@ -33,14 +33,18 @@ def review_summary(review: dict[str, Any] | None) -> str:
                                                         f"{doubts} 处存疑" if doubts else "") if part)
 
 
-def _review_section(review: dict[str, Any] | None) -> list[str]:
-    if not review:  # 没有复核过的运行，报告和以前一样
-        return []
-    lines = ["", "## 附录 G：复核 Agent 的意见", ""]
+def render_agent_review(review: dict[str, Any]) -> str:
+    """复核 Agent 的意见，单独写成 review.md。
+
+    不并进 report.md：评测（eval/results/review-2026-11-10）里，它在没改动的答案上给出的“错误”级意见 6 条中成立 4 条，
+    没有达到运行前定下的 70%。在换一批答案重新评测之前，它的意见只在主动运行 `da-agent review` 时给出。
+    """
+    lines = ["# 复核 Agent 的意见", "",
+             "> **这是另一个 AI 的判断，不是结论。** 评测里，它指出的“错误”约三分之二经验算成立"
+             "（6 条中 4 条，见 eval/review_rubric_addendum.md）；每一条都要回到工具结果核对后再采信。", ""]
     if review["status"] != "reviewed":
-        return lines + [f"复核没有完成：{review.get('error') or '原运行没有答案'}。"]
-    lines += [f"第二个 Agent（模型 {review['model']}）只看问题、答案和工具调用记录，核对程序查不了的内容："
-              "数字有没有用错对象、方向有没有说反、概括和因果有没有依据。**它的意见同样是 AI 的判断，供人工复核时参考。**", "",
+        return "\n".join(lines + [f"复核没有完成：{review.get('error') or '原运行没有答案'}。", ""])
+    lines += [f"- 被复核的运行：`{review['reviewed_run']}`；复核模型 {review['model']}",
               f"- 结论：**{review['verdict']}**。{review['checked']}",
               f"- 调用模型 {review['usage']['llm_calls']} 次，token {review['usage']['prompt_tokens']} + "
               f"{review['usage']['completion_tokens']}，用时 {review['seconds']} 秒", ""]
@@ -48,17 +52,17 @@ def _review_section(review: dict[str, Any] | None) -> list[str]:
         lines += ["| 级别 | 类别 | 答案原句 | 理由 | 依据（第几次工具调用） |", "|---|---|---|---|---|"]
         lines += [f"| {f['severity']} | {f['category']} | {f['quote'].replace('|', '/')} | {f['explanation'].replace('|', '/')} | "
                   f"{'、'.join(str(n) for n in f['evidence']) or '—'} |" for f in review["findings"]]
-    return lines
+    else:
+        lines.append("没有发现问题。这不代表答案没有问题：它只核对了能对照工具结果的句子。")
+    return "\n".join(lines + [""])
 
 
-def render_report(run: dict[str, Any], checks: dict[str, Any], review: dict[str, Any] | None = None) -> str:
-    """渲染 report.md。只排版，不新增任何数字。review 是复核 Agent 的意见（review.json），没有就不显示结论。"""
+def render_report(run: dict[str, Any], checks: dict[str, Any]) -> str:
+    """渲染 report.md。只排版，不新增任何数字。"""
     numbers, phrases = checks["numbers"], checks["phrases"]
     usage = run["usage"]
-    verdict = review_summary(review)
     lines = [
-        f"> **AI 初稿，待人工复核。** {checks['summary']}。{checks['process']['summary']}。" + (f"{verdict}。" if verdict else ""),
-        "",
+        f"> **AI 初稿，待人工复核。** {checks['summary']}。{checks['process']['summary']}。", "",
         f"**问题：** {run['question']}", "",
         run.get("answer") or f"（没有答案，状态：{run['status']}）", "",
         "---", "", "## 附录 A：流程检查与危险信号", "",
@@ -103,8 +107,7 @@ def render_report(run: dict[str, Any], checks: dict[str, Any], review: dict[str,
     lines += ["", "## 附录 F：运行信息", "",
               f"- 运行编号 `{run['run_id']}`，状态 {run['status']}，模型 {run['model']}",
               f"- 调用模型 {usage['llm_calls']} 次，token {usage['prompt_tokens']} + {usage['completion_tokens']}，用时 {run['seconds']} 秒",
-              f"- 工具调用上限 {run['max_tool_calls']} 次" + ("，本次已用完" if run["budget_exhausted"] else "")]
-    lines += _review_section(review) + [""]
+              f"- 工具调用上限 {run['max_tool_calls']} 次" + ("，本次已用完" if run["budget_exhausted"] else ""), ""]
     return "\n".join(lines)
 
 
@@ -114,7 +117,5 @@ def write_review(run_dir: Path) -> dict[str, Any]:
     checks = check_run(run)
     (run_dir / "checks.json").write_text(json.dumps(checks, ensure_ascii=False, indent=2) + "\n",
                                          encoding="utf-8", newline="\n")
-    review_path = run_dir / "review.json"  # 复核过（da-agent review）就把意见一起写进报告
-    review = json.loads(review_path.read_text(encoding="utf-8")) if review_path.exists() else None
-    (run_dir / "report.md").write_text(render_report(run, checks, review), encoding="utf-8", newline="\n")
+    (run_dir / "report.md").write_text(render_report(run, checks), encoding="utf-8", newline="\n")
     return checks

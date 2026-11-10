@@ -9,6 +9,7 @@
 - 依据必须指向真实存在的工具调用（第几次）；“没有依据”这一类可以不填；
 - 结论和意见要一致：有“错误”级别的意见就不能给“通过”。
 校验不过就退回，让它改了再交。复核意见只标记、不改写答案：改不改由人决定。
+意见写在单独的 review.md 里，不并进报告：它够不够准，见 eval/review_rubric.md 和补充说明。
 """
 
 import json
@@ -42,7 +43,8 @@ class SubmitReviewArgs(_Model):
     verdict: Literal["通过", "有问题"] = Field(description="通过：没有发现“错误”级别的问题；有问题：至少有 1 处错误")
     findings: list[Finding] = Field(default_factory=list, max_length=MAX_FINDINGS, description=(
         "发现的问题，最重要的在前；没有就留空。只写能指出具体句子的问题，不写泛泛的建议"))
-    checked: str = Field(min_length=4, max_length=300, description="核对了哪些内容，例如“核对了 GMV、订单数、客单价的数值和方向，以及三条结论的依据”")
+    # 上限第一次评测时是 300 字：72 次被退回的提交里 56 次是因为超了它，白白多花一轮
+    checked: str = Field(min_length=4, max_length=800, description="核对了哪些内容，例如“核对了 GMV、订单数、客单价的数值和方向，以及三条结论的依据”")
 
 
 @dataclass(frozen=True)

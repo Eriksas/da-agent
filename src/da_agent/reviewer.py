@@ -12,9 +12,11 @@ from typing import Any
 
 from .agent import SYSTEM_PROMPTS, run_agent
 from .llm import LLMClient
+from .report import render_agent_review
 from .review import ReviewContext, review_request, tool_records
 
-MAX_TOOL_CALLS = 6  # 验算几次、提交（可能被退回一两次）
+# 验算几次、提交（可能被退回一两次）。第一次评测时是 6 次，有一次复核把次数全用在验算上，没能提交
+MAX_TOOL_CALLS = 10
 
 
 def final_review(review_run: dict[str, Any]) -> dict[str, Any] | None:
@@ -50,11 +52,15 @@ def review_run(run: dict[str, Any], *, llm: LLMClient, max_tool_calls: int = MAX
 
 
 def write_agent_review(run_dir: Path, *, llm: LLMClient) -> dict[str, Any]:
-    """复核 run_dir 里的运行，写出 review.json（意见）和 review_run.json（复核 Agent 的完整记录）。"""
+    """复核 run_dir 里的运行，写出 review.json（意见）、review.md（给人看的）和 review_run.json（复核 Agent 的完整记录）。
+
+    不改 report.md，原因见 report.render_agent_review。
+    """
     run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     out = review_run(run, llm=llm)
     for name, content in (("review.json", out["review"]), ("review_run.json", out["run"])):
         if content is not None:
             (run_dir / name).write_text(json.dumps(content, ensure_ascii=False, indent=2, default=str) + "\n",
                                         encoding="utf-8", newline="\n")
+    (run_dir / "review.md").write_text(render_agent_review(out["review"]), encoding="utf-8", newline="\n")
     return out["review"]

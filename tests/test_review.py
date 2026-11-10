@@ -7,7 +7,7 @@ import pytest
 
 from da_agent.cli import main
 from da_agent.llm import FakeLLM, LLMReply, ToolCall
-from da_agent.report import render_report, review_summary, write_review
+from da_agent.report import render_agent_review, review_summary, write_review
 from da_agent.review import ReviewContext, ReviewProblems, SubmitReviewArgs, locate, review_request, submit_review, tool_records
 from da_agent.reviewer import final_review, review_run, write_agent_review
 from da_agent.tools import execute
@@ -135,22 +135,31 @@ def test_review_failures_do_not_raise() -> None:
     assert broken["status"] == "failed" and "假模型" in broken["error"]
 
 
-# ---------- 报告和命令行 ----------
-def test_report_shows_the_review_only_when_there_is_one(tmp_path: Path) -> None:
+# ---------- 复核意见单独成文、命令行 ----------
+def test_the_review_goes_to_its_own_file_and_leaves_the_report_alone(tmp_path: Path) -> None:
+    """评测没达到运行前定的标准，所以复核意见不并进 report.md，只写 review.md。"""
     run = make_run()
     (tmp_path / "run.json").write_text(json.dumps(run, ensure_ascii=False), encoding="utf-8")
     write_review(tmp_path)
-    assert "复核 Agent" not in (tmp_path / "report.md").read_text(encoding="utf-8")  # 没复核过：报告和以前一样
+    before = (tmp_path / "report.md").read_text(encoding="utf-8")
     review = write_agent_review(tmp_path, llm=FakeLLM(replies=[_call(GOOD), LLMReply(content="有 1 处错误。")]))
     assert review_summary(review) == "复核 Agent：指出 1 处错误、1 处存疑"
     assert json.loads((tmp_path / "review_run.json").read_text(encoding="utf-8"))["domain"] == "review"
     write_review(tmp_path)
-    report = (tmp_path / "report.md").read_text(encoding="utf-8")
-    assert "复核 Agent：指出 1 处错误、1 处存疑。" in report.splitlines()[0]
-    assert "| 错误 | 方向或比较说反 | 环比增长 6.00% |" in report and "同样是 AI 的判断" in report
+    assert (tmp_path / "report.md").read_text(encoding="utf-8") == before and "复核 Agent" not in before
+    text = (tmp_path / "review.md").read_text(encoding="utf-8")
+    assert "| 错误 | 方向或比较说反 | 环比增长 6.00% |" in text and "| 存疑 | 因果或推测没有依据 |" in text
+    assert "另一个 AI 的判断，不是结论" in text and "被复核的运行：`r1`" in text
     assert review_summary({"status": "reviewed", "findings": []}) == "复核 Agent：没有发现问题"
     assert review_summary(None) == "" and "没有完成" in review_summary({"status": "failed", "error": "超时"})
-    assert "附录 G" not in render_report(run, json.loads((tmp_path / "checks.json").read_text(encoding="utf-8")))
+
+
+def test_review_file_for_a_pass_and_for_a_failure() -> None:
+    passed = review_run(make_run(), llm=FakeLLM(replies=[
+        _call({"verdict": "通过", "findings": [], "checked": "核对了全部结论句"}), LLMReply(content="没有问题。")]))["review"]
+    assert "没有发现问题。这不代表答案没有问题" in render_agent_review(passed)
+    failed = review_run(make_run(), llm=FakeLLM(replies=[LLMReply(content="我觉得没问题。")]))["review"]
+    assert "复核没有完成：没有提交合格的复核意见" in render_agent_review(failed)
 
 
 def test_cli_review_writes_files_and_signals_errors(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -162,4 +171,16 @@ def test_cli_review_writes_files_and_signals_errors(tmp_path: Path, capsys: pyte
     assert main(["review", str(tmp_path), "--llm", "fake", "--script", str(script)]) == 1  # 有“错误”级别的意见
     out = capsys.readouterr().out
     assert "复核 Agent：指出 1 处错误、1 处存疑" in out and "[错误] 方向或比较说反：「环比增长 6.00%」" in out
-    assert (tmp_path / "review.json").exists() and "附录 G" in (tmp_path / "report.md").read_text(encoding="utf-8")
+    assert "每条都要回到工具结果核对" in out
+    assert (tmp_path / "review.json").exists() and (tmp_path / "review.md").exists()
+    assert not (tmp_path / "report.md").exists()  # 这条命令不碰报告
+
+
+def test_a_long_checked_summary_and_several_calculations_still_get_through() -> None:
+    """第一次评测暴露的两个限制：“核对了哪些内容”超过 300 字被退回；6 次工具调用全用在验算上就没法提交。"""
+    long_summary = GOOD | {"checked": "核对了" + "GMV、订单数、客单价的数值和方向；" * 30}
+    assert 500 < len(long_summary["checked"]) < 800 and _submit(long_summary)["accepted"]
+    calc = LLMReply(content="", tool_calls=(ToolCall(id="c", name="calculate", arguments={
+        "expression": "35 - 12", "purpose": "验算"}),))
+    review = review_run(make_run(), llm=FakeLLM(replies=[calc] * 8 + [_call(GOOD), LLMReply(content="完成。")]))["review"]
+    assert review["status"] == "reviewed"
