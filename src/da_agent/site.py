@@ -364,7 +364,7 @@ def index_page() -> str:
 报告里的数字都能回查到工具输出。同一个 Agent 还接入了上市公司财报分析。</p>
 <div class="tiles">{tile_html}</div>
 <p class="small muted">提升主要来自“核查后退回修正”，它和评分用的是同一个核查器，所以“数字有出处”这一项的提升有一部分是构造出来的；
-详见<a href="evals.html">评测</a>。人工复核由 Claude 辅助完成，待项目作者确认。</p>
+详见<a href="evals.html">评测</a>。复核由 Claude 代项目作者完成（作者授权，本人未逐条核对）。</p>
 <h2>架构</h2>
 <div class="card"><pre class="mermaid">{esc(_mermaid_from_readme())}</pre></div>
 <ul>
