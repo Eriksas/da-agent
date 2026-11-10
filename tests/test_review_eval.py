@@ -71,6 +71,7 @@ def test_entity_swaps_only_within_the_same_kind_of_name() -> None:
     assert m.before == "本周 GMV 为 120,000.00，环比下降 6.00%" and m.after == "本周 订单数 为 120,000.00，环比下降 6.00%"
     countries = mutate_entity("荷兰的订单从 10,798.24 降到 104.00。\n英国增长 12.30%。\nGMV 合计 120,000.00。", make_run())
     assert countries.after.startswith("英国的订单从")  # 国家只换成国家，不会换成指标名（GMV 在答案里出现得更早）
+    assert mutate_entity("荷兰的订单从 10,798.24 降到 104.00。\n老客共 200 单。", make_run()) is None  # 国家不会换成客户类型
     assert mutate_entity("共 314 单，英国和荷兰都在内。", make_run()) is None  # 两个名字都在这一句里：不换
     assert mutate_entity("新老客合计 314 单。\n新客更活跃。", make_run()) is None  # “新老客”里的“老客”不是单独提到的
 
