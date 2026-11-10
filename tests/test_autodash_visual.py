@@ -8,8 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from da_agent.autodash.compile import (DashboardProblems, bin_labels, claim_problems, compile_dashboard,
-                                       preview_chart)
+from da_agent.autodash.compile import DashboardProblems, bin_labels, claim_problems, compile_dashboard, preview_chart
 from da_agent.autodash.sources import column_types, connect_source, source_of
 from da_agent.autodash.spec import Chart, DashboardSpec, Metric, check_spec
 

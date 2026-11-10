@@ -13,7 +13,7 @@
 
 import operator
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated, Any, TypedDict
 from uuid import uuid4
 
@@ -21,8 +21,14 @@ import duckdb
 from langgraph.graph import END, START, StateGraph
 
 from da_agent.agent import (
-    BUDGET_NOTICE, FORMAT_NOTICE, MALFORMED_ERROR, REPAIR_TOOL_CALLS, TOOL_CALL_TEXT, AgentRun,
-    build_system_prompt, repair_notice,
+    BUDGET_NOTICE,
+    FORMAT_NOTICE,
+    MALFORMED_ERROR,
+    REPAIR_TOOL_CALLS,
+    TOOL_CALL_TEXT,
+    AgentRun,
+    build_system_prompt,
+    repair_notice,
 )
 from da_agent.checks import number_check
 from da_agent.llm import LLMClient, LLMError, ToolCall
@@ -142,7 +148,7 @@ def run_agent_langgraph(question: str, *, llm: LLMClient, con: duckdb.DuckDBPyCo
     start = time.perf_counter()
     run = AgentRun(run_id=f"{datetime.now():%Y%m%dT%H%M%S}-{uuid4().hex[:6]}", question=question, model=llm.model,
                    max_tool_calls=max_tool_calls, use_skills=use_skills, domain=domain,
-                   started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+                   started_at=datetime.now(UTC).isoformat(timespec="seconds"))
     specs = [s for s in tool_specs(domain) if use_skills or s["function"]["name"] != "load_skill"]
     app = build_graph(llm, con, specs, repair)
     max_rounds = max_tool_calls + 2

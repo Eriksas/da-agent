@@ -10,8 +10,17 @@ from typing import Any
 import duckdb
 
 from .cleaning import (
-    BUSINESS_COLUMNS, EXTREME_LINE_AMOUNT, GIFT_VOUCHER_PREFIX, NON_MERCHANDISE, RULES,
-    fetch_one as _one, fetch_rows as _rows,
+    BUSINESS_COLUMNS,
+    EXTREME_LINE_AMOUNT,
+    GIFT_VOUCHER_PREFIX,
+    NON_MERCHANDISE,
+    RULES,
+)
+from .cleaning import (
+    fetch_one as _one,
+)
+from .cleaning import (
+    fetch_rows as _rows,
 )
 from .dataset import DATA_URL, EXPECTED_SHA256
 from .periods import LOW_TRADING_DAYS
@@ -190,7 +199,7 @@ def render_markdown(report: dict[str, Any]) -> str:
     lines += ["", "## 6. 时间覆盖", "",
               f"- 不完整周：{', '.join(cov['partial_weeks']) or '无'}（数据首日或末日落在周中）。",
               f"- 交易天数少于 {LOW_TRADING_DAYS} 天的周：" + (", ".join(f"{w['week']}（{w['trading_days']} 天）" for w in cov["low_trading_weeks"]) or "无") + "。0 天表示整周停业，这些周在按周汇总时会缺失，需要补 0 或单独说明。",
-              f"- 周六有交易的日期：" + (", ".join(f"{d['day']}（{d['rows']:,} 行）" for d in cov["saturday_trading_days"]) or "无") + "；其余周六没有交易，按日环比时要注意。",
+              "- 周六有交易的日期：" + (", ".join(f"{d['day']}（{d['rows']:,} 行）" for d in cov["saturday_trading_days"]) or "无") + "；其余周六没有交易，按日环比时要注意。",
               f"- 连续停业超过 {CLOSURE_GAP_DAYS} 天：" + ("；".join(f"{c['last_open']} 之后到 {c['reopen']} 重新开业（间隔 {c['gap_days']} 天）" for c in cov["closures"]) or "无") + "。",
               "", "## 7. 已知局限", "",
               "- R07 删除的完全重复行可能是真实的重复购买，若删错，GMV 会偏低（影响金额见第 2 节）。",

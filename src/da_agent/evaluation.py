@@ -13,7 +13,7 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -146,7 +146,7 @@ def run_baseline(question: str, *, llm: LLMClient, con: duckdb.DuckDBPyConnectio
     start = time.perf_counter()
     run = AgentRun(run_id=f"{datetime.now():%Y%m%dT%H%M%S}-{uuid4().hex[:6]}", question=question, model=llm.model,
                    max_tool_calls=0, use_skills=False, domain=domain,
-                   started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+                   started_at=datetime.now(UTC).isoformat(timespec="seconds"))
     if domain == "company":
         system = COMPANY_BASELINE_PROMPT.format(table=company_table(con))
     else:

@@ -20,7 +20,7 @@ from da_agent.tools import execute, tool_specs
 from helpers import S2, UK, make_frame
 
 sys.path.insert(0, str(Path(__file__).parent))
-from fixtures_dashboard_spec import RETAIL_SPEC  # noqa: E402
+from fixtures_dashboard_spec import RETAIL_SPEC
 
 # 2010-12 到 2011-02：英国 4 单、法国 2 单、1 张取消单。数据到 2 月 15 日为止，2 月不完整
 ROWS = [
@@ -153,7 +153,7 @@ def test_heatmap_orders_weekdays_naturally(con) -> None:
     assert sum(r["values"][0] for r in data["rows"]) == 6
 
 
-def _small(rows: list[tuple]):  # noqa: ANN202
+def _small(rows: list[tuple]):
     connection = connect_frame(make_frame(rows))
     sources._retail_view(connection)
     return connection

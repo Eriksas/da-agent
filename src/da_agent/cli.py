@@ -159,7 +159,7 @@ def evaluate(llm_kind: str, case_ids: str | None, conditions: str, repeats: int,
     from datetime import datetime
 
     from .dataset import PARQUET_PATH
-    from .evaluation import Connections, RESULTS_DIR, load_cases, render_summary, run_eval
+    from .evaluation import RESULTS_DIR, Connections, load_cases, render_summary, run_eval
     from .llm import LLMReply, OpenAICompatibleLLM
     from .paths import ROOT
 
@@ -424,7 +424,8 @@ def week(week_label: str, compare: str) -> int:
     from .cleaning import connect
     from .dataset import PARQUET_PATH
     from .decompose import decompose_gmv
-    from .metrics import drilldown, format_value as _fmt, metric_summary
+    from .metrics import drilldown, metric_summary
+    from .metrics import format_value as _fmt
 
     if not PARQUET_PATH.exists():
         raise SystemExit("还没有准备数据，请先运行：da-agent prepare-data")

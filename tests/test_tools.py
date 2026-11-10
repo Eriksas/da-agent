@@ -3,12 +3,12 @@
 import json
 
 import pytest
+from test_metrics import ROWS
 
 from da_agent.cleaning import connect_frame
 from da_agent.llm import INVALID_JSON_KEY
 from da_agent.tools import DOMAIN_TOOLS, TOOLS, execute, tool_specs
 from helpers import make_frame
-from test_metrics import ROWS
 
 
 @pytest.fixture(scope="module")

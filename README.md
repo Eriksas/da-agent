@@ -7,7 +7,7 @@
 
 > **项目网站**：<https://eriksas.github.io/da-agent/>（[数据看板](https://eriksas.github.io/da-agent/dashboard.html)、周报、评测、财报比率、运行回放，每周自动更新）
 >
-> 当前进度：**M7 自动周报**已上线，每周一由 GitHub Actions 生成一份，见 [reports/weekly](reports/weekly/README.md)；**M7b 准确率提升**已完成，前后对比见 [m7b-comparison.md](eval/results/m7b-comparison.md)；**M9 上市公司财报分析**已完成，同一个 Agent 换成财报领域，见[下文](#上市公司财报分析m9-产出)。**M11 本机图形界面**：`da-agent ui` 回放已保存的运行或实时提问，见[下文](#本机图形界面m11-产出)。完整规划见 [PROJECT_BRIEF.md](PROJECT_BRIEF.md)，**真实运行样例**见 [examples/real_runs](examples/real_runs/README.md)。
+> 这个仓库有三部分：**问答和周报**（电商运营、上市公司财报两个领域，周报每周一由 GitHub Actions 自动生成，见 [reports/weekly](reports/weekly/README.md)）、**自主搭看板**（给一份数据和读者，Agent 设计看板，见[下文](#agent-自主搭看板m13-产出)）、**评测**（评分表在运行前冻结，每次运行的完整记录都已提交）。完整规划见 [PROJECT_BRIEF.md](PROJECT_BRIEF.md)，真实运行样例见 [examples/real_runs](examples/real_runs/README.md)。
 
 ## 架构
 
@@ -37,9 +37,10 @@ flowchart LR
 | 对症改进后（同 10 道题） | 18/40 → 38/40；只看初稿（不靠核查后退回修正）22/40 | [M7b 对比](eval/results/m7b-comparison.md) |
 | 能不能推广？（5 道改代码前冻结的新题） | 11/20 → 18/20；只看初稿 9/20 | [M7b 对比](eval/results/m7b-comparison.md) |
 | 代价 | 每次运行 token 约为原来的 1.9 倍 | [M7b 对比](eval/results/m7b-comparison.md) |
-| 自动周报 | 每周一运行；已生成的周报数字出处 122/129、119/119 | [reports/weekly](reports/weekly/README.md) |
+| 自动周报 | 每周一运行，每份的数字出处核查结果见列表 | [reports/weekly](reports/weekly/README.md) |
 | 换一个领域：上市公司财报（8 道题） | 直接问模型 4/8，数字有出处率 46%；Agent 16/16，只看初稿 9/16 | [M9 评测](eval/results/company-2026-10-07/summary.md) |
-| 测试 | 214 个，每次 push 由 CI 运行 | [ci.yml](.github/workflows/ci.yml) |
+| 自主搭看板（2 份没见过、没有说明的数据） | 13 次真实运行全部独立完成；改进后“数量 + 比率”表格 13 → 0 张，比率对比图全部带整体参考线 | [盲测 1](examples/dashboard_runs/bank-marketing-review.md)、[盲测 2](examples/dashboard_runs/online-shoppers-review.md)、[表达能力](examples/dashboard_runs/visual-review.md) |
+| 测试 | 359 个，行覆盖率约 90%；每次 push 由 CI 运行 lint 和测试，覆盖率低于 80% 不通过 | [ci.yml](.github/workflows/ci.yml) |
 
 提升主要来自“核查后退回修正”，它和评分用的是同一个核查器，所以“数字有出处”这一项的提升有一部分是构造出来的；局限和解读见 [M7b 对比](eval/results/m7b-comparison.md)。人工复核由 Claude 辅助完成，待项目作者确认。
 
@@ -62,7 +63,7 @@ flowchart LR
 | M10 | 项目展示网站（GitHub Pages，静态网页，每周随周报更新） | ✅ |
 | M11 | 本机图形界面（回放已保存的运行、实时提问，每一步实时显示） | ✅ |
 | M12 | 电商运营数据看板（网站页面，按时间和市场筛选，8 张图 + 指标卡） | ✅ |
-| M13 | Agent 根据数据自主搭看板（模型写方案，程序校验、算数、画图）；3 份数据上的真实模型评测（含 2 份盲测）已完成，Tableau 导出待做 | 进行中 |
+| M13 | Agent 根据数据自主搭看板（模型写方案，程序校验、算数、画图）；3 份数据上的真实模型评测（含 2 份盲测）已完成；Tableau 导出没做 | ✅ |
 
 ## 本地运行
 
@@ -320,7 +321,7 @@ LangGraph 是可选依赖组（`uv sync --group langgraph`），只有 CI 的对
 - **做的过程中发现的数据问题**：有一张订单从 11:59 录到 12:00，按行统计会在热力图里算两次，改成按订单第一行的时间；一笔 80,995 件、12 分钟后就被取消的订单，按下单口径会让一个商品排进 Top 5，所以商品排名用净销售额，并在图下说明。
 - **图表**：不用第三方图表库，SVG 由原生 JavaScript 画出。配色按 dataviz 方法选：分类色前 3 个经校验器检查，深浅两种模式都通过；顺序色阶在深色模式下反向。每张图都有悬停提示（也能用 Tab 键聚焦）和表格视图，商品名等来自数据的文字一律按纯文本写入页面。
 
-## Agent 自主搭看板（M13 产出，进行中）
+## Agent 自主搭看板（M13 产出）
 
 给一份数据和一个读者（“给研究员看四家平台的盈利能力”），Agent 自己决定放哪些指标和图，生成一个和 M12 同样规格的看板页面。
 

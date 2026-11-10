@@ -5,13 +5,13 @@ from dataclasses import asdict
 from pathlib import Path
 
 import pytest
+from test_metrics import ROWS
 
 from da_agent.agent import BUDGET_NOTICE, FORMAT_NOTICE, AgentRun, run_agent, save_run
 from da_agent.checks import check_run
 from da_agent.cleaning import connect_frame
 from da_agent.llm import FakeLLM, LLMError, LLMReply, ToolCall
 from helpers import make_frame
-from test_metrics import ROWS
 
 QUESTION = "2011-W02 的 GMV 为什么变了？"
 
@@ -200,8 +200,9 @@ def test_tool_call_written_as_text_twice_is_not_an_answer() -> None:
 
 def test_company_domain_uses_its_own_prompt_and_tools(tmp_path: Path) -> None:
     """同一个循环换一个领域：提示词、工具和流程目录都换成财报的，核查和退回修正不变。"""
-    from da_agent.company import connect_financials
     from test_company import write_key_facts
+
+    from da_agent.company import connect_financials
 
     llm = FakeLLM(replies=[
         tools(call(1, "metric_summary", week="2011-W02")),  # 电商工具：在财报领域里不存在

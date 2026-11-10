@@ -9,7 +9,13 @@ import pandas as pd
 import pytest
 
 from da_agent.dataset import (
-    DataIntegrityError, download, extract_xlsx, normalize, read_workbook, sha256_of, write_parquet,
+    DataIntegrityError,
+    download,
+    extract_xlsx,
+    normalize,
+    read_workbook,
+    sha256_of,
+    write_parquet,
 )
 
 

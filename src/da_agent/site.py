@@ -219,7 +219,7 @@ def grouped_columns(categories: list[str], series: list[tuple[str, str, list[tup
         parts.append(f'<text class="tick" x="{left - 6}" y="{y + 4:.1f}" text-anchor="end">{tick * 100:.0f}%</text>')
     for i, category in enumerate(categories):
         x0 = left + band * i + (band - group) / 2
-        for j, (name, color, values) in enumerate(series):
+        for j, (_name, color, values) in enumerate(series):
             value, tip = values[i]
             x = x0 + j * (bar + gap)
             h = plot_h * value

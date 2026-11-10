@@ -7,8 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from da_agent.autodash.compile import (DashboardProblems, _calendar, compile_dashboard, preview_chart,
-                                       ungrounded_numbers)
+from da_agent.autodash.compile import DashboardProblems, _calendar, compile_dashboard, preview_chart, ungrounded_numbers
 from da_agent.autodash.sources import connect_source, profile_table
 from da_agent.autodash.spec import Chart, DashboardSpec, Metric
 

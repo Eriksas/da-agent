@@ -5,6 +5,8 @@ from dataclasses import asdict
 from pathlib import Path
 
 import pytest
+from test_agent import QUESTION, call, tools
+from test_metrics import ROWS
 
 from da_agent import dataset, ui
 from da_agent.agent import BUDGET_NOTICE, FORMAT_NOTICE, run_agent, save_run
@@ -14,8 +16,6 @@ from da_agent.config import Settings
 from da_agent.llm import FakeLLM, LLMReply
 from da_agent.site import REAL_RUNS
 from helpers import make_frame
-from test_agent import QUESTION, call, tools
-from test_metrics import ROWS
 
 
 def test_replayed_events_equal_live_events(tmp_path: Path) -> None:
@@ -59,7 +59,7 @@ class Box:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple, dict]] = []
 
-    def __getattr__(self, name: str):  # noqa: ANN204
+    def __getattr__(self, name: str):
         return lambda *args, **kwargs: self.calls.append((name, args, kwargs))
 
 

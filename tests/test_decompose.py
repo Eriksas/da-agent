@@ -1,11 +1,11 @@
 """GMV 拆解：先验证纯函数（手算），再验证接上数据后的结果。"""
 
 import pytest
+from test_metrics import ROWS
 
 from da_agent.cleaning import connect_frame
 from da_agent.decompose import FACTORS, chain_substitution, decompose_gmv, order_range, shapley
 from helpers import make_frame
-from test_metrics import ROWS
 
 C, F, A = FACTORS
 BASE = {C: 10, F: 2, A: 50}      # 乘积 1000
