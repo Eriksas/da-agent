@@ -167,6 +167,48 @@ def agent_review(run_dir: Path, llm_kind: str, script: Path | None) -> int:
     return 1 if result["verdict"] == "有问题" else 0
 
 
+def evaluate_review(llm_kind: str, name: str | None, workers: int) -> int:
+    """复核 Agent 的评测：在真实答案里植入程序查不出的错误，看复核 Agent 能不能指出来。--llm fake 只检查流程。"""
+    import json
+    from datetime import datetime
+
+    from .evaluation import RESULTS_DIR
+    from .llm import LLMReply, OpenAICompatibleLLM, ToolCall
+    from .review_eval import build_cases, load_plan, render_summary, run_review_eval, summarize
+
+    cases = build_cases(load_plan())
+    if llm_kind == "fake":
+        model, workers = "fake", 1
+        passed = {"verdict": "通过", "findings": [], "checked": "（假模型）固定回答，只用来检查评测流程"}
+
+        def make_llm() -> FakeLLM:
+            return FakeLLM(replies=[LLMReply(content="", tool_calls=(ToolCall(id="s1", name="submit_review", arguments=passed),)),
+                                    LLMReply(content="（假模型）没有发现问题。")])
+    else:
+        settings = Settings()
+        client = OpenAICompatibleLLM(settings, model=settings.review_llm_model)
+        model = client.model
+
+        def make_llm() -> OpenAICompatibleLLM:
+            return client
+    started = datetime.now()
+    name = name or f"review-{'fake' if llm_kind == 'fake' else started.strftime('%Y-%m-%d')}"
+    out_dir = RESULTS_DIR / name
+    if (out_dir / "results.json").exists():
+        raise SystemExit(f"{out_dir} 已经有结果了；换一个 --name，或先删除旧结果")
+    results = run_review_eval(cases, make_llm, out_dir, workers=workers)
+    summary = summarize(results)
+    meta = {"name": name, "model": model, "started_at": started.strftime("%Y-%m-%d %H:%M"), "workers": workers}
+    for file, content in (("results.json", results), ("summary.json", summary), ("meta.json", meta)):
+        (out_dir / file).write_text(json.dumps(content, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    (out_dir / "summary.md").write_text(render_summary(summary, meta), encoding="utf-8", newline="\n")
+    total = summary["seeded_total"]
+    print(f"植入的错误：指到了 {total['detected']}/{total['counted']} 处；原样答案 {summary['clean']['answers']} 份，"
+          f"提出 {summary['clean']['findings']} 条意见（错误 {summary['clean']['errors']} 条）")
+    print(f"结果：{out_dir / 'summary.md'}")
+    return 0
+
+
 def check(run_dir: Path) -> int:
     """对已保存的运行补做核查。有找不到出处的数字时返回 1，方便在自动化流程里当关卡用。"""
     if not (run_dir / "run.json").exists():
@@ -534,6 +576,10 @@ def main(argv: list[str] | None = None) -> int:
     review_parser.add_argument("run_dir", type=Path, help="运行目录（里面有 run.json）")
     review_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 调用真实模型（默认）；fake 按剧本回放")
     review_parser.add_argument("--script", type=Path, help="--llm fake 时使用的剧本文件")
+    eval_review_parser = commands.add_parser("eval-review", help="复核 Agent 的评测：植入程序查不出的错误，看它能不能指出来")
+    eval_review_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="fake 只检查流程，结果不代表模型表现")
+    eval_review_parser.add_argument("--name", help="结果目录名（eval/results/<name>），默认 review-<日期>")
+    eval_review_parser.add_argument("--workers", type=int, default=6, help="同时复核几份，默认 6")
     check_parser = commands.add_parser("check", help="对已保存的运行补做核查并重新生成报告，不调用模型")
     check_parser.add_argument("run_dir", type=Path, help="运行目录，例如 runs/20260929T144747-a7db30")
     prepare_parser = commands.add_parser("prepare-data", help="下载并转换 UCI Online Retail II 数据集")
@@ -594,6 +640,8 @@ def main(argv: list[str] | None = None) -> int:
             return ask(args.question, args.llm, args.script)
         if args.command == "company-ask":
             return ask(args.question, args.llm, args.script, domain="company")
+        if args.command == "eval-review":
+            return evaluate_review(args.llm, args.name, args.workers)
         if args.command == "review":
             return agent_review(args.run_dir, args.llm, args.script)
         if args.command == "check":
