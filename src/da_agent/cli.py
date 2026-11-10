@@ -167,6 +167,20 @@ def agent_review(run_dir: Path, llm_kind: str, script: Path | None) -> int:
     return 1 if result["verdict"] == "有问题" else 0
 
 
+def compare_models() -> int:
+    """把多模型对比的结果并排汇总成一张表（eval/results/<prefix>.md）。不调用模型；还没跑完的列会标“没跑”。"""
+    from .evaluation import RESULTS_DIR
+    from .model_compare import collect, load_plan, render_comparison
+
+    plan = load_plan()
+    data = collect(plan)
+    path = RESULTS_DIR / f"{plan['prefix']}.md"
+    path.write_text(render_comparison(plan, data), encoding="utf-8", newline="\n")
+    missing = [f"{m['id']}-{suite}" for suite, per_model in data.items() for m in plan["models"] if per_model[m["id"]] is None]
+    print(f"汇总：{path}" + (f"（还没有结果：{'、'.join(missing)}）" if missing else ""))
+    return 0
+
+
 def evaluate_review(llm_kind: str, name: str | None, workers: int) -> int:
     """复核 Agent 的评测：在真实答案里植入程序查不出的错误，看复核 Agent 能不能指出来。--llm fake 只检查流程。"""
     import json
@@ -576,6 +590,7 @@ def main(argv: list[str] | None = None) -> int:
     review_parser.add_argument("run_dir", type=Path, help="运行目录（里面有 run.json）")
     review_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 调用真实模型（默认）；fake 按剧本回放")
     review_parser.add_argument("--script", type=Path, help="--llm fake 时使用的剧本文件")
+    commands.add_parser("eval-models", help="多模型对比：把 eval/model_comparison.yaml 里各模型的评测结果并排汇总，不调用模型")
     eval_review_parser = commands.add_parser("eval-review", help="复核 Agent 的评测：植入程序查不出的错误，看它能不能指出来")
     eval_review_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="fake 只检查流程，结果不代表模型表现")
     eval_review_parser.add_argument("--name", help="结果目录名（eval/results/<name>），默认 review-<日期>")
@@ -640,6 +655,8 @@ def main(argv: list[str] | None = None) -> int:
             return ask(args.question, args.llm, args.script)
         if args.command == "company-ask":
             return ask(args.question, args.llm, args.script, domain="company")
+        if args.command == "eval-models":
+            return compare_models()
         if args.command == "eval-review":
             return evaluate_review(args.llm, args.name, args.workers)
         if args.command == "review":
