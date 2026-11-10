@@ -106,12 +106,13 @@ def test_review_run_keeps_the_last_accepted_submission() -> None:
         LLMReply(content="", tool_calls=(ToolCall(id="c", name="calculate", arguments={
             "expression": "35 - 12", "purpose": "英国和荷兰的订单数之差"}),)),
         _call(GOOD | {"findings": [DIRECTION | {"quote": "环比上涨"}]}),  # 引用不是原文：被退回
-        _call(GOOD, "s2"),
-        LLMReply(content="答案把 GMV 环比的方向说反了。")])
+        _call(GOOD | {"findings": [DIRECTION]}, "s2"),  # 合格，但后面又交了一版更完整的
+        _call(GOOD, "s3"),
+        LLMReply(content="答案把 GMV 环比的方向说反了，共核对 37 句。")])  # 37 不在任何工具结果里：复核的结语不查数字出处
     out = review_run(make_run(), llm=llm)
     review = out["review"]
     assert (review["status"], review["verdict"], review["rejected_submissions"]) == ("reviewed", "有问题", 1)
-    assert [f["category"] for f in review["findings"]] == ["方向或比较说反", "因果或推测没有依据"]
+    assert [f["category"] for f in review["findings"]] == ["方向或比较说反", "因果或推测没有依据"]  # 以最后一版为准
     assert final_review(out["run"])["checked"] == GOOD["checked"]
     sent = llm.received[0]
     assert [t["function"]["name"] for t in sent["tools"]] == ["calculate", "submit_review"]  # 复核 Agent 不能查数据
