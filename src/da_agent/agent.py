@@ -46,7 +46,8 @@ from .tools import ToolOutcome, execute, tool_specs
 SYSTEM_PROMPT_PATH = ROOT / "prompts" / "agent_system.md"
 # 每个领域一份系统提示词和一组工具；循环、核查、退回修正对所有领域都一样
 SYSTEM_PROMPTS = {"ecommerce": SYSTEM_PROMPT_PATH, "company": ROOT / "prompts" / "company_system.md",
-                  "dashboard": ROOT / "prompts" / "dashboard_system.md"}
+                  "dashboard": ROOT / "prompts" / "dashboard_system.md",
+                  "review": ROOT / "prompts" / "review_system.md"}  # 复核 Agent 的提示词由 reviewer.py 填好后传入
 BUDGET_NOTICE = "（系统提示）工具调用次数已用完。请不要再调用工具，直接根据已有的工具结果给出最终回答。"
 FORMAT_NOTICE = ("（系统提示）上一条回复里有工具调用的文字标记，但没有按函数调用的格式发出，程序无法执行。"
                  "需要工具时请直接发起工具调用；不需要时请给出文字回答。")
@@ -101,10 +102,13 @@ def repair_notice(ungrounded: list[dict[str, Any]]) -> str:
     return REPAIR_NOTICE.format(count=len(ungrounded), items=items, calls=REPAIR_TOOL_CALLS)
 
 
-def run_agent(question: str, *, llm: LLMClient, con: duckdb.DuckDBPyConnection, max_tool_calls: int,
+def run_agent(question: str, *, llm: LLMClient, con: Any, max_tool_calls: int,
               system_prompt: str | None = None, use_skills: bool = True, repair: bool = True,
               domain: str = "ecommerce", on_step: Callable[[dict[str, Any]], None] | None = None) -> AgentRun:
-    """运行一次 Agent 循环，返回完整记录。任何失败都体现在 status 里，不向外抛异常（on_step 自己抛的除外）。"""
+    """运行一次 Agent 循环，返回完整记录。任何失败都体现在 status 里，不向外抛异常（on_step 自己抛的除外）。
+
+    con 是交给工具的上下文：分析领域是数据库连接；复核（domain="review"）是 review.ReviewContext。
+    """
     notify = on_step or (lambda event: None)
     start = time.perf_counter()
     run = AgentRun(run_id=f"{datetime.now():%Y%m%dT%H%M%S}-{uuid4().hex[:6]}", question=question, model=llm.model,

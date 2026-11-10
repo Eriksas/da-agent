@@ -19,6 +19,44 @@ def _warnings(run: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(found))
 
 
+def review_summary(review: dict[str, Any] | None) -> str:
+    """复核 Agent 结论的一句话摘要；没有复核过返回空串。"""
+    if not review or review["status"] == "no_answer":
+        return ""
+    if review["status"] != "reviewed":
+        return f"复核 Agent：没有完成（{review['error']}）"
+    errors = sum(f["severity"] == "错误" for f in review["findings"])
+    doubts = len(review["findings"]) - errors
+    if not review["findings"]:
+        return "复核 Agent：没有发现问题"
+    return "复核 Agent：" + "、".join(part for part in (f"指出 {errors} 处错误" if errors else "",
+                                                        f"{doubts} 处存疑" if doubts else "") if part)
+
+
+def render_agent_review(review: dict[str, Any]) -> str:
+    """复核 Agent 的意见，单独写成 review.md。
+
+    不并进 report.md：评测（eval/results/review-2026-11-10）里，它在没改动的答案上给出的“错误”级意见 6 条中成立 4 条，
+    没有达到运行前定下的 70%。在换一批答案重新评测之前，它的意见只在主动运行 `da-agent review` 时给出。
+    """
+    lines = ["# 复核 Agent 的意见", "",
+             "> **这是另一个 AI 的判断，不是结论。** 评测里，它指出的“错误”约三分之二经验算成立"
+             "（6 条中 4 条，见 eval/review_rubric_addendum.md）；每一条都要回到工具结果核对后再采信。", ""]
+    if review["status"] != "reviewed":
+        return "\n".join(lines + [f"复核没有完成：{review.get('error') or '原运行没有答案'}。", ""])
+    lines += [f"- 被复核的运行：`{review['reviewed_run']}`；复核模型 {review['model']}",
+              f"- 结论：**{review['verdict']}**。{review['checked']}",
+              f"- 调用模型 {review['usage']['llm_calls']} 次，token {review['usage']['prompt_tokens']} + "
+              f"{review['usage']['completion_tokens']}，用时 {review['seconds']} 秒", ""]
+    if review["findings"]:
+        lines += ["| 级别 | 类别 | 答案原句 | 理由 | 依据（第几次工具调用） |", "|---|---|---|---|---|"]
+        lines += [f"| {f['severity']} | {f['category']} | {f['quote'].replace('|', '/')} | {f['explanation'].replace('|', '/')} | "
+                  f"{'、'.join(str(n) for n in f['evidence']) or '—'} |" for f in review["findings"]]
+    else:
+        lines.append("没有发现问题。这不代表答案没有问题：它只核对了能对照工具结果的句子。")
+    return "\n".join(lines + [""])
+
+
 def render_report(run: dict[str, Any], checks: dict[str, Any]) -> str:
     """渲染 report.md。只排版，不新增任何数字。"""
     numbers, phrases = checks["numbers"], checks["phrases"]

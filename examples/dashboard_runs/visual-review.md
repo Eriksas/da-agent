@@ -1,6 +1,6 @@
 # 看板表达能力（M13e）：真实模型 5 次运行的复核记录
 
-> **Claude 辅助复核，待项目作者确认。** 评分表 [eval/dashboard_rubric_visual.md](../../eval/dashboard_rubric_visual.md) 在第一次运行前提交并冻结（提交 443d24b，2026-10-14 15:59:16；5 次运行同时开始于 15:59:25）。样本量：Online Shoppers 3 次、Bank Marketing 2 次。几次运行之间程序没有改动。
+> **Claude 代项目作者复核（作者授权，本人未逐条核对）。** 评分表 [eval/dashboard_rubric_visual.md](../../eval/dashboard_rubric_visual.md) 在第一次运行前提交并冻结（提交 443d24b，2026-10-14 15:59:16；5 次运行同时开始于 15:59:25）。样本量：Online Shoppers 3 次、Bank Marketing 2 次。几次运行之间程序没有改动。
 
 - **起因**：用户反馈 Agent 搭的看板每次都是同样的视觉方案。之前 6 次盲测里，非 kpi 的图几乎都是条形图加表格，13 张表格全是“数量 + 比率”。
 - **M13e 增加的能力**：散点图、数值分段（bins）、整体参考线（reference）、重点（highlight）、分区（section）和宽窄（width）。分析流程 v3 写了按问题选图的规则。

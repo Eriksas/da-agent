@@ -1,6 +1,6 @@
 # Online Shoppers 盲测：真实模型 3 次运行的复核记录
 
-> **Claude 辅助复核，待项目作者确认。** 评分表 [eval/dashboard_rubric_shoppers.md](../../eval/dashboard_rubric_shoppers.md) 在第一次运行前提交并冻结（提交 3835b5d，2026-10-14 15:16:15；第一次运行开始于 15:16:25）。样本量 3。三次运行之间程序没有改动。
+> **Claude 代项目作者复核（作者授权，本人未逐条核对）。** 评分表 [eval/dashboard_rubric_shoppers.md](../../eval/dashboard_rubric_shoppers.md) 在第一次运行前提交并冻结（提交 3835b5d，2026-10-14 15:16:15；第一次运行开始于 15:16:25）。样本量 3。三次运行之间程序没有改动。
 
 - **盲测设置**：只给 Agent 一个 CSV（UCI Online Shoppers Purchasing Intention，12,330 行，CC BY 4.0）。没有语义标注，也没有数据说明，列的含义只能从列名和取值判断。UCI 页面只用来写评分表。
 - **读者和目标**（三次相同）：电商运营负责人复盘网站访问的购买转化：整体转化怎么样，哪些访客类型、流量来源和月份转化更高，以及需要注意的数据问题。
