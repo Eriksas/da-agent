@@ -8,11 +8,11 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("streamlit", reason="需要可选依赖：uv sync --group ui")
-from streamlit.testing.v1 import AppTest  # noqa: E402
+from streamlit.testing.v1 import AppTest
+from test_agent import call, tools
 
-from da_agent import ui  # noqa: E402
-from da_agent.llm import FakeLLM, LLMReply  # noqa: E402
-from test_agent import call, tools  # noqa: E402
+from da_agent import ui
+from da_agent.llm import FakeLLM, LLMReply
 
 APP = str(Path(ui.__file__).with_name("ui_app.py"))
 
@@ -24,7 +24,7 @@ def app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> AppTest:
     return AppTest.from_file(APP, default_timeout=60)
 
 
-def button(at: AppTest, label: str):  # noqa: ANN201
+def button(at: AppTest, label: str):
     return next(b for b in at.button if b.label == label)
 
 

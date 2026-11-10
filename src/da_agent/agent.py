@@ -27,7 +27,7 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -109,7 +109,7 @@ def run_agent(question: str, *, llm: LLMClient, con: duckdb.DuckDBPyConnection, 
     start = time.perf_counter()
     run = AgentRun(run_id=f"{datetime.now():%Y%m%dT%H%M%S}-{uuid4().hex[:6]}", question=question, model=llm.model,
                    max_tool_calls=max_tool_calls, use_skills=use_skills, domain=domain,
-                   started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+                   started_at=datetime.now(UTC).isoformat(timespec="seconds"))
     run.messages = [{"role": "system",
                      "content": system_prompt or build_system_prompt(con, max_tool_calls, use_skills, domain)},
                     {"role": "user", "content": question}]

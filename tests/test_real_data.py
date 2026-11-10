@@ -7,7 +7,6 @@ CI 里没有这份数据，测试会自动跳过。
 import json
 
 import duckdb
-import pandas as pd
 import pytest
 
 from da_agent.cleaning import GIFT_VOUCHER_PREFIX, NON_MERCHANDISE, connect

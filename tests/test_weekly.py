@@ -4,16 +4,21 @@ import json
 from pathlib import Path
 
 import pytest
+from test_metrics import ROWS
 
 from da_agent import cli
 from da_agent.cleaning import connect_frame
 from da_agent.dataset import read_normalized_csv
 from da_agent.llm import FakeLLM, LLMError, LLMReply, ToolCall
 from da_agent.weekly import (
-    FIRST_REPLAY_WEEK, demote_headings, generate_weekly, next_replay_week, read_cursor, write_cursor,
+    FIRST_REPLAY_WEEK,
+    demote_headings,
+    generate_weekly,
+    next_replay_week,
+    read_cursor,
+    write_cursor,
 )
 from helpers import S2, UK, make_frame
-from test_metrics import ROWS
 
 
 @pytest.fixture

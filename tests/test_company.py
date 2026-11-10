@@ -133,9 +133,10 @@ def test_overview_lists_only_companies_in_the_table(con) -> None:
 
 def test_amounts_in_yi_are_readable_and_sourced() -> None:
     """首次真实运行：原始数字太长，模型自己换算成“百万”，换算后的数找不到出处。现在工具直接给出“亿”的写法。"""
+    import json
+
     from da_agent.checks import check_run
     from da_agent.company import _yi
-    import json
 
     assert _yi(1023670000000, "CNY") == "10,236.70 亿元" and _yi(716924000000, "USD") == "7,169.24 亿美元"
     assert _yi(None, "CNY") is None

@@ -5,19 +5,28 @@ from dataclasses import asdict
 from pathlib import Path
 
 import pytest
+from test_metrics import ROWS
 
 from da_agent import cli
 from da_agent.agent import AgentRun, run_agent
 from da_agent.checks import check_run
 from da_agent.cleaning import connect_frame
 from da_agent.evaluation import (
-    HOLDOUT_PATH, Case, Connections, inject, load_cases, render_comparison, render_summary, rescore, run_eval, score,
+    HOLDOUT_PATH,
+    Case,
+    Connections,
+    inject,
+    load_cases,
+    render_comparison,
+    render_summary,
+    rescore,
+    run_eval,
+    score,
     score_run,
     verify_injection,
 )
 from da_agent.llm import FakeLLM, LLMReply, ToolCall
 from helpers import make_frame
-from test_metrics import ROWS
 
 
 def test_real_case_file_is_valid() -> None:

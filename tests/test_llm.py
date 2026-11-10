@@ -2,9 +2,21 @@
 
 from pathlib import Path
 
+import openai
 import pytest
+from openai.types.chat import ChatCompletion
 
-from da_agent.llm import FakeLLM, FakeLLMExhausted, LLMReply, ToolCall
+from da_agent.config import Settings
+from da_agent.llm import (
+    INVALID_JSON_KEY,
+    FakeLLM,
+    FakeLLMExhausted,
+    LLMError,
+    LLMReply,
+    OpenAICompatibleLLM,
+    ToolCall,
+    parse_response,
+)
 
 
 def test_replays_in_order_and_records_input() -> None:
@@ -33,11 +45,6 @@ def test_loads_tool_calls_from_file(tmp_path: Path) -> None:
 
 # ---- 真实模型客户端：用构造出来的返回值测试，不联网 ----
 
-import openai
-from openai.types.chat import ChatCompletion
-
-from da_agent.config import Settings
-from da_agent.llm import INVALID_JSON_KEY, LLMError, OpenAICompatibleLLM, parse_response
 
 
 def completion(content: str | None, tool_calls: list | None = None, extra: dict | None = None,

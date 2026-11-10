@@ -13,13 +13,14 @@ import pytest
 
 pytest.importorskip("langgraph", reason="需要可选依赖：uv sync --group langgraph")
 
-from da_agent import cli  # noqa: E402
-from da_agent.agent import run_agent  # noqa: E402
-from da_agent.cleaning import connect_frame  # noqa: E402
-from da_agent.company import connect_financials  # noqa: E402
-from da_agent.dataset import read_normalized_csv  # noqa: E402
-from da_agent.llm import FakeLLM, LLMReply, ToolCall  # noqa: E402
-from test_company import write_key_facts  # noqa: E402
+from test_company import write_key_facts
+
+from da_agent import cli
+from da_agent.agent import run_agent
+from da_agent.cleaning import connect_frame
+from da_agent.company import connect_financials
+from da_agent.dataset import read_normalized_csv
+from da_agent.llm import FakeLLM, LLMReply, ToolCall
 
 EXAMPLE = Path(__file__).parents[1] / "examples" / "langgraph_version.py"
 _spec = importlib.util.spec_from_file_location("langgraph_version", EXAMPLE)

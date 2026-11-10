@@ -20,8 +20,19 @@ import duckdb
 from ..checks import extract_numbers
 from ..cleaning import fetch_one, fetch_rows
 from .sources import Source, column_types, source_of
-from .spec import (MAX_SERIES, MAX_X, Chart, DashboardSpec, Dimension, Metric, base_metrics, chart_problems,
-                   check_spec, is_additive, metric_problems)
+from .spec import (
+    MAX_SERIES,
+    MAX_X,
+    Chart,
+    DashboardSpec,
+    Dimension,
+    Metric,
+    base_metrics,
+    chart_problems,
+    check_spec,
+    is_additive,
+    metric_problems,
+)
 
 WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 # 认得出的月份和星期写法（不分大小写）：取值全部能认出来时，按日历排，而不是按字母排（M13b 盲测里 apr、aug、dec……）
@@ -529,7 +540,7 @@ def _calendar(values: list[Any]) -> dict[Any, int] | None:
     return None
 
 
-def _ranker(dim: Dimension | None, values: list[Any]):  # noqa: ANN202
+def _ranker(dim: Dimension | None, values: list[Any]):
     """一个维度上取值的先后：模型给的 order 最优先；其次月份、星期按日历；其余按取值本身。"""
     if dim is not None and dim.order:
         position = {v: i for i, v in enumerate(dim.order)}
