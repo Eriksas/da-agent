@@ -19,12 +19,46 @@ def _warnings(run: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(found))
 
 
-def render_report(run: dict[str, Any], checks: dict[str, Any]) -> str:
-    """渲染 report.md。只排版，不新增任何数字。"""
+def review_summary(review: dict[str, Any] | None) -> str:
+    """复核 Agent 结论的一句话摘要；没有复核过返回空串。"""
+    if not review or review["status"] == "no_answer":
+        return ""
+    if review["status"] != "reviewed":
+        return f"复核 Agent：没有完成（{review['error']}）"
+    errors = sum(f["severity"] == "错误" for f in review["findings"])
+    doubts = len(review["findings"]) - errors
+    if not review["findings"]:
+        return "复核 Agent：没有发现问题"
+    return "复核 Agent：" + "、".join(part for part in (f"指出 {errors} 处错误" if errors else "",
+                                                        f"{doubts} 处存疑" if doubts else "") if part)
+
+
+def _review_section(review: dict[str, Any] | None) -> list[str]:
+    if not review:  # 没有复核过的运行，报告和以前一样
+        return []
+    lines = ["", "## 附录 G：复核 Agent 的意见", ""]
+    if review["status"] != "reviewed":
+        return lines + [f"复核没有完成：{review.get('error') or '原运行没有答案'}。"]
+    lines += [f"第二个 Agent（模型 {review['model']}）只看问题、答案和工具调用记录，核对程序查不了的内容："
+              "数字有没有用错对象、方向有没有说反、概括和因果有没有依据。**它的意见同样是 AI 的判断，供人工复核时参考。**", "",
+              f"- 结论：**{review['verdict']}**。{review['checked']}",
+              f"- 调用模型 {review['usage']['llm_calls']} 次，token {review['usage']['prompt_tokens']} + "
+              f"{review['usage']['completion_tokens']}，用时 {review['seconds']} 秒", ""]
+    if review["findings"]:
+        lines += ["| 级别 | 类别 | 答案原句 | 理由 | 依据（第几次工具调用） |", "|---|---|---|---|---|"]
+        lines += [f"| {f['severity']} | {f['category']} | {f['quote'].replace('|', '/')} | {f['explanation'].replace('|', '/')} | "
+                  f"{'、'.join(str(n) for n in f['evidence']) or '—'} |" for f in review["findings"]]
+    return lines
+
+
+def render_report(run: dict[str, Any], checks: dict[str, Any], review: dict[str, Any] | None = None) -> str:
+    """渲染 report.md。只排版，不新增任何数字。review 是复核 Agent 的意见（review.json），没有就不显示结论。"""
     numbers, phrases = checks["numbers"], checks["phrases"]
     usage = run["usage"]
+    verdict = review_summary(review)
     lines = [
-        f"> **AI 初稿，待人工复核。** {checks['summary']}。{checks['process']['summary']}。", "",
+        f"> **AI 初稿，待人工复核。** {checks['summary']}。{checks['process']['summary']}。" + (f"{verdict}。" if verdict else ""),
+        "",
         f"**问题：** {run['question']}", "",
         run.get("answer") or f"（没有答案，状态：{run['status']}）", "",
         "---", "", "## 附录 A：流程检查与危险信号", "",
@@ -69,7 +103,8 @@ def render_report(run: dict[str, Any], checks: dict[str, Any]) -> str:
     lines += ["", "## 附录 F：运行信息", "",
               f"- 运行编号 `{run['run_id']}`，状态 {run['status']}，模型 {run['model']}",
               f"- 调用模型 {usage['llm_calls']} 次，token {usage['prompt_tokens']} + {usage['completion_tokens']}，用时 {run['seconds']} 秒",
-              f"- 工具调用上限 {run['max_tool_calls']} 次" + ("，本次已用完" if run["budget_exhausted"] else ""), ""]
+              f"- 工具调用上限 {run['max_tool_calls']} 次" + ("，本次已用完" if run["budget_exhausted"] else "")]
+    lines += _review_section(review) + [""]
     return "\n".join(lines)
 
 
@@ -79,5 +114,7 @@ def write_review(run_dir: Path) -> dict[str, Any]:
     checks = check_run(run)
     (run_dir / "checks.json").write_text(json.dumps(checks, ensure_ascii=False, indent=2) + "\n",
                                          encoding="utf-8", newline="\n")
-    (run_dir / "report.md").write_text(render_report(run, checks), encoding="utf-8", newline="\n")
+    review_path = run_dir / "review.json"  # 复核过（da-agent review）就把意见一起写进报告
+    review = json.loads(review_path.read_text(encoding="utf-8")) if review_path.exists() else None
+    (run_dir / "report.md").write_text(render_report(run, checks, review), encoding="utf-8", newline="\n")
     return checks

@@ -128,10 +128,10 @@ def parse_response(response: Any) -> LLMReply:
 class OpenAICompatibleLLM:
     """真实模型客户端（默认 MiniMax）。密钥只在构造时从配置读取，不写日志、不进运行记录。"""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, model: str | None = None) -> None:
         from openai import OpenAI
 
-        self.model = settings.llm_model
+        self.model = model or settings.llm_model
         self.temperature = settings.llm_temperature
         self._client = OpenAI(base_url=settings.llm_base_url, api_key=settings.require_api_key(),
                               timeout=settings.llm_timeout_seconds, max_retries=2)

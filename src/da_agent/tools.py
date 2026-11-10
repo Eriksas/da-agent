@@ -26,6 +26,7 @@ from .financials import COMPANIES
 from .llm import INVALID_JSON_KEY
 from .metrics import METRICS, drilldown, metric_summary
 from .quality import build_report
+from .review import SubmitReviewArgs, submit_review
 from .skills import load_skills
 
 LOGGER = logging.getLogger(__name__)
@@ -193,7 +194,8 @@ class Tool:
     name: str
     description: str
     args_model: type[_Args]
-    run: Callable[[duckdb.DuckDBPyConnection, Any], dict[str, Any]]
+    # 第一个参数是工具的上下文：分析工具是数据库连接，复核工具是被复核的答案（review.ReviewContext）
+    run: Callable[[Any, Any], dict[str, Any]]
     hint: str = ""  # 参数不合法时附在报错后面的正确写法（看板工具的参数层级多，模型常放错位置）
 
 
@@ -258,6 +260,13 @@ TOOLS: dict[str, Tool] = {tool.name: tool for tool in (
     Tool("peer_compare",
          "多家公司的比率对比（增速、利润率、ROE、资产负债率、现金流质量等）。只比比率，不比金额：各公司币种和财年截止日不同。",
          PeerArgs, lambda con, a: peer_compare(con, a.companies or None, a.fiscal_year, a.ratios or None)),
+    Tool("submit_review",
+         "提交复核意见：结论（通过 / 有问题）、发现的问题（引用答案原句、类别、严重程度、理由、依据的是第几次工具调用）、"
+         "核对了哪些内容。程序会检查引用和依据是否真实，不合格时返回修改意见。",
+         SubmitReviewArgs, submit_review,
+         '正确写法：{"verdict": "有问题", "findings": [{"quote": "从答案原样照抄的一句", "category": "方向或比较说反", '
+         '"severity": "错误", "explanation": "第 2 次工具调用里 GMV 环比是 -6.00%，答案写成了增长", "evidence": [2]}], '
+         '"checked": "核对了……"}；没有问题时 findings 留空、verdict 写“通过”'),
 )}
 # 每个领域给模型看的工具。电商的顺序和 M7b 评测时一致；load_skill 和 calculate 两个领域共用
 DOMAIN_TOOLS: dict[str, tuple[str, ...]] = {
@@ -265,6 +274,7 @@ DOMAIN_TOOLS: dict[str, tuple[str, ...]] = {
                   "ab_proportion_test", "ab_sample_size", "calculate"),
     "company": ("company_overview", "financial_summary", "dupont", "peer_compare", "load_skill", "calculate"),
     "dashboard": ("profile_table", "preview_chart", "submit_dashboard", "load_skill", "calculate"),
+    "review": ("calculate", "submit_review"),  # 复核 Agent：不查数据，只验算和提交意见
 }
 
 
@@ -317,7 +327,7 @@ class ToolOutcome:
         return json.dumps(self.content, ensure_ascii=False, default=str)
 
 
-def execute(con: duckdb.DuckDBPyConnection, name: str, arguments: dict[str, Any]) -> ToolOutcome:
+def execute(con: Any, name: str, arguments: dict[str, Any]) -> ToolOutcome:
     """执行一次工具调用。任何失败都变成给模型看的错误说明，不向外抛异常。"""
     start = time.perf_counter()
 

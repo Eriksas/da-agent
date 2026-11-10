@@ -144,6 +144,29 @@ def ask(question: str, llm_kind: str, script: Path | None, domain: str = "ecomme
     return 0 if run.status == "completed" else 1
 
 
+def agent_review(run_dir: Path, llm_kind: str, script: Path | None) -> int:
+    """让复核 Agent 复核一次已保存的运行，把意见写进 review.json 和 report.md。发现“错误”级别的问题时返回 1。"""
+    from .llm import OpenAICompatibleLLM
+    from .report import review_summary
+    from .reviewer import write_agent_review
+
+    if not (run_dir / "run.json").exists():
+        raise SystemExit(f"{run_dir} 下没有 run.json")
+    if llm_kind == "fake":
+        if script is None:
+            raise SystemExit("--llm fake 需要用 --script 指定剧本文件")
+        llm = FakeLLM.from_file(script)
+    else:
+        settings = Settings()
+        llm = OpenAICompatibleLLM(settings, model=settings.review_llm_model)
+    result = write_agent_review(run_dir, llm=llm)
+    _review(run_dir)  # 重新生成 report.md，带上复核意见
+    print(review_summary(result) or "原运行没有答案，没有复核")
+    for f in result["findings"]:
+        print(f"- [{f['severity']}] {f['category']}：「{f['quote']}」——{f['explanation']}")
+    return 1 if result["verdict"] == "有问题" else 0
+
+
 def check(run_dir: Path) -> int:
     """对已保存的运行补做核查。有找不到出处的数字时返回 1，方便在自动化流程里当关卡用。"""
     if not (run_dir / "run.json").exists():
@@ -507,6 +530,10 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser = commands.add_parser("eval-compare", help="对比两次评测（改进前、改进后），不调用模型")
     compare_parser.add_argument("before_dir", type=Path, help="改进前的评测结果目录")
     compare_parser.add_argument("after_dir", type=Path, help="改进后的评测结果目录")
+    review_parser = commands.add_parser("review", help="复核 Agent：对照工具调用记录检查已保存的答案，把意见写进报告")
+    review_parser.add_argument("run_dir", type=Path, help="运行目录（里面有 run.json）")
+    review_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 调用真实模型（默认）；fake 按剧本回放")
+    review_parser.add_argument("--script", type=Path, help="--llm fake 时使用的剧本文件")
     check_parser = commands.add_parser("check", help="对已保存的运行补做核查并重新生成报告，不调用模型")
     check_parser.add_argument("run_dir", type=Path, help="运行目录，例如 runs/20260929T144747-a7db30")
     prepare_parser = commands.add_parser("prepare-data", help="下载并转换 UCI Online Retail II 数据集")
@@ -567,6 +594,8 @@ def main(argv: list[str] | None = None) -> int:
             return ask(args.question, args.llm, args.script)
         if args.command == "company-ask":
             return ask(args.question, args.llm, args.script, domain="company")
+        if args.command == "review":
+            return agent_review(args.run_dir, args.llm, args.script)
         if args.command == "check":
             return check(args.run_dir)
         if args.command == "weekly":
