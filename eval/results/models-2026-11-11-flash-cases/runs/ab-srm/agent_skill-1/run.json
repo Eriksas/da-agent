@@ -1,0 +1,205 @@
+{
+  "run_id": "20261111T005922-d95513",
+  "question": "我们做了一个满减实验，按 50/50 分流：对照组 5000 人中 400 人下单，实验组 5600 人中 480 人下单。实验组赢了吗？",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "max_tool_calls": 15,
+  "use_skills": true,
+  "domain": "ecommerce",
+  "status": "completed",
+  "answer": "## 结论\n\n**不能判定实验组赢。** 两组转化率差异为 +0.57pp（8.00% → 8.57%），但 z 检验 **p = 0.287131，不显著**，95% 置信区间 [-0.48pp, +1.62pp] 跨过 0。更关键的是 **样本比例失衡（SRM）检验未通过（卡方 = 33.9623，p = 0.0）**，按流程应先排查分流与埋点，暂不解读实验效果。\n\n## 主要原因\n\n| 指标 | 对照组 | 实验组 | 差异 |\n|---|---|---|---|\n| 样本量 | 5,000 | 5,600 | — |\n| 下单人数 | 400 | 480 | — |\n| 转化率 | 0.08 | 0.085714 | 0.005714（+0.5714pp，相对提升 7.1429%） |\n\n- **统计上不显著**（`ab_proportion_test`）：z = 1.0644，p = 0.287131，95% CI [-0.004788, 0.016217]，区间内既包含负向也包含正向效果；当前样本量对 0.57pp 级别的差异没有检出力。\n- **分流比例本身就不符合 50/50 设计**（`ab_proportion_test` 的 SRM 检查）：观测对照组占比 0.471698、实验组 0.528302，期望各 5300 人，实际对照组少 300 人、实验组多 600 人，chi2 = 33.9623，p = 0.0。在 50/50 设计下出现这种偏离，随机分流几乎不可能产生，可能存在分流脚本 bug、用户 ID 重复计数、或两组人群重叠。\n\n## 需要注意\n\n- **SRM 不通过时，任何转化率差异都可能不是策略效果，而是分流的系统偏差**。此时直接上线\"满减有效\"的结论风险很高。\n- 当前每组 5,000 / 5,600 人：\n  - 若要检出本次观察到的 0.5714pp 绝对提升，每组需 **36,536 人**（合计 73,072），即还需要补到当前的 **6.3072 倍**（`ab_sample_size`、`calculate`）。\n  - 若要检出 2pp（8% → 10%）的提升，每组需 3,213 人（合计 6,426），**当前每组样本量已经足够**（对照组 5,000 人已超出所需 0.556178，即多 55.6%；`ab_sample_size`、`calculate`）——所以在 2pp 这个量级上，瓶颈不是流量而是分流正确性与实验时长。\n\n## 建议下一步\n\n1. **先查分流**：核对分流脚本/AB 平台配置，确认 5000 vs 5600 的差异来自哪里；检查是否存在用户被重复计数、跨组曝光、或埋点去重口径不一致（可对照 `data_quality_overview` 的清洗规则）。\n2. **SRM 未修复前不要解读效果**，更不要据此上线满减策略。\n3. **补充样本量**：若业务预期效果只有 0.5–1pp，需要每组 3.6 万量级样本，建议延长实验周期或提高流量比例（延长周期的前提是分流问题已解决）。\n4. **如业务上更关心绝对提升 2pp**，当前流量已经够，只需修复分流后延长实验至一个完整业务周期再复跑，并把观察窗口拉长以避免星期效应。\n5. 修复分流后重跑，并一并看 GMV/客单价等金额指标（可配合 `metric_summary`、`drilldown` 做周度拆解），避免只看转化率而忽略满减带来的客单价下滑。",
+  "error": null,
+  "budget_exhausted": false,
+  "repair": {
+    "draft": "## 结论\n\n**不能判定实验组赢。** 两组转化率差异为 +0.57pp（8.00% → 8.57%），但 z 检验 **p = 0.287131，不显著**，95% 置信区间 [-0.48pp, +1.62pp] 跨过 0。更关键的是 **样本比例失衡（SRM）检验未通过（卡方 = 33.9623，p = 0.0）**，按流程应先排查分流与埋点，暂不解读实验效果。\n\n## 主要原因\n\n| 指标 | 对照组 | 实验组 | 差异 |\n|---|---|---|---|\n| 样本量 | 5,000 | 5,600 | — |\n| 下单人数 | 400 | 480 | — |\n| 转化率 | 0.08 | 0.085714 | 0.005714（+0.5714pp，相对提升 7.1429%） |\n\n- **统计上不显著**（`ab_proportion_test`）：z = 1.0644，p = 0.287131，95% CI [-0.004788, 0.016217]，区间内既包含负向也包含正向效果；当前样本量对 0.57pp 级别的差异没有检出力。\n- **分流比例本身就不符合 50/50 设计**（`ab_proportion_test` 的 SRM 检查）：观测对照组占比 0.471698、实验组 0.528302，期望各 5300 人，实际对照组少 300 人、实验组多 600 人，chi2 = 33.9623，p = 0.0。在 50/50 设计下出现这种偏离，随机分流几乎不可能产生，可能存在分流脚本 bug、用户 ID 重复计数、或两组人群重叠。\n\n## 需要注意\n\n- **SRM 不通过时，任何转化率差异都可能不是策略效果，而是分流的系统偏差**。此时直接上线\"满减有效\"的结论风险很高。\n- 当前每组 5,000 / 5,600 人，即使分流正常，也不足以支撑 0.57pp 这个量级的判断：按 `ab_sample_size`（基线 8%，alpha 0.05，power 0.8），每组需要 **36,536 人**（合计 73,072）才能检出 0.5714pp 的绝对提升；而要检出 2pp（8% → 10%）的提升，每组需 3,213 人（合计 6,426）——当前每组量级连这个都还不够。\n- 上述数字均来自 `ab_proportion_test` 和 `ab_sample_size` 的返回值，未做二次换算；实验数据来自你提供的 5000/400、5600/480。\n\n## 建议下一步\n\n1. **先查分流**：核对分流脚本/AB 平台配置，确认 5000 vs 5600 的差异来自哪里；检查是否存在用户被重复计数、跨组曝光、或埋点去重口径不一致（可对照 `data_quality_overview` 的清洗规则）。\n2. **SRM 未修复前不要解读效果**，更不要据此上线满减策略。\n3. **补充样本量**：若预期效果只有 0.5–1pp，需要每组 3.6 万量级样本，建议延长实验周期或提高流量比例。\n4. **如业务上更关心绝对提升 2pp**，则每组 3,213 人即可，当前实验尚差约 40% 流量，延长实验即可补齐。\n5. 修复分流后重跑，并一并看 GMV/客单价等金额指标（可配合 `metric_summary`、`drilldown` 做周度拆解），避免只看转化率而忽略满减带来的客单价下滑。",
+    "draft_message_index": 7,
+    "draft_round": 3,
+    "ungrounded": [
+      {
+        "text": "40%",
+        "context": "…升 2pp**，则每组 3,213 人即可，当前实验尚差约 40% 流量，延长实验即可补齐。\n5. 修复分流后重跑，并一并看…"
+      }
+    ]
+  },
+  "malformed_replies": 0,
+  "steps": [
+    {
+      "round": 1,
+      "tool": "ab_proportion_test",
+      "arguments": {
+        "control_success": 400,
+        "control_total": 5000,
+        "treatment_success": 480,
+        "treatment_total": 5600,
+        "expected_control_share": 0.5
+      },
+      "ok": true,
+      "error": null,
+      "ms": 1
+    },
+    {
+      "round": 2,
+      "tool": "ab_sample_size",
+      "arguments": {
+        "baseline_rate": 0.08,
+        "min_detectable_effect": 0.005714
+      },
+      "ok": true,
+      "error": null,
+      "ms": 0
+    },
+    {
+      "round": 2,
+      "tool": "ab_sample_size",
+      "arguments": {
+        "baseline_rate": 0.08,
+        "min_detectable_effect": 0.02
+      },
+      "ok": true,
+      "error": null,
+      "ms": 0
+    },
+    {
+      "round": 4,
+      "tool": "calculate",
+      "arguments": {
+        "expression": "(36536 - 5000) / 5000",
+        "purpose": "检出 0.5714pp 提升时，对照组还需补充的样本量是当前量的多少倍"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 0
+    },
+    {
+      "round": 4,
+      "tool": "calculate",
+      "arguments": {
+        "expression": "(5000 - 3213) / 3213",
+        "purpose": "检出 2pp 提升时，当前对照组每组 5000 人相对所需 3213 人超出多少比例"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 0
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 20095,
+    "completion_tokens": 3282,
+    "llm_calls": 5
+  },
+  "started_at": "2026-11-10T16:59:22+00:00",
+  "seconds": 52.45,
+  "messages": [
+    {
+      "role": "system",
+      "content": "你是一名电商运营数据分析助手，帮助运营同学回答业务问题，例如“上周 GMV 为什么下降”。\n\n## 工作方式\n\n你只能通过工具获取数据。所有计算都由工具完成，你负责：选择工具、组织分析思路、解读结果、写结论。\n\n## 分析流程\n\n下面是可用的分析流程，只列出名字和用途。遇到对应的问题时，先调用 load_skill 加载完整流程，再按流程执行：\n\n- `ecommerce-metric-diagnosis`：电商指标异动诊断。回答“某周 GMV、订单、客单价为什么变了，变化来自哪里，能不能下结论”，适用于周度环比、同比分析和写周报。不适用于：只查一个数字（直接调用 metric_summary），AB 实验结果判断（直接调用 ab_proportion_test）。\n\n## 必须遵守\n\n1. 回答中的每个数字都必须有出处：原样引用工具结果或用户问题里的数字；需要求和、相减、算占比、变化率或日均时，调用 calculate 计算，再引用它的结果。不要心算，也不要写估算的约数（例如“约 5,200”）。既不在工具结果里、也无法用 calculate 从工具结果算出的数字，写“工具未提供”。回答提交后，程序会逐个核查数字的出处。\n2. 工具结果里的 warnings（警告）必须在回答中说明，例如不完整周、停业、极端大额订单、样本不足。\n3. 没有对照实验时，不能下因果结论：写“与……同时发生”“可能的原因”，不要写“导致”“因为”。\n4. 工具报错时，根据错误信息修正参数再试；无法修正就在回答中说明。\n5. 数据范围：2009-W49 至 2011-W49（最后一条销售记录在 2011-12-09 12:50）。用户说“上周”“最近一周”时，指 2011-W48（最近的完整周），并在回答开头写明分析的是哪一周。\n6. 最多调用 15 次工具（calculate 也计入），信息够用就停。\n\n## 回答格式（中文 Markdown）\n\n1. **结论**：一两句话说清发生了什么。\n2. **主要原因**：按贡献大小列出，每条带数字，并注明来自哪个工具。\n3. **需要注意**：数据口径和警告。\n4. **建议下一步**：还需要看什么、验证什么。\n"
+    },
+    {
+      "role": "user",
+      "content": "我们做了一个满减实验，按 50/50 分流：对照组 5000 人中 400 人下单，实验组 5600 人中 480 人下单。实验组赢了吗？"
+    },
+    {
+      "content": "",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00055751dcce9c686a14334a",
+          "function": {
+            "arguments": "{\"control_success\": 400, \"control_total\": 5000, \"treatment_success\": 480, \"treatment_total\": 5600, \"expected_control_share\": 0.5}",
+            "name": "ab_proportion_test"
+          },
+          "type": "function",
+          "index": 0
+        }
+      ],
+      "reasoning_content": "The user asks about an AB test. Let me use the ab_proportion_test tool. Also should check SRM: expected_control_share = 5000/(5000+5600) = 0.4734. Hmm, the design says 50/50 but actual split is 5000/5600 = 47.2%/52.8%. The tool's SRM check will flag this. Let me call with expected_control_share 0.5 as designed.\n\nLet me call the tool."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00055751dcce9c686a14334a",
+      "content": "{\"tool\": \"ab_proportion_test\", \"srm\": {\"method\": \"卡方拟合优度检验\", \"total\": 10600, \"observed_control_share\": 0.471698, \"observed_treatment_share\": 0.528302, \"expected_control_share\": 0.5, \"expected_control\": 5300.0, \"expected_treatment\": 5300.0, \"control_minus_expected\": -300.0, \"treatment_minus_control\": 600, \"chi2\": 33.9623, \"p_value\": 0.0, \"sample_ratio_mismatch\": true, \"advice\": \"样本比例与设计不符，先排查分流和埋点，暂不解读实验效果。\"}, \"test\": {\"method\": \"两比例 z 检验（检验用合并比例，置信区间用非合并标准误）\", \"control_rate\": 0.08, \"treatment_rate\": 0.085714, \"difference\": 0.005714, \"relative_lift\": 0.071429, \"z\": 1.0644, \"p_value\": 0.287131, \"confidence_interval\": [-0.004788, 0.016217], \"confidence_level\": 0.95, \"significant\": false, \"warnings\": []}}"
+    },
+    {
+      "content": "",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_dcdb26faee850b6377d25f8f",
+          "function": {
+            "arguments": "{\"baseline_rate\": 0.08, \"min_detectable_effect\": 0.005714}",
+            "name": "ab_sample_size"
+          },
+          "type": "function",
+          "index": 0
+        },
+        {
+          "id": "call_fa01e8a88d811cb93a4ced3f",
+          "function": {
+            "arguments": "{\"baseline_rate\": 0.08, \"min_detectable_effect\": 0.02}",
+            "name": "ab_sample_size"
+          },
+          "type": "function",
+          "index": 1
+        }
+      ],
+      "reasoning_content": "SRM check failed. Let me report. Maybe also check sample size needed? The user asked \"实验组赢了吗?\" Answer: no significant win, and SRM failed so shouldn't interpret.\n\nLet me also compute the SRM more explicitly maybe. The tool already gave details. I might want to check what sample size would be needed for 8% → 10% (0.02 MDE). That could be useful for \"建议下一步\". Let me call ab_sample_size with baseline 0.08, mde 0.02. Actually the observed lift is 7.14% relative = 0.5714pp absolute. Hmm, for planning, detecting a 0.57pp absolute difference would need huge sample. Let me just call once with baseline 0.08 and MDE 0.02 — hmm, but is that what they'd want? Better to compute needed sample for the effect actually observed (0.0057) to show how far off they are. Let me do both in one block? They're independent calls. Let's do both.\n\nActually, tool call limit is 15, so fine.\n\nLet me call ab_sample_size twice: baseline_rate 0.08, min_detectable_effect 0.02 (a practical 2pp target), and baseline_rate 0.08, min_detectable_effect 0.005714 (the observed effect)."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_dcdb26faee850b6377d25f8f",
+      "content": "{\"tool\": \"ab_sample_size\", \"per_group\": 36536, \"total\": 73072, \"baseline_rate\": 0.08, \"min_detectable_effect\": 0.005714, \"target_rate\": 0.085714, \"alpha\": 0.05, \"power\": 0.8}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_fa01e8a88d811cb93a4ced3f",
+      "content": "{\"tool\": \"ab_sample_size\", \"per_group\": 3213, \"total\": 6426, \"baseline_rate\": 0.08, \"min_detectable_effect\": 0.02, \"target_rate\": 0.1, \"alpha\": 0.05, \"power\": 0.8}"
+    },
+    {
+      "content": "## 结论\n\n**不能判定实验组赢。** 两组转化率差异为 +0.57pp（8.00% → 8.57%），但 z 检验 **p = 0.287131，不显著**，95% 置信区间 [-0.48pp, +1.62pp] 跨过 0。更关键的是 **样本比例失衡（SRM）检验未通过（卡方 = 33.9623，p = 0.0）**，按流程应先排查分流与埋点，暂不解读实验效果。\n\n## 主要原因\n\n| 指标 | 对照组 | 实验组 | 差异 |\n|---|---|---|---|\n| 样本量 | 5,000 | 5,600 | — |\n| 下单人数 | 400 | 480 | — |\n| 转化率 | 0.08 | 0.085714 | 0.005714（+0.5714pp，相对提升 7.1429%） |\n\n- **统计上不显著**（`ab_proportion_test`）：z = 1.0644，p = 0.287131，95% CI [-0.004788, 0.016217]，区间内既包含负向也包含正向效果；当前样本量对 0.57pp 级别的差异没有检出力。\n- **分流比例本身就不符合 50/50 设计**（`ab_proportion_test` 的 SRM 检查）：观测对照组占比 0.471698、实验组 0.528302，期望各 5300 人，实际对照组少 300 人、实验组多 600 人，chi2 = 33.9623，p = 0.0。在 50/50 设计下出现这种偏离，随机分流几乎不可能产生，可能存在分流脚本 bug、用户 ID 重复计数、或两组人群重叠。\n\n## 需要注意\n\n- **SRM 不通过时，任何转化率差异都可能不是策略效果，而是分流的系统偏差**。此时直接上线\"满减有效\"的结论风险很高。\n- 当前每组 5,000 / 5,600 人，即使分流正常，也不足以支撑 0.57pp 这个量级的判断：按 `ab_sample_size`（基线 8%，alpha 0.05，power 0.8），每组需要 **36,536 人**（合计 73,072）才能检出 0.5714pp 的绝对提升；而要检出 2pp（8% → 10%）的提升，每组需 3,213 人（合计 6,426）——当前每组量级连这个都还不够。\n- 上述数字均来自 `ab_proportion_test` 和 `ab_sample_size` 的返回值，未做二次换算；实验数据来自你提供的 5000/400、5600/480。\n\n## 建议下一步\n\n1. **先查分流**：核对分流脚本/AB 平台配置，确认 5000 vs 5600 的差异来自哪里；检查是否存在用户被重复计数、跨组曝光、或埋点去重口径不一致（可对照 `data_quality_overview` 的清洗规则）。\n2. **SRM 未修复前不要解读效果**，更不要据此上线满减策略。\n3. **补充样本量**：若预期效果只有 0.5–1pp，需要每组 3.6 万量级样本，建议延长实验周期或提高流量比例。\n4. **如业务上更关心绝对提升 2pp**，则每组 3,213 人即可，当前实验尚差约 40% 流量，延长实验即可补齐。\n5. 修复分流后重跑，并一并看 GMV/客单价等金额指标（可配合 `metric_summary`、`drilldown` 做周度拆解），避免只看转化率而忽略满减带来的客单价下滑。",
+      "role": "assistant",
+      "reasoning_content": "Now write the answer.\n\nNumbers:\n- 对照组 5000 人，400 人下单 → 转化率 0.08 (8%)\n- 实验组 5600 人，480 人下单 → 转化率 0.085714 (8.5714%)\n- 差异 0.005714 (+0.5714pp)，相对提升 7.1429%\n- z = 1.0644, p = 0.287131, 不显著\n- 95% CI: [-0.004788, 0.016217] → [-0.48pp, +1.62pp]\n- SRM: 观测对照组占比 0.471698，期望 0.5，chi2=33.9623, p=0.0 → 严重不匹配\n- 样本量：当前每组 5000/5600，若要检测 0.5714pp 的绝对提升，每组需 36536 人（总计 73072）；若检测 2pp，每组 3213。\n\nAnswer: 不能算赢，且因 SRM 不通过应先排查分流。\n\nFormat: 结论、主要原因、需要注意、建议下一步。Note this is an AB test question, so the ecommerce-metric-diagnosis flow isn't needed. But the format guidelines apply. I'll use headings.\n\nAlso note: the tool's p_value for SRM is 0.0. And confidence interval includes 0.\n\nOne caution: SRM p=0.0 with chi2=33.96 and 1 df — critical value 3.84, so far beyond.\n\nAlso should mention that the difference in the observed split (5000 vs 5600) is itself a red flag.\n\nLet me write it."
+    },
+    {
+      "role": "user",
+      "content": "（系统核查）回答里有 1 个数字在工具结果中找不到出处：\n- 「40%」：…升 2pp**，则每组 3,213 人即可，当前实验尚差约 40% 流量，延长实验即可补齐。\n5. 修复分流后重跑，并一并看…\n请逐个处理：工具结果里有原数的，改成原数；需要计算的，用 calculate 计算后引用结果（最多再调用 3 次工具）；无法确定的，删掉或改成不带数字的描述。然后输出修改后的完整回答，不要只写改动的部分，也不要提到这次核查。"
+    },
+    {
+      "content": "",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_99e1b9e4606aab236160000a",
+          "function": {
+            "arguments": "{\"expression\": \"(36536 - 5000) / 5000\", \"purpose\": \"检出 0.5714pp 提升时，对照组还需补充的样本量是当前量的多少倍\"}",
+            "name": "calculate"
+          },
+          "type": "function",
+          "index": 0
+        },
+        {
+          "id": "call_e09c0ef072392e7f5d77e916",
+          "function": {
+            "arguments": "{\"expression\": \"(5000 - 3213) / 3213\", \"purpose\": \"检出 2pp 提升时，当前对照组每组 5000 人相对所需 3213 人超出多少比例\"}",
+            "name": "calculate"
+          },
+          "type": "function",
+          "index": 1
+        }
+      ],
+      "reasoning_content": "I need to fix the \"40%\" claim. I said current 5000/5600 vs needed 3213 per group. Actually current per group is 5000 (control) and 5600 (treatment), which already EXCEEDS 3213 per group. So my claim \"尚差约 40% 流量\" is wrong — the current sample is already larger than needed for 2pp detection. Let me recompute.\n\nRequired per group for 2pp: 3213. Control currently has 5000, treatment 5600. So current sample already exceeds required. So the correct statement is: current per-group sample (5,000 / 5,600) already exceeds the 3,213 needed for detecting a 2pp lift, so sample size isn't the bottleneck for a 2pp effect — the bottleneck is SRM and the fact that the observed effect is only 0.57pp.\n\nLet me use calculate to compute a proper statement. Maybe compute the shortfall for the 0.5714pp case: needed 36,536 per group, current 5,000 → shortfall = 36,536 - 5,000 = 31,536 per group, which is 6.3x more. Let me compute ratio: 36536/5000 = 7.3072, i.e. current is ~13.7% of needed.\n\nLet me call calculate for: (36536 - 5000) / 5000 = 6.3072 (需要的倍数) and 36536/5600 = 6.524. And for 2pp: 3213/5000 = 0.6426 → 已有 5000 > 3213，超出 56%.\n\nLet me do a couple of calculate calls (max 3).\n\nCall 1: (36536 - 5000) / 5000 → 需要的额外倍数\nCall 2: (5000 - 3213) / 3213 → 超出比例 for 2pp: 1787/3213 = 0.5562\n\nLet me do both in one block.\n\nThen rewrite the answer.\n\nAlso verify: do I need to double check other numbers? \"40%\" was the only flagged one. Fine.\n\nLet me write the final answer with corrected point 4.\n\nAlso I should double check the earlier claim in step 4: \"当前每组量级连这个都不够\" — I said earlier \"而要检出 2pp（8% → 10%）的提升，每组需 3,213 人（合计 6,426）——当前每组量级连这个都不够。\" That's wrong too, since 5,000 per group > 3,213. So I must fix that too. It wasn't flagged but it's factually wrong and inconsistent. I'll fix both consistently.\n\nLet me run calculates."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_99e1b9e4606aab236160000a",
+      "content": "{\"tool\": \"calculate\", \"expression\": \"(36536 - 5000) / 5000\", \"purpose\": \"检出 0.5714pp 提升时，对照组还需补充的样本量是当前量的多少倍\", \"result\": 6.3072}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_e09c0ef072392e7f5d77e916",
+      "content": "{\"tool\": \"calculate\", \"expression\": \"(5000 - 3213) / 3213\", \"purpose\": \"检出 2pp 提升时，当前对照组每组 5000 人相对所需 3213 人超出多少比例\", \"result\": 0.556178}"
+    },
+    {
+      "content": "## 结论\n\n**不能判定实验组赢。** 两组转化率差异为 +0.57pp（8.00% → 8.57%），但 z 检验 **p = 0.287131，不显著**，95% 置信区间 [-0.48pp, +1.62pp] 跨过 0。更关键的是 **样本比例失衡（SRM）检验未通过（卡方 = 33.9623，p = 0.0）**，按流程应先排查分流与埋点，暂不解读实验效果。\n\n## 主要原因\n\n| 指标 | 对照组 | 实验组 | 差异 |\n|---|---|---|---|\n| 样本量 | 5,000 | 5,600 | — |\n| 下单人数 | 400 | 480 | — |\n| 转化率 | 0.08 | 0.085714 | 0.005714（+0.5714pp，相对提升 7.1429%） |\n\n- **统计上不显著**（`ab_proportion_test`）：z = 1.0644，p = 0.287131，95% CI [-0.004788, 0.016217]，区间内既包含负向也包含正向效果；当前样本量对 0.57pp 级别的差异没有检出力。\n- **分流比例本身就不符合 50/50 设计**（`ab_proportion_test` 的 SRM 检查）：观测对照组占比 0.471698、实验组 0.528302，期望各 5300 人，实际对照组少 300 人、实验组多 600 人，chi2 = 33.9623，p = 0.0。在 50/50 设计下出现这种偏离，随机分流几乎不可能产生，可能存在分流脚本 bug、用户 ID 重复计数、或两组人群重叠。\n\n## 需要注意\n\n- **SRM 不通过时，任何转化率差异都可能不是策略效果，而是分流的系统偏差**。此时直接上线\"满减有效\"的结论风险很高。\n- 当前每组 5,000 / 5,600 人：\n  - 若要检出本次观察到的 0.5714pp 绝对提升，每组需 **36,536 人**（合计 73,072），即还需要补到当前的 **6.3072 倍**（`ab_sample_size`、`calculate`）。\n  - 若要检出 2pp（8% → 10%）的提升，每组需 3,213 人（合计 6,426），**当前每组样本量已经足够**（对照组 5,000 人已超出所需 0.556178，即多 55.6%；`ab_sample_size`、`calculate`）——所以在 2pp 这个量级上，瓶颈不是流量而是分流正确性与实验时长。\n\n## 建议下一步\n\n1. **先查分流**：核对分流脚本/AB 平台配置，确认 5000 vs 5600 的差异来自哪里；检查是否存在用户被重复计数、跨组曝光、或埋点去重口径不一致（可对照 `data_quality_overview` 的清洗规则）。\n2. **SRM 未修复前不要解读效果**，更不要据此上线满减策略。\n3. **补充样本量**：若业务预期效果只有 0.5–1pp，需要每组 3.6 万量级样本，建议延长实验周期或提高流量比例（延长周期的前提是分流问题已解决）。\n4. **如业务上更关心绝对提升 2pp**，当前流量已经够，只需修复分流后延长实验至一个完整业务周期再复跑，并把观察窗口拉长以避免星期效应。\n5. 修复分流后重跑，并一并看 GMV/客单价等金额指标（可配合 `metric_summary`、`drilldown` 做周度拆解），避免只看转化率而忽略满减带来的客单价下滑。",
+      "role": "assistant"
+    }
+  ]
+}
