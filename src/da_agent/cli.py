@@ -173,7 +173,7 @@ def compare_models() -> int:
     from .model_compare import collect, load_plan, render_comparison
 
     plan = load_plan()
-    data = collect(plan)
+    data = collect(plan, RESULTS_DIR)  # 显式传入：默认参数在定义时就绑定了，测试里换目录不会生效
     path = RESULTS_DIR / f"{plan['prefix']}.md"
     path.write_text(render_comparison(plan, data), encoding="utf-8", newline="\n")
     missing = [f"{m['id']}-{suite}" for suite, per_model in data.items() for m in plan["models"] if per_model[m["id"]] is None]
