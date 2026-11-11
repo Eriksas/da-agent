@@ -40,8 +40,9 @@ flowchart LR
 | 自动周报 | 每周一运行，每份的数字出处核查结果见列表 | [reports/weekly](reports/weekly/README.md) |
 | 换一个领域：上市公司财报（8 道题） | 直接问模型 4/8，数字有出处率 46%；Agent 16/16，只看初稿 9/16 | [M9 评测](eval/results/company-2026-10-07/summary.md) |
 | 自主搭看板（2 份没见过、没有说明的数据） | 13 次真实运行全部独立完成；改进后“数量 + 比率”表格 13 → 0 张，比率对比图全部带整体参考线 | [盲测 1](examples/dashboard_runs/bank-marketing-review.md)、[盲测 2](examples/dashboard_runs/online-shoppers-review.md)、[表达能力](examples/dashboard_runs/visual-review.md) |
+| 换模型还成立吗？（同厂商 3 个模型，同一套题和评分） | 直接问模型都是 2/10，Agent 都在 37/40 以上；模型之间的差别小于同一模型重跑的波动（财报重跑从 16/16 变成 13/16） | [多模型对比](eval/results/model-comparison.md) |
 | 第二个 Agent 来复核答案（查程序查不出的错） | 植入的 52 处错误全部指到；但它在原样答案上说的“错误”6 条里只成立 4 条，低于运行前定的 70%，所以没有接入报告 | [复核 Agent 评测](eval/results/review-agent.md) |
-| 测试 | 387 个，行覆盖率约 90%；每次 push 由 CI 运行 lint 和测试，覆盖率低于 80% 不通过 | [ci.yml](.github/workflows/ci.yml) |
+| 测试 | 391 个，行覆盖率约 90%；每次 push 由 CI 运行 lint 和测试，覆盖率低于 80% 不通过 | [ci.yml](.github/workflows/ci.yml) |
 
 提升主要来自“核查后退回修正”，它和评分用的是同一个核查器，所以“数字有出处”这一项的提升有一部分是构造出来的；局限和解读见 [M7b 对比](eval/results/m7b-comparison.md)。复核由 Claude 代项目作者完成（作者授权，本人未逐条核对）。
 
@@ -67,6 +68,7 @@ flowchart LR
 | M13 | Agent 根据数据自主搭看板（模型写方案，程序校验、算数、画图）；3 份数据上的真实模型评测（含 2 份盲测）已完成；Tableau 导出没做 | ✅ |
 | M14 | 工程清理：lint 和覆盖率门槛进 CI | ✅ |
 | M15 | 复核 Agent：第二个 Agent 对照工具调用记录检查答案；评测后没有达到自定标准，意见不接入报告 | ✅ |
+| M16 | 多模型对比：同一套题和评分在 3 个模型上各跑一遍，计划在运行前提交 | ✅ |
 
 ## 本地运行
 
