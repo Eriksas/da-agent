@@ -4,6 +4,7 @@
 - baseline（直接问模型）：只给一张周度指标表，不给工具。代表“把报表贴给大模型问”的常见用法。
 - agent（Agent 不带流程）：有工具，没有分析流程。
 - agent_skill（Agent 带流程）：有工具，也有分析流程，是当前的默认做法。
+- agent_query（M19b）：在 agent_skill 的基础上加 query_data 工具，固定工具答不了的问题交给查询 Agent 写只读 SQL 取数。
 
 每次运行的完整记录都保存下来，结果表里的任何一个数都能回溯到原始对话。
 """
@@ -41,7 +42,13 @@ CONDITIONS = {
     "baseline": "直接问模型（只给一张数据表，无工具）",
     "agent": "Agent 不带流程",
     "agent_skill": "Agent 带流程",
+    "agent_query": "Agent 带流程 + 取数（query_data）",
 }
+SKILL_CONDITIONS = ("agent_skill", "agent_query")  # 有分析流程的组
+# 模型接口的这几类报错（限流、超时、连不上、服务端错误）不是被评测对象的表现：等一会儿重跑，不算它没答上来
+RETRYABLE_ERRORS = ("RateLimitError", "APITimeoutError", "APIConnectionError", "InternalServerError")
+API_RETRIES = 4
+RETRY_WAIT_SECONDS = 45
 BASELINE_PROMPT = """你是一名电商运营数据分析助手。下面是程序导出的周度指标表（ISO 周，周一到周日），数据范围 {first_week} 至 {last_week}。
 请只根据这张表和用户提供的信息回答问题，用中文 Markdown 写出结论、主要原因、需要注意的地方和建议下一步。
 
@@ -67,6 +74,8 @@ class Case:
     inject: dict[str, str] | None = None
     expects_skill: bool = True
     domain: str = "ecommerce"  # 题集文件开头的 domain：ecommerce 电商运营 / company 上市公司财报
+    # 答案里必须出现的数，由参考 SQL 现算（M19b）：每条 SQL 返回一行，这一行里的每个数都要出现在答案里
+    expect_sql: tuple[str, ...] = ()
 
 
 def load_cases(path: Path = CASES_PATH) -> list[Case]:
@@ -76,7 +85,8 @@ def load_cases(path: Path = CASES_PATH) -> list[Case]:
                   must_mention=tuple(tuple(group) for group in item.get("must_mention") or []),
                   must_not=tuple(item.get("must_not") or []),
                   expect_value=item.get("expect_value"), inject=item.get("inject"),
-                  expects_skill=bool(item.get("expects_skill", True)), domain=str(data.get("domain", "ecommerce")))
+                  expects_skill=bool(item.get("expects_skill", True)), domain=str(data.get("domain", "ecommerce")),
+                  expect_sql=tuple(item.get("expect_sql") or ()))
              for item in data["cases"]]
     ids = [case.id for case in cases]
     if len(ids) != len(set(ids)):
@@ -184,18 +194,42 @@ def expected_value(con: duckdb.DuckDBPyConnection, case: Case) -> float | None:
     return float(next(row["current"] for row in rows if row[key] == spec[key]))
 
 
-def score(case: Case, run: dict[str, Any], checks: dict[str, Any], expected: float | None) -> dict[str, Any]:
-    """按题目的规则给一次运行打分。"""
+def expected_sql_values(con: duckdb.DuckDBPyConnection, case: Case) -> list[float]:
+    """参考 SQL 算出的、答案里必须出现的数（M19b）。在评测用的同一份数据上执行，不经过查询 Agent。"""
+    if not case.expect_sql:
+        return []
+    from .metrics import _ensure
+
+    _ensure(con)  # 参考 SQL 可以用 sales_enriched（带周和新老客标签的明细）
+    values = []
+    for sql in case.expect_sql:
+        rows = fetch_rows(con, sql)
+        if len(rows) != 1:
+            raise ValueError(f"题目 {case.id} 的参考 SQL 要返回 1 行，实际 {len(rows)} 行：{sql}")
+        values += [float(v) for v in rows[0].values() if isinstance(v, (int, float)) and not isinstance(v, bool)]
+    return values
+
+
+def score(case: Case, run: dict[str, Any], checks: dict[str, Any], expected: float | None,
+          sql_values: list[float] | tuple[float, ...] = ()) -> dict[str, Any]:
+    """按题目的规则给一次运行打分。sql_values：参考 SQL 算出的数，每个都要出现在答案里。"""
     answer = run.get("answer") or ""
     lowered = answer.lower()
     mentions = [{"any_of": list(group), "hit": any(alt.lower() in lowered for alt in group)}
                 for group in case.must_mention]
     violations = [pattern for pattern in case.must_not if re.search(pattern, answer)]
     value_found = None
+    mentioned = extract_numbers(answer)[0]
     if expected is not None:
-        value_found = any(abs(m.value - expected) < m.tolerance - 1e-12 for m in extract_numbers(answer)[0])
+        value_found = any(abs(m.value - expected) < m.tolerance - 1e-12 for m in mentioned)
+    # 按答案自己的显示精度比：写成 2,440,756.22、244.08 万、45.26% 都算
+    sql_found = [{"value": round(v, 6), "found": any(abs(m.value - abs(v)) < m.tolerance - 1e-12 for m in mentioned)}
+                 for v in sql_values]
+    if sql_found:
+        value_found = all(item["found"] for item in sql_found) and value_found is not False
     numbers = checks["numbers"]
     skills = checks["process"]["skills"]
+    query_tokens = sum(sub["usage"]["prompt_tokens"] + sub["usage"]["completion_tokens"] for sub in run.get("sub_runs") or [])
     passed = (run["status"] == "completed" and all(m["hit"] for m in mentions) and not violations
               and not numbers["ungrounded"] and value_found is not False)
     return {
@@ -205,8 +239,11 @@ def score(case: Case, run: dict[str, Any], checks: dict[str, Any], expected: flo
         "skill_expected": case.expects_skill, "skill_loaded": bool(skills),
         # 只对应该使用流程的题统计“流程是否完成”；查数这类题按流程文件的要求本来就不加载流程
         "process_complete": (bool(skills) and not any(s["missing"] for s in skills)) if case.expects_skill else None,
+        "expected_sql_values": sql_found,
         "tool_calls": len(run["steps"]), "llm_calls": run["usage"]["llm_calls"],
-        "tokens": run["usage"]["prompt_tokens"] + run["usage"]["completion_tokens"], "seconds": run["seconds"],
+        # token 含嵌套的查询 Agent（M19b）：取数的成本也算在这次回答上
+        "tokens": run["usage"]["prompt_tokens"] + run["usage"]["completion_tokens"] + query_tokens, "seconds": run["seconds"],
+        "query_calls": sum(step["tool"] == "query_data" for step in run["steps"]), "query_tokens": query_tokens,
     }
 
 
@@ -223,13 +260,14 @@ def draft_view(run: dict[str, Any]) -> dict[str, Any] | None:
             "steps": [step for step in run["steps"] if step["round"] < repair["draft_round"]]}
 
 
-def score_run(case: Case, run: dict[str, Any], checks: dict[str, Any], expected: float | None) -> dict[str, Any]:
+def score_run(case: Case, run: dict[str, Any], checks: dict[str, Any], expected: float | None,
+              sql_values: list[float] | tuple[float, ...] = ()) -> dict[str, Any]:
     """打分，并在被退回修正过时给初稿也打一次分。"""
-    result = score(case, run, checks, expected)
+    result = score(case, run, checks, expected, sql_values)
     draft = draft_view(run)
     result["repaired"] = draft is not None
     result["passed_without_repair"] = (result["passed"] if draft is None
-                                       else score(case, draft, check_run(draft), expected)["passed"])
+                                       else score(case, draft, check_run(draft), expected, sql_values)["passed"])
     return result
 
 
@@ -245,12 +283,38 @@ def _save(run_dir: Path, run: dict[str, Any], checks: dict[str, Any], result: di
 class Connections:
     """每种数据只建一次库：真实数据一个，每个注入场景一个。"""
 
-    def __init__(self, parquet_path: Path = PARQUET_PATH) -> None:
+    def __init__(self, parquet_path: Path = PARQUET_PATH, query_dir: Path | None = None) -> None:
         self.parquet_path = parquet_path
+        self.query_dir = query_dir
         self._cache: dict[str, duckdb.DuckDBPyConnection] = {}
+        self._query: dict[str, Any] = {}
+
+    @staticmethod
+    def _key(case: Case) -> str:
+        return "company" if case.domain == "company" else json.dumps(case.inject, sort_keys=True) if case.inject else "real"
+
+    def query_db(self, case: Case) -> Any:
+        """查询 Agent 用的只读数据（M19b），和这道题的数据一致：注入了异动的题，取数也要看到注入后的数据。"""
+        from .semantic import QUERY_DB_DIR, SEMANTIC_DIR, build_database, load_config, prepare
+
+        key = self._key(case)
+        if key not in self._query:
+            if key == "real" and self.query_dir is None:
+                self._query[key] = prepare("retail")
+            else:
+                from hashlib import sha1
+
+                from .metrics import _ensure
+
+                con = self.get(case)
+                _ensure(con)
+                folder = self.query_dir or QUERY_DB_DIR
+                path = folder / f"eval-{sha1(key.encode()).hexdigest()[:10]}.duckdb"
+                self._query[key] = build_database(load_config(SEMANTIC_DIR / "retail.yaml"), con, path)
+        return self._query[key]
 
     def get(self, case: Case) -> duckdb.DuckDBPyConnection:
-        key = "company" if case.domain == "company" else json.dumps(case.inject, sort_keys=True) if case.inject else "real"
+        key = self._key(case)
         if key not in self._cache:
             if case.domain == "company":
                 con = connect_financials()
@@ -266,8 +330,12 @@ class Connections:
 
 def run_eval(cases: list[Case], conditions: list[str], repeats: int,
              make_llm: Callable[[Case, str, int], LLMClient], connections: Connections, out_dir: Path,
-             max_tool_calls: int, progress: Callable[[str], None] = print) -> dict[str, Any]:
-    """逐题、逐组、逐次运行并打分；结果和每次运行的完整记录写到 out_dir。"""
+             max_tool_calls: int, progress: Callable[[str], None] = print,
+             wait: Callable[[float], None] = time.sleep) -> dict[str, Any]:
+    """逐题、逐组、逐次运行并打分；结果和每次运行的完整记录写到 out_dir。
+
+    模型接口报错（RETRYABLE_ERRORS）的运行等一会儿重跑，最多 API_RETRIES 次，次数记在 api_retries 里。
+    """
     unknown = [c for c in conditions if c not in CONDITIONS]
     if unknown:
         raise ValueError(f"未知对比组：{unknown}；可选：{list(CONDITIONS)}")
@@ -276,15 +344,26 @@ def run_eval(cases: list[Case], conditions: list[str], repeats: int,
     results = []
     for n, (case, condition, i) in enumerate(plan, start=1):
         con = connections.get(case)
-        llm = make_llm(case, condition, i)
-        if condition == "baseline":
-            run = run_baseline(case.question, llm=llm, con=con, domain=case.domain)
-        else:
-            run = run_agent(case.question, llm=llm, con=con, max_tool_calls=max_tool_calls,
-                            use_skills=condition == "agent_skill", domain=case.domain)
+        for attempt in range(API_RETRIES + 1):
+            llm = make_llm(case, condition, i)
+            if condition == "baseline":
+                run = run_baseline(case.question, llm=llm, con=con, domain=case.domain)
+            else:
+                contexts = {}
+                if condition == "agent_query":
+                    from .analyst import QueryService
+
+                    contexts["query_data"] = QueryService(llm=llm, db=connections.query_db(case))
+                run = run_agent(case.question, llm=llm, con=con, max_tool_calls=max_tool_calls,
+                                use_skills=condition in SKILL_CONDITIONS, domain=case.domain, tool_contexts=contexts)
+            retryable = run.status == "llm_error" and (run.error or "").startswith(RETRYABLE_ERRORS)
+            if not retryable or attempt == API_RETRIES:
+                break
+            wait(RETRY_WAIT_SECONDS * (attempt + 1))
         run_dict = asdict(run)
         checks = check_run(run_dict)
-        result = score_run(case, run_dict, checks, expected_value(con, case))
+        result = score_run(case, run_dict, checks, expected_value(con, case), expected_sql_values(con, case))
+        result["api_retries"] = attempt
         _save(out_dir / "runs" / case.id / f"{condition}-{i}", run_dict, checks, result)
         results.append({"case": case.id, "category": case.category, "condition": condition, "repeat": i, **result})
         progress(f"[{n}/{len(plan)}] {case.id} {condition} #{i} → {'通过' if result['passed'] else '未通过'}"
@@ -317,10 +396,15 @@ def summarize(results: list[dict[str, Any]], cases: list[Case], conditions: list
             "grounded_rate": _ratio(sum(r["numbers_checked"] - r["numbers_ungrounded"] for r in rows),
                                     sum(r["numbers_checked"] for r in rows)),
             "skill_use_correct_rate": (_ratio(sum(r["skill_loaded"] == r["skill_expected"] for r in rows), len(rows))
-                                       if condition == "agent_skill" else None),
+                                       if condition in SKILL_CONDITIONS else None),
             "process_complete_rate": (_ratio(sum(r["process_complete"] is True for r in rows if r["skill_expected"]),
                                              sum(1 for r in rows if r["skill_expected"]))
-                                      if condition == "agent_skill" else None),
+                                      if condition in SKILL_CONDITIONS else None),
+            # 取数（M19b）：用到 query_data 的运行数、平均调用次数和平均花在取数上的 token；以前的结果没有这几项
+            "runs_using_query": sum(r.get("query_calls", 0) > 0 for r in rows),
+            "avg_query_calls": _ratio(sum(r.get("query_calls", 0) for r in rows), len(rows)),
+            "avg_query_tokens": _ratio(sum(r.get("query_tokens", 0) for r in rows), len(rows)),
+            "api_retries": sum(r.get("api_retries", 0) for r in rows),
             # M7b 之前的结果没有这两项：没有退回修正，修正前后相同
             "repaired": sum(r.get("repaired", False) for r in rows),
             "passed_without_repair": sum(r.get("passed_without_repair", r["passed"]) for r in rows),
@@ -335,7 +419,8 @@ def summarize(results: list[dict[str, Any]], cases: list[Case], conditions: list
         for condition in conditions}} for case in cases}
     failures = [{"case": r["case"], "condition": r["condition"], "repeat": r["repeat"], "status": r["status"],
                  "missed": [m["any_of"] for m in r["mentions"] if not m["hit"]], "violations": r["violations"],
-                 "numbers_ungrounded": r["numbers_ungrounded"], "value_found": r["value_found"]}
+                 "numbers_ungrounded": r["numbers_ungrounded"], "value_found": r["value_found"],
+                 "missing_values": [v["value"] for v in r.get("expected_sql_values", []) if not v["found"]]}
                 for r in results if not r["passed"]]
     return {"conditions": conditions, "cases": len(cases), "runs": len(results),
             "by_condition": by_condition, "by_case": by_case, "failures": failures}
@@ -392,6 +477,12 @@ def render_summary(summary: dict[str, Any], meta: dict[str, Any]) -> str:
                   "| 组别 | 运行 | 被退回 | 修正前通过 | 修正后通过 |", "|---|---:|---:|---:|---:|"]
         lines += [f"| {s['label']} | {s['runs']} | {s['repaired']} | {s['passed_without_repair']} | {s['passed']} |"
                   for s in summary["by_condition"].values()]
+    if "agent_query" in summary["conditions"]:
+        lines += ["", "## 取数（query_data）", "",
+                  "token 含嵌套的查询 Agent。", "",
+                  "| 组别 | 运行 | 用到取数的运行 | 平均取数次数 | 平均取数 token | 模型接口报错后重跑 |", "|---|---:|---:|---:|---:|---:|"]
+        lines += [f"| {s['label']} | {s['runs']} | {s['runs_using_query']} | {s['avg_query_calls']} | {s['avg_query_tokens']:.0f} | "
+                  f"{s['api_retries']} |" for s in summary["by_condition"].values()]
     labels = [CONDITIONS[c] for c in summary["conditions"]]
     lines += ["", "## 按题目（通过次数 / 运行次数）", "",
               "| 题目 | 类别 | " + " | ".join(labels) + " |", "|---|---|" + "---:|" * len(labels)]
@@ -409,7 +500,9 @@ def render_summary(summary: dict[str, Any], meta: dict[str, Any]) -> str:
         reasons += [f"出现违规说法 `{pattern}`" for pattern in f["violations"]]
         if f["numbers_ungrounded"]:
             reasons.append(f"{f['numbers_ungrounded']} 个数字找不到出处")
-        if f["value_found"] is False:
+        if f.get("missing_values"):
+            reasons.append("没有给出正确数值 " + "、".join(f"{v:,}" for v in f["missing_values"]))
+        elif f["value_found"] is False:
             reasons.append("没有给出正确数值")
         lines.append(f"- `{f['case']}` {CONDITIONS[f['condition']]} 第 {f['repeat']} 次：{'；'.join(reasons)}"
                      f"（[记录](runs/{f['case']}/{f['condition']}-{f['repeat']}/report.md)）")

@@ -1,0 +1,117 @@
+# 端到端评测题（M19b）：固定工具答不了、要取数才能回答的问题，问法和真实用户一样不那么精确。
+#
+# 用来比较“原来的 Agent”（agent_skill）和“加上取数工具的 Agent”（agent_query）。评分规则同 cases.yaml，另加：
+#   expect_sql  参考 SQL（人写的，在评测用的数据上直接执行，不经过查询 Agent）。每条返回一行，
+#               这一行里的每个数都必须出现在答案里（按答案自己的显示精度比，写成万、百分数都算）。
+#
+# 这些题在提示词和评分定下来之后才第一次用模型跑，只跑一次。题目里的事实（注释）由参考 SQL 算出。
+domain: ecommerce
+cases:
+  - id: e-peak-hour
+    category: 取数：按小时
+    # 2011-07-01 起按下单小时数订单：12 点 1,716 单最多，13 点 1,437，14 点 1,248
+    question: 2011 年下半年，客户一般几点下单最多？那个小时一共有多少张订单？
+    expects_skill: false
+    must_mention:
+      - ["12 点", "12点", "12 时", "12时", "12:00", "中午"]
+    expect_sql:
+      - SELECT count(DISTINCT invoice) AS orders FROM sales WHERE invoice_date >= '2011-07-01' AND hour(invoice_date) = 12
+
+  - id: e-q4-vs-q3
+    category: 取数：按季度（陷阱：最后一个季度不完整）
+    # 2011 Q3 GMV 2,440,756.22，Q4 3,169,921.15；Q4 只到 2011-12-09
+    question: 2011 年第四季度的 GMV 比第三季度高了多少？
+    expects_skill: false
+    must_mention:
+      - ["12 月 9 日", "12月9日", "12-09", "12/9", "不完整", "不是完整", "没有完整", "只到 12 月", "只到12月", "截至 12 月", "截止到 12 月", "缺少"]
+    expect_sql:
+      - |
+        SELECT sum(amount) FILTER (WHERE quarter(invoice_date) = 3) AS q3, sum(amount) FILTER (WHERE quarter(invoice_date) = 4) AS q4,
+               q4 - q3 AS diff
+        FROM sales WHERE year(invoice_date) = 2011
+
+  - id: e-retention
+    category: 取数：复购
+    # 2011-09 有购买的可识别客户 1,259 位，其中 487 位 10 月又买了，38.68%
+    question: 2011 年 9 月买过东西的客户，10 月还有多少人回来买？占多少？
+    expects_skill: false
+    expect_sql:
+      - |
+        WITH s AS (SELECT DISTINCT customer_id FROM sales WHERE strftime(invoice_date, '%Y-%m') = '2011-09' AND customer_id IS NOT NULL),
+             o AS (SELECT DISTINCT customer_id FROM sales WHERE strftime(invoice_date, '%Y-%m') = '2011-10' AND customer_id IS NOT NULL)
+        SELECT count(*) AS september, count(o.customer_id) AS returned, count(o.customer_id) / count(*) AS rate
+        FROM s LEFT JOIN o USING (customer_id)
+
+  - id: e-top-cancelled-product
+    category: 取数：商品排名（陷阱：当天下单当天全部取消的极端大单）
+    # 23843 PAPER CRAFT , LITTLE BIRDIE：2011-12-09 下单 80,995 件（581483），12 分钟后全部取消，168,469.60
+    question: 2011 年哪个商品被取消的金额最多？取消了多少钱？
+    expects_skill: false
+    must_mention:
+      - ["23843", "PAPER CRAFT", "LITTLE BIRDIE"]
+    expect_sql:
+      - SELECT -sum(amount) AS cancelled FROM cancellations WHERE year(invoice_date) = 2011 AND stock_code = '23843'
+
+  - id: e-top-customers
+    category: 取数：客户集中度
+    # 2011 年 GMV 前 10 的可识别客户合计 1,457,769.64，占 2011 年全部 GMV 15.39%
+    question: 2011 年买得最多的 10 个客户（按 GMV），合计占全年 GMV 的多少？
+    expects_skill: false
+    expect_sql:
+      - |
+        WITH c AS (SELECT customer_id, sum(amount) AS g FROM sales WHERE year(invoice_date) = 2011 AND customer_id IS NOT NULL
+                   GROUP BY 1 ORDER BY 2 DESC LIMIT 10)
+        SELECT (SELECT sum(g) FROM c) AS top10, (SELECT sum(g) FROM c) / (SELECT sum(amount) FROM sales WHERE year(invoice_date) = 2011) AS share
+
+  - id: e-new-customers-2011
+    category: 取数：新客
+    # 第一次购买在 2011 年的客户 1,537 位（数据从 2009-12 开始），他们 2011 年的 GMV 合计见参考 SQL
+    question: 2011 年一共来了多少新客户（以前从没买过的）？他们 2011 年一共贡献了多少 GMV？
+    expects_skill: false
+    expect_sql:
+      - |
+        WITH f AS (SELECT customer_id, min(invoice_date) AS t FROM sales WHERE customer_id IS NOT NULL GROUP BY 1)
+        SELECT count(DISTINCT f.customer_id) AS customers, sum(s.amount) AS gmv
+        FROM f JOIN sales s USING (customer_id) WHERE year(f.t) = 2011 AND year(s.invoice_date) = 2011
+
+  - id: e-sunday-aov
+    category: 取数：按星期几
+    # 2011-11：周日客单价 370.38（346 单），周一到周五 550.50（2,405 单）；周六没有营业
+    question: 2011 年 11 月，周日的客单价和工作日（周一到周五）比，哪个高？各是多少？
+    expects_skill: false
+    expect_sql:
+      - |
+        SELECT sum(amount) FILTER (WHERE isodow(invoice_date) = 7) / count(DISTINCT invoice) FILTER (WHERE isodow(invoice_date) = 7) AS sunday,
+               sum(amount) FILTER (WHERE isodow(invoice_date) <= 5) / count(DISTINCT invoice) FILTER (WHERE isodow(invoice_date) <= 5) AS weekdays
+        FROM sales WHERE strftime(invoice_date, '%Y-%m') = '2011-11'
+
+  - id: e-germany-quarters
+    category: 取数：某国按季度
+    # 德国 2011 年各季度 GMV：36,984.58、46,590.84、48,929.54、59,632.45（Q4 只到 12-09）
+    question: 德国市场 2011 年每个季度的 GMV 各是多少？
+    expects_skill: false
+    expect_sql:
+      - |
+        SELECT sum(amount) FILTER (WHERE quarter(invoice_date) = 1) AS q1, sum(amount) FILTER (WHERE quarter(invoice_date) = 2) AS q2,
+               sum(amount) FILTER (WHERE quarter(invoice_date) = 3) AS q3, sum(amount) FILTER (WHERE quarter(invoice_date) = 4) AS q4
+        FROM sales WHERE year(invoice_date) = 2011 AND country = 'Germany'
+
+  - id: e-overseas-october
+    category: 取数：按月、海外
+    # 2011-10 英国以外 GMV 191,846.87，占全站 17.39%
+    question: 2011 年 10 月，英国以外的市场一共贡献了多少 GMV？占全站多少？
+    expects_skill: false
+    expect_sql:
+      - |
+        SELECT sum(amount) FILTER (WHERE country <> 'United Kingdom') AS overseas,
+               sum(amount) FILTER (WHERE country <> 'United Kingdom') / sum(amount) AS share
+        FROM sales WHERE strftime(invoice_date, '%Y-%m') = '2011-10'
+
+  - id: e-margin
+    category: 拒答：数据里没有成本
+    question: 2011 年 11 月我们的毛利率大概多少？
+    expects_skill: false
+    must_mention:
+      - ["成本"]
+    must_not:
+      - "毛利率(?:约|大概|大约|为|是|：|:|\\s)*[0-9]"
