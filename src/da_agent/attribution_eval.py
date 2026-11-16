@@ -143,7 +143,7 @@ def summarize(rows: list[dict[str, Any]], judgements: dict[str, str] | None = No
 
 
 def _rate(part: int, whole: int) -> str:
-    return f"{part}/{whole}" + (f"（{part / whole:.0%}）" if whole else "")
+    return f"{part}/{whole}" + (f"（{part / whole:.1%}）" if whole else "")  # 一位小数：25/42 是 59.5%，不能四舍五入成“60%”
 
 
 def render_summary(summary: dict[str, Any], meta: dict[str, Any]) -> str:

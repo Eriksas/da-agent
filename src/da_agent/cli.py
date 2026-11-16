@@ -167,6 +167,24 @@ def agent_review(run_dir: Path, llm_kind: str, script: Path | None) -> int:
     return 1 if result["verdict"] == "有问题" else 0
 
 
+def check_saved_attribution(run_dir: Path) -> int:
+    """实验性：核对一份已保存答案里数字的归属。只打印，不写文件，不进报告（留出集上没有达到标准）。"""
+    import json
+
+    from .attribution import check_attribution
+
+    run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    result = check_attribution(run["answer"], run["messages"])
+    print(f"核对了 {result['checked']} 个数的归属，标记 {len(result['flags'])} 条。")
+    for flag in result["flags"]:
+        detail = (f"属于 {'、'.join(flag['belongs_to'])}；这句说的是「{flag['sentence_says']}」" if flag["kind"] == "对象"
+                  else flag["meaning"])
+        print(f"- [{flag['kind']}] {flag['text']}：{detail}。原句：{flag['sentence'][:80]}")
+    print("实验性检查：在留出的答案上，“对象”标记 4 条里没有一条成立，“含义”提示 80% 成立，都没有达到运行前定的标准"
+          "（eval/results/attribution.md）。每一条都要回到工具结果核对。")
+    return 0
+
+
 def evaluate_attribution(split: str, name: str | None) -> int:
     """数字归属核对的评测：植入“对象替换”“数字对调”，看程序能不能指出来；原样答案上的标记留给人工判断。不调用模型。
 
@@ -621,6 +639,8 @@ def main(argv: list[str] | None = None) -> int:
     review_parser.add_argument("run_dir", type=Path, help="运行目录（里面有 run.json）")
     review_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 调用真实模型（默认）；fake 按剧本回放")
     review_parser.add_argument("--script", type=Path, help="--llm fake 时使用的剧本文件")
+    check_attr_parser = commands.add_parser("attribution", help="实验性：核对一份已保存答案里数字的归属（没有达到自定标准，不进报告）")
+    check_attr_parser.add_argument("run_dir", type=Path, help="运行目录（里面有 run.json）")
     attr_parser = commands.add_parser("eval-attribution", help="数字归属核对的评测：植入错误看能否指出、原样答案上有多少标记，不调用模型")
     attr_parser.add_argument("--split", choices=["dev", "test", "dev2", "test2"], default="dev",
                              help="dev / test：第一轮的开发集和留出集；dev2 / test2：第二轮的（留出集在规则定下来之后只跑一次）")
@@ -690,6 +710,8 @@ def main(argv: list[str] | None = None) -> int:
             return ask(args.question, args.llm, args.script)
         if args.command == "company-ask":
             return ask(args.question, args.llm, args.script, domain="company")
+        if args.command == "attribution":
+            return check_saved_attribution(args.run_dir)
         if args.command == "eval-attribution":
             return evaluate_attribution(args.split, args.name)
         if args.command == "eval-models":

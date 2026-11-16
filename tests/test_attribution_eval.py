@@ -73,7 +73,7 @@ def test_planted_errors_are_detected_and_counted(repo: tuple[Path, dict]) -> Non
     assert summary["clean"]["合计"]["answers"] == 3 and summary["clean"]["合计"]["含义"] == {"flags": 3, "answers": 3}
     assert summary["clean"]["合计"]["对象"] == {"flags": 0, "answers": 0} and not summary["judged"]
     text = render_summary(summary, {"name": "t", "split_label": "留出集", "started_at": "now"})
-    assert "| 对象替换 | 合计 | 2 | 0 | 0 | 2 | 2/2（100%） |" in text and "需要人工逐条判断" in text
+    assert "| 对象替换 | 合计 | 2 | 0 | 0 | 2 | 2/2（100.0%） |" in text and "需要人工逐条判断" in text
 
 
 def test_judgements_are_joined_by_flag_number(repo: tuple[Path, dict]) -> None:
@@ -119,3 +119,15 @@ def test_cli_writes_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cap
     assert "植入的对象替换：指到" in capsys.readouterr().out
     assert json.loads((tmp_path / "attr-test" / "meta.json").read_text(encoding="utf-8"))["split"] == "dev"
     assert (tmp_path / "attr-test" / "flags.json").exists() and "开发材料" in (tmp_path / "attr-test" / "summary.md").read_text(encoding="utf-8")
+
+
+def test_cli_checks_one_saved_run(repo: tuple[Path, dict], capsys: pytest.CaptureFixture[str]) -> None:
+    from da_agent.cli import main
+
+    root, _plan = repo
+    write_run(root / "one", answer="本周净销售额为 120,064.77。\n- 活跃客户数 -13,310.62（53.52%）")
+    assert main(["attribution", str(root / "one")]) == 0
+    out = capsys.readouterr().out
+    assert "标记 2 条" in out and "[对象] 120,064.77：属于 GMV；这句说的是「净销售额」" in out
+    assert "[含义] 53.52%" in out and "实验性检查" in out and "没有达到" in out
+    assert not (root / "one" / "report.md").exists()  # 只打印，不写文件
