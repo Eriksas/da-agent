@@ -1,0 +1,46 @@
+# 对照用的配置（M19 评测）：和 retail.yaml 是同一份数据、同样的口径说明，
+# 但口径只写成文字：没有“带口径的列”（gmv_amount、order_id 等），也没有现成的指标表达式。
+# 用来回答：把口径做成可以直接用的列和表达式，比只用文字说明，结果差多少。
+name: retail_raw
+label: 电商交易（UCI Online Retail II，已清洗）
+description: >-
+  一家英国线上礼品批发零售商 2009-12 至 2011-12 的商品交易明细。清洗规则已经应用：
+  删除了重复、坏账调整、单价为 0 等记录，运费等非商品行不在表里。金额单位是英镑。
+base: retail
+tables:
+  order_lines:
+    description: 每行是订单里的一个商品（销售）或取消单里的一个商品（取消）。金额和数量都是正数，用 line_type 区分。
+    sql: |
+      SELECT invoice, '销售' AS line_type, invoice_date AS order_time, CAST(invoice_date AS DATE) AS order_date,
+             week, strftime(invoice_date, '%Y-%m') AS month, stock_code, description, quantity, price, amount,
+             customer_id, customer_type,
+             CASE WHEN country IN ('Unspecified', 'European Community') THEN '国家不明确' ELSE coalesce(country, '未知') END AS country
+      FROM sales_enriched
+      UNION ALL
+      SELECT invoice, '取消', invoice_date, CAST(invoice_date AS DATE),
+             week, strftime(invoice_date, '%Y-%m'), stock_code, description, abs(quantity), price, abs(amount),
+             customer_id, customer_type,
+             CASE WHEN country IN ('Unspecified', 'European Community') THEN '国家不明确' ELSE coalesce(country, '未知') END
+      FROM cancellations_enriched
+    columns:
+      invoice: 发票号（订单号）；C 开头的是取消单
+      line_type: 销售 / 取消
+      order_time: 下单（或取消）时间
+      order_date: 下单（或取消）日期
+      week: ISO 周（周一到周日），写法如 2011-W48
+      month: 月份，写法如 2011-11
+      stock_code: 商品编码
+      description: 商品名称
+      quantity: 数量（正数）
+      price: 单价
+      amount: 金额 = 数量 × 单价（正数；销售行和取消行都是正数，不能直接相加）
+      customer_id: 客户 ID；缺失表示游客或未登记客户
+      customer_type: 新客（这位客户第一次购买就在这一行所在的周）/ 老客 / 未知（缺客户 ID）
+      country: 客户所在国家（英文；Unspecified、European Community 归为“国家不明确”）
+notes:
+  - "指标口径（文字）：GMV = 商品销售额（下单口径），数量 × 单价之和，含之后被取消的订单；取消金额 = 取消单的商品金额（正数）；净销售额 = GMV − 取消金额；取消率 = 取消金额 ÷ GMV；订单数 = 不同发票号的个数，只数销售订单；客单价 = GMV ÷ 订单数；活跃客户数 = 有购买的可识别客户数（不含缺客户 ID 的订单）；新客数 = 第一次购买落在当周的客户数；交易天数 = 有销售的日期数。"
+  - 周是 ISO 周；数据截止到 2011-12-09（周五），所以 2011-W49 不是完整的一周，和完整的周比总量会偏低。
+  - 2010-12-23 到 2011-01-03 停业，这期间没有数据。
+  - 约四分之一的行缺客户 ID：按客户统计（活跃客户、新老客）时这些行不计入，但它们的金额计入 GMV。
+  - 取消单按取消发生的时间入账，不回溯到原订单所在的周。
+  - 有少数金额极大、下单后很快又全部取消的订单（例如发票 541431、581483），会抬高当周的 GMV 和商品排名；净销售额不受影响。

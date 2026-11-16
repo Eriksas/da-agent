@@ -47,7 +47,8 @@ SYSTEM_PROMPT_PATH = ROOT / "prompts" / "agent_system.md"
 # 每个领域一份系统提示词和一组工具；循环、核查、退回修正对所有领域都一样
 SYSTEM_PROMPTS = {"ecommerce": SYSTEM_PROMPT_PATH, "company": ROOT / "prompts" / "company_system.md",
                   "dashboard": ROOT / "prompts" / "dashboard_system.md",
-                  "review": ROOT / "prompts" / "review_system.md"}  # 复核 Agent 的提示词由 reviewer.py 填好后传入
+                  "review": ROOT / "prompts" / "review_system.md",  # 复核 Agent 的提示词由 reviewer.py 填好后传入
+                  "analyst": ROOT / "prompts" / "analyst_system.md"}  # 查询 Agent 的提示词由 analyst.py 填好后传入
 BUDGET_NOTICE = "（系统提示）工具调用次数已用完。请不要再调用工具，直接根据已有的工具结果给出最终回答。"
 FORMAT_NOTICE = ("（系统提示）上一条回复里有工具调用的文字标记，但没有按函数调用的格式发出，程序无法执行。"
                  "需要工具时请直接发起工具调用；不需要时请给出文字回答。")

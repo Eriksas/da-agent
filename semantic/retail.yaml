@@ -1,0 +1,98 @@
+# 电商数据的口径配置（M19）：查询 Agent 能看到的表、每一列的含义、每个指标的算法。
+# 指标的口径和固定工具（src/da_agent/metrics.py）一致，tests/test_semantic.py 逐个指标核对。
+name: retail
+label: 电商交易（UCI Online Retail II，已清洗）
+description: >-
+  一家英国线上礼品批发零售商 2009-12 至 2011-12 的商品交易明细。清洗规则已经应用：
+  删除了重复、坏账调整、单价为 0 等记录，运费等非商品行不在表里。金额单位是英镑。
+base: retail
+tables:
+  order_lines:
+    description: 每行是订单里的一个商品（销售）或取消单里的一个商品（取消）。金额和数量都是正数，用 line_type 区分。
+    sql: |
+      SELECT invoice, '销售' AS line_type, invoice_date AS order_time, CAST(invoice_date AS DATE) AS order_date,
+             week, strftime(invoice_date, '%Y-%m') AS month, stock_code, description, quantity, price, amount,
+             customer_id, customer_type,
+             CASE WHEN country IN ('Unspecified', 'European Community') THEN '国家不明确' ELSE coalesce(country, '未知') END AS country,
+             amount AS gmv_amount, 0.0 AS cancelled_amount, amount AS net_amount,
+             invoice AS order_id, customer_id AS buyer_id
+      FROM sales_enriched
+      UNION ALL
+      SELECT invoice, '取消', invoice_date, CAST(invoice_date AS DATE),
+             week, strftime(invoice_date, '%Y-%m'), stock_code, description, abs(quantity), price, abs(amount),
+             customer_id, customer_type,
+             CASE WHEN country IN ('Unspecified', 'European Community') THEN '国家不明确' ELSE coalesce(country, '未知') END,
+             0.0, abs(amount), -abs(amount), NULL, NULL
+      FROM cancellations_enriched
+    columns:
+      invoice: 发票号（订单号）；C 开头的是取消单
+      line_type: 销售 / 取消
+      order_time: 下单（或取消）时间
+      order_date: 下单（或取消）日期
+      week: ISO 周（周一到周日），写法如 2011-W48
+      month: 月份，写法如 2011-11
+      stock_code: 商品编码
+      description: 商品名称
+      quantity: 数量（正数）
+      price: 单价
+      amount: 金额 = 数量 × 单价（正数；销售行和取消行都是正数，不能直接相加）
+      customer_id: 客户 ID；缺失表示游客或未登记客户
+      customer_type: 新客（这位客户第一次购买就在这一行所在的周）/ 老客 / 未知（缺客户 ID）
+      country: 客户所在国家（英文；Unspecified、European Community 归为“国家不明确”）
+      gmv_amount: 计入 GMV 的金额：销售行等于 amount，取消行是 0
+      cancelled_amount: 取消金额：取消行等于 amount，销售行是 0
+      net_amount: 计入净销售额的金额：销售行是 amount，取消行是 -amount
+      order_id: 订单号：销售行等于 invoice，取消行为空（所以 count(DISTINCT order_id) 只数销售订单）
+      buyer_id: 购买客户：销售行等于 customer_id，取消行为空
+metrics:
+  gmv:
+    label: GMV
+    table: order_lines
+    sql: sum(gmv_amount)
+    definition: 商品销售额（下单口径）：数量 × 单价之和，含之后被取消的订单
+  cancelled_amount:
+    label: 取消金额
+    table: order_lines
+    sql: sum(cancelled_amount)
+    definition: 这段时间里取消单的商品金额（正数）；可能对应更早下的订单
+  net_sales:
+    label: 净销售额
+    table: order_lines
+    sql: sum(net_amount)
+    definition: GMV − 取消金额
+  cancel_rate:
+    label: 取消率
+    table: order_lines
+    sql: sum(cancelled_amount) / sum(gmv_amount)
+    definition: 取消金额 ÷ GMV；分子分母不一定是同一批订单
+  orders:
+    label: 订单数
+    table: order_lines
+    sql: count(DISTINCT order_id)
+    definition: 不同发票号的个数，只数销售订单
+  aov:
+    label: 客单价
+    table: order_lines
+    sql: sum(gmv_amount) / count(DISTINCT order_id)
+    definition: GMV ÷ 订单数
+  active_customers:
+    label: 活跃客户数
+    table: order_lines
+    sql: count(DISTINCT buyer_id)
+    definition: 有购买的可识别客户数（不含缺客户 ID 的订单）
+  new_customers:
+    label: 新客数
+    table: order_lines
+    sql: count(DISTINCT buyer_id) FILTER (WHERE customer_type = '新客')
+    definition: 第一次购买落在当周的客户数；只适合按单个周统计。越靠近数据起点（2009-12），越可能把老客算成新客
+  trading_days:
+    label: 交易天数
+    table: order_lines
+    sql: count(DISTINCT order_date) FILTER (WHERE line_type = '销售')
+    definition: 有销售的日期数
+notes:
+  - 周是 ISO 周；数据截止到 2011-12-09（周五），所以 2011-W49 不是完整的一周，和完整的周比总量会偏低。
+  - 2010-12-23 到 2011-01-03 停业，这期间没有数据。
+  - 约四分之一的行缺客户 ID：按客户统计（活跃客户、新老客）时这些行不计入，但它们的金额计入 GMV。
+  - 取消单按取消发生的时间入账，不回溯到原订单所在的周。
+  - 有少数金额极大、下单后很快又全部取消的订单（例如发票 541431、581483），会抬高当周的 GMV 和商品排名；净销售额不受影响。

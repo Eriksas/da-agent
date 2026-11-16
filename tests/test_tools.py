@@ -26,10 +26,12 @@ def test_specs_are_valid_function_definitions() -> None:
     dashboard = [s["function"]["name"] for s in tool_specs("dashboard")]
     review = [s["function"]["name"] for s in tool_specs("review")]
     assert review == ["calculate", "submit_review"]  # 复核 Agent 不查数据
-    assert set(DOMAIN_TOOLS["ecommerce"]) | set(company) | set(dashboard) | set(review) == set(TOOLS)  # 每个工具都属于某个领域
+    analyst = [s["function"]["name"] for s in tool_specs("analyst")]
+    assert analyst == ["run_sql", "submit_query"]  # 查询 Agent 只有这两个工具
+    assert set(DOMAIN_TOOLS["ecommerce"]) | set(company) | set(dashboard) | set(review) | set(analyst) == set(TOOLS)  # 每个工具都属于某个领域
     with pytest.raises(ValueError, match="未知领域"):
         tool_specs("crypto")
-    for spec in specs + tool_specs("company") + tool_specs("dashboard") + tool_specs("review"):
+    for spec in specs + tool_specs("company") + tool_specs("dashboard") + tool_specs("review") + tool_specs("analyst"):
         assert spec["type"] == "function"
         assert spec["function"]["description"]
         assert spec["function"]["parameters"]["type"] == "object"
