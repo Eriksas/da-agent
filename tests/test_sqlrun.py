@@ -40,6 +40,9 @@ def test_queries_are_accepted(sql: str) -> None:
     ("ATTACH 'other.db' AS o", "只能执行以 SELECT 或 WITH 开头"),
     ("SET threads = 8", "只能执行以 SELECT 或 WITH 开头"),
     ("PRAGMA database_list", "只能执行以 SELECT 或 WITH 开头"),  # DuckDB 把它归为 SELECT 类语句，要靠开头的检查拦
+    # 以 WITH 开头、其实是写操作：开头的检查看不出来，要靠语句类型
+    ("WITH a AS (SELECT 1 AS id) INSERT INTO t (id) SELECT id FROM a", "只能执行以 SELECT 或 WITH 开头"),
+    ("WITH a AS (SELECT 1 AS id) DELETE FROM t WHERE id IN (SELECT id FROM a)", "只能执行以 SELECT 或 WITH 开头"),
     ("SELECT 1; DROP TABLE t", "一次只能执行一条"),
     ("SELECT * FROM read_csv('C:/Windows/win.ini')", "不能使用 read_csv"),
     ("SELECT * FROM pragma_database_list()", "不能使用 pragma_database_list"),  # 会暴露数据库文件在本机的路径
