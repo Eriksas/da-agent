@@ -116,10 +116,11 @@ def demo(llm_kind: str) -> int:
     return 0 if run.status == "completed" else 1
 
 
-def ask(question: str, llm_kind: str, script: Path | None, domain: str = "ecommerce") -> int:
+def ask(question: str, llm_kind: str, script: Path | None, domain: str = "ecommerce", with_query: bool = False) -> int:
     """在真实数据上回答问题。默认调用真实模型；--llm fake 时按剧本回放（用于调试）。
 
     domain：ecommerce 用电商交易数据（ask）；company 用上市公司关键科目表（company-ask）。
+    with_query：给 Agent 加上 query_data 工具（M19b），由查询 Agent 写只读 SQL 取数；只支持电商。
     """
     from .agent import run_agent, save_run
     from .cleaning import connect
@@ -136,8 +137,17 @@ def ask(question: str, llm_kind: str, script: Path | None, domain: str = "ecomme
         llm = FakeLLM.from_file(script)
     else:
         llm = OpenAICompatibleLLM(settings)
+    contexts = {}
+    if with_query:
+        from .analyst import QueryService
+        from .semantic import prepare
+
+        if domain != "ecommerce":
+            raise SystemExit("--with-query 只支持电商问答")
+        contexts["query_data"] = QueryService(llm=llm, db=prepare("retail"))
     with (connect_financials() if domain == "company" else connect(PARQUET_PATH)) as con:
-        run = run_agent(question, llm=llm, con=con, max_tool_calls=settings.llm_max_tool_calls, domain=domain)
+        run = run_agent(question, llm=llm, con=con, max_tool_calls=settings.llm_max_tool_calls, domain=domain,
+                        tool_contexts=contexts)
     run_dir = save_run(run, RUNS_DIR)
     _print_run(run, run_dir)
     _review(run_dir)
@@ -699,6 +709,8 @@ def main(argv: list[str] | None = None) -> int:
     ask_parser.add_argument("question", help="例如：上周 GMV 为什么下降？")
     ask_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 调用真实模型（默认）；fake 按剧本回放")
     ask_parser.add_argument("--script", type=Path, help="--llm fake 时使用的剧本文件")
+    ask_parser.add_argument("--with-query", action="store_true",
+                            help="加上 query_data 工具：固定工具答不了的问题，由查询 Agent 写只读 SQL 取数（M19b，评测中）")
     company_parser = commands.add_parser("company-ask", help="上市公司财报分析：用 Agent 回答一个问题，运行记录存到 runs/")
     company_parser.add_argument("question", help="例如：阿里巴巴最近一个财年的盈利能力怎么样？")
     company_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 调用真实模型（默认）；fake 按剧本回放")
@@ -802,7 +814,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "week":
             return week(args.week, args.compare)
         if args.command == "ask":
-            return ask(args.question, args.llm, args.script)
+            return ask(args.question, args.llm, args.script, with_query=args.with_query)
         if args.command == "company-ask":
             return ask(args.question, args.llm, args.script, domain="company")
         if args.command == "query":

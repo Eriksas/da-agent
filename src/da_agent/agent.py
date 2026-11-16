@@ -77,6 +77,8 @@ class AgentRun:
     budget_exhausted: bool = False
     repair: dict[str, Any] | None = None  # 被退回修正时：初稿、退回的数字、初稿在对话中的位置；没退回为 None
     malformed_replies: int = 0  # 把工具调用写成文字的次数
+    # 工具调用里嵌套的 Agent 运行（M19b：query_data 每次取数时查询 Agent 的完整记录），按调用顺序
+    sub_runs: list[dict[str, Any]] = field(default_factory=list)
     steps: list[dict[str, Any]] = field(default_factory=list)
     usage: dict[str, int] = field(default_factory=lambda: {"prompt_tokens": 0, "completion_tokens": 0, "llm_calls": 0})
     started_at: str = ""
@@ -84,9 +86,15 @@ class AgentRun:
     messages: list[dict[str, Any]] = field(default_factory=list)
 
 
+QUERY_SECTION_PATH = ROOT / "prompts" / "query_data_section.md"
+
+
 def build_system_prompt(con: duckdb.DuckDBPyConnection, max_tool_calls: int, use_skills: bool = True,
-                        domain: str = "ecommerce") -> str:
-    """把数据范围（电商：周范围和最近完整周；财报：公司和财年）、工具上限、本领域的流程目录填进提示词模板。"""
+                        domain: str = "ecommerce", query: bool = False) -> str:
+    """把数据范围（电商：周范围和最近完整周；财报：公司和财年）、工具上限、本领域的流程目录填进提示词模板。
+
+    query：有 query_data 工具时，在电商提示词里加上它的用法；没有时这一段是空的，提示词和以前一字不差。
+    """
     template = SYSTEM_PROMPTS[domain].read_text(encoding="utf-8")
     skills = catalog(load_skills(domain=domain) if use_skills else {})
     if domain == "company":
@@ -95,7 +103,9 @@ def build_system_prompt(con: duckdb.DuckDBPyConnection, max_tool_calls: int, use
         source = source_of(con)
         return template.format(source_label=source.label, source_description=source.description,
                                max_tool_calls=max_tool_calls, skills_catalog=skills)
-    return template.format(**data_range(con), max_tool_calls=max_tool_calls, skills_catalog=skills)
+    query_section = QUERY_SECTION_PATH.read_text(encoding="utf-8") if query else ""
+    return template.format(**data_range(con), max_tool_calls=max_tool_calls, skills_catalog=skills,
+                           query_section=query_section)
 
 
 def repair_notice(ungrounded: list[dict[str, Any]]) -> str:
@@ -105,20 +115,25 @@ def repair_notice(ungrounded: list[dict[str, Any]]) -> str:
 
 def run_agent(question: str, *, llm: LLMClient, con: Any, max_tool_calls: int,
               system_prompt: str | None = None, use_skills: bool = True, repair: bool = True,
-              domain: str = "ecommerce", on_step: Callable[[dict[str, Any]], None] | None = None) -> AgentRun:
+              domain: str = "ecommerce", on_step: Callable[[dict[str, Any]], None] | None = None,
+              tool_contexts: dict[str, Any] | None = None) -> AgentRun:
     """运行一次 Agent 循环，返回完整记录。任何失败都体现在 status 里，不向外抛异常（on_step 自己抛的除外）。
 
     con 是交给工具的上下文：分析领域是数据库连接；复核（domain="review"）是 review.ReviewContext。
+    tool_contexts：可选工具和它们自己的上下文（M19b：{"query_data": analyst.QueryService}）。给了才让模型用；
+    上下文里有 records 的，运行结束后把它们附在 sub_runs 里。
     """
+    contexts = tool_contexts or {}
     notify = on_step or (lambda event: None)
     start = time.perf_counter()
     run = AgentRun(run_id=f"{datetime.now():%Y%m%dT%H%M%S}-{uuid4().hex[:6]}", question=question, model=llm.model,
                    max_tool_calls=max_tool_calls, use_skills=use_skills, domain=domain,
                    started_at=datetime.now(UTC).isoformat(timespec="seconds"))
     run.messages = [{"role": "system",
-                     "content": system_prompt or build_system_prompt(con, max_tool_calls, use_skills, domain)},
+                     "content": system_prompt or build_system_prompt(con, max_tool_calls, use_skills, domain,
+                                                                     query="query_data" in contexts)},
                     {"role": "user", "content": question}]
-    specs = [s for s in tool_specs(domain) if use_skills or s["function"]["name"] != "load_skill"]
+    specs = [s for s in tool_specs(domain, optional=list(contexts)) if use_skills or s["function"]["name"] != "load_skill"]
     allowed = [s["function"]["name"] for s in specs]  # 只执行这个领域的工具：别的领域的工具连的是另一份数据
     used, limit, notified_at = 0, max_tool_calls, None
     max_rounds = max_tool_calls + 2  # 正常情况下每轮至少用 1 次工具，再加作答的一轮和一轮余量
@@ -166,7 +181,7 @@ def run_agent(question: str, *, llm: LLMClient, con: Any, max_tool_calls: int,
                 outcome = ToolOutcome(False, {"error": f"没有名为 {call.name} 的工具；可用工具：{allowed}"}, 0)
             else:
                 used += 1
-                outcome = execute(con, call.name, call.arguments)
+                outcome = execute(contexts.get(call.name, con), call.name, call.arguments)
             run.steps.append({"round": round_no, "tool": call.name, "arguments": call.arguments, "ok": outcome.ok,
                               "error": None if outcome.ok else outcome.content["error"], "ms": outcome.duration_ms})
             run.messages.append({"role": "tool", "tool_call_id": call.id, "content": outcome.to_json()})
@@ -176,6 +191,7 @@ def run_agent(question: str, *, llm: LLMClient, con: Any, max_tool_calls: int,
             notified_at, run.budget_exhausted = limit, True
             run.messages.append({"role": "user", "content": BUDGET_NOTICE})
             notify({"type": "notice", "text": BUDGET_NOTICE})
+    run.sub_runs = [record for context in contexts.values() for record in getattr(context, "records", [])]
     if run.repair is not None and run.status != "completed":  # 修正失败：保留初稿
         run.repair["error"] = run.error or run.status
         run.answer, run.status, run.error = run.repair["draft"], "completed", None

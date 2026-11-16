@@ -87,8 +87,12 @@ def extract_numbers(text: str) -> tuple[list[NumberMention], int]:
     return mentions, skipped
 
 
+# 工具输出里不当出处的部分：查询 Agent 自己写的口径说明和注意事项（M19b）。表里的数是程序执行出来的，说明是模型写的
+UNVERIFIED_KEYS = frozenset({"unverified_notes"})
+
+
 def _numbers_in(value: Any, pool: list[float]) -> None:
-    """收集工具输出里所有的数：数值字段，以及文字里出现的数（例如警告里的“少于 30”）。"""
+    """收集工具输出里所有的数：数值字段，以及文字里出现的数（例如警告里的“少于 30”）。UNVERIFIED_KEYS 下面的不收。"""
     if isinstance(value, bool):
         return
     if isinstance(value, (int, float)):
@@ -100,8 +104,9 @@ def _numbers_in(value: Any, pool: list[float]) -> None:
             if match.group(2):  # 文字里带单位的数（如“超过 50%”），同时存一份换算后的值（0.5），和报告里的写法对得上
                 pool.append(number * SCALES[match.group(2)])
     elif isinstance(value, dict):
-        for item in value.values():
-            _numbers_in(item, pool)
+        for key, item in value.items():
+            if key not in UNVERIFIED_KEYS:
+                _numbers_in(item, pool)
     elif isinstance(value, list):
         for item in value:
             _numbers_in(item, pool)
