@@ -1,0 +1,429 @@
+# 查询 Agent（M19）的评测题。每道题是一个分析请求 + 一条参考 SQL。
+#
+# 参考 SQL 是人写的，在“参考连接”上执行：电商题用清洗后的基础表（sales_enriched、cancellations_enriched，
+# 取消行的金额是负数），不经过口径配置里的 order_lines 表，所以它和查询 Agent 走的是两条独立的路。
+# CSV 题的参考连接就是把 CSV 读成一张表 data。
+#
+# keys：参考结果里用来认行的列（Agent 的结果里要有一行包含这些取值）；留空表示不认行，数值出现在结果表的任何位置都算。
+# values：要对上的数值列。rates：其中哪些是比率（写成小数或百分数都算对）。
+# kind: decline 的题数据里没有答案，正确的做法是不提交、说明原因。
+# group：tool = 固定工具也能答（用来看两条路是否一致）；beyond = 固定工具答不了；decline = 应该拒答。
+datasets:
+  shoppers: data/raw/online-shoppers/online_shoppers_intention.csv
+  bank: data/raw/bank-marketing/bank-additional-full.csv
+
+# ---------- 开发题：调提示词时反复用，成绩不算数 ----------
+dev:
+  - id: d-week-basics
+    data: retail
+    group: tool
+    request: 2011-W45 的 GMV、订单数和客单价各是多少？
+    values: [gmv, orders, aov]
+    reference_sql: |
+      SELECT sum(amount) AS gmv, count(DISTINCT invoice) AS orders, sum(amount) / count(DISTINCT invoice) AS aov
+      FROM sales_enriched WHERE week = '2011-W45'
+  - id: d-net-top-countries
+    data: retail
+    group: tool
+    request: 2011-W45 净销售额最高的 3 个国家，以及各自的净销售额。
+    keys: [country]
+    values: [net_sales]
+    reference_sql: |
+      SELECT country, sum(amount) AS net_sales
+      FROM (SELECT country, amount FROM sales_enriched WHERE week = '2011-W45'
+            UNION ALL SELECT country, amount FROM cancellations_enriched WHERE week = '2011-W45')
+      GROUP BY 1 ORDER BY 2 DESC LIMIT 3
+  - id: d-wow-gmv
+    data: retail
+    group: tool
+    request: 2011-W45 相比 2011-W44，GMV 变化了多少？给出两周的 GMV、差额（W45 减 W44）和变化率。
+    values: [cur, base, change, change_pct]
+    rates: [change_pct]
+    reference_sql: |
+      SELECT sum(amount) FILTER (WHERE week = '2011-W45') AS cur, sum(amount) FILTER (WHERE week = '2011-W44') AS base,
+             cur - base AS change, (cur - base) / base AS change_pct
+      FROM sales_enriched WHERE week IN ('2011-W44', '2011-W45')
+  - id: d-new-returning
+    data: retail
+    group: tool
+    request: 2011-W45 的新客数和老客数各是多少？
+    values: [new_customers, returning_customers]
+    reference_sql: |
+      SELECT count(DISTINCT customer_id) FILTER (WHERE customer_type = '新客') AS new_customers,
+             count(DISTINCT customer_id) - new_customers AS returning_customers
+      FROM sales_enriched WHERE week = '2011-W45'
+  - id: d-weekday
+    data: retail
+    group: beyond
+    request: 2011 年 10 月，按星期几（周一到周日）分别合计 GMV，每一天各是多少？
+    values: [gmv]
+    reference_sql: |
+      SELECT isodow(invoice_date) AS weekday, sum(amount) AS gmv
+      FROM sales WHERE strftime(invoice_date, '%Y-%m') = '2011-10' GROUP BY 1 ORDER BY 1
+  - id: d-top-products-quantity
+    data: retail
+    group: beyond
+    request: 2011-W45 销售件数最多的 5 个商品（按商品编码），以及各自的销售件数。
+    keys: [stock_code]
+    values: [quantity]
+    reference_sql: |
+      SELECT stock_code, sum(quantity) AS quantity FROM sales_enriched WHERE week = '2011-W45' GROUP BY 1 ORDER BY 2 DESC LIMIT 5
+  - id: d-margin
+    data: retail
+    group: decline
+    kind: decline
+    request: 2011-W45 的毛利率是多少？
+  - id: d-month-cancel-rate
+    data: retail
+    group: beyond
+    request: 2011 年 9 月整月的取消率是多少？
+    values: [cancel_rate]
+    rates: [cancel_rate]
+    reference_sql: |
+      SELECT (SELECT -sum(amount) FROM cancellations WHERE strftime(invoice_date, '%Y-%m') = '2011-09')
+             / (SELECT sum(amount) FROM sales WHERE strftime(invoice_date, '%Y-%m') = '2011-09') AS cancel_rate
+  - id: d-bank-jobs
+    data: bank
+    group: csv
+    request: 记录数最多的 5 个 job，各自的记录数和成功率（y 为 yes 的比例）。
+    keys: [job]
+    values: [n, rate]
+    rates: [rate]
+    reference_sql: |
+      SELECT job, count(*) AS n, avg(CASE WHEN y = 'yes' THEN 1.0 ELSE 0.0 END) AS rate FROM data GROUP BY 1 ORDER BY 2 DESC LIMIT 5
+  - id: d-bank-months
+    data: bank
+    group: csv
+    request: 每个 month 的记录数和成功率（y 为 yes 的比例）。
+    keys: [month]
+    values: [n, rate]
+    rates: [rate]
+    reference_sql: |
+      SELECT month, count(*) AS n, avg(CASE WHEN y = 'yes' THEN 1.0 ELSE 0.0 END) AS rate FROM data GROUP BY 1
+
+# ---------- 留出题：提示词和评分定下来之后只跑一次 ----------
+holdout:
+  # —— 固定工具也能答的（12 道）——
+  - id: a-gmv-net
+    data: retail
+    group: tool
+    request: 2011-W48 的 GMV 和净销售额各是多少？
+    values: [gmv, net_sales]
+    reference_sql: |
+      SELECT g.gmv, g.gmv + c.cancelled AS net_sales
+      FROM (SELECT sum(amount) AS gmv FROM sales_enriched WHERE week = '2011-W48') g,
+           (SELECT coalesce(sum(amount), 0) AS cancelled FROM cancellations_enriched WHERE week = '2011-W48') c
+  - id: a-orders-customers-aov
+    data: retail
+    group: tool
+    request: 2011-W47 的订单数、活跃客户数和客单价各是多少？
+    values: [orders, active_customers, aov]
+    reference_sql: |
+      SELECT count(DISTINCT invoice) AS orders, count(DISTINCT customer_id) AS active_customers,
+             sum(amount) / count(DISTINCT invoice) AS aov
+      FROM sales_enriched WHERE week = '2011-W47'
+  - id: a-net-wow
+    data: retail
+    group: tool
+    request: 2011-W48 相比 2011-W47，净销售额变化了多少？给出两周的净销售额、差额（W48 减 W47）和变化率。
+    values: [cur, base, change, change_pct]
+    rates: [change_pct]
+    reference_sql: |
+      WITH net AS (SELECT week, sum(amount) AS v
+                   FROM (SELECT week, amount FROM sales_enriched UNION ALL SELECT week, amount FROM cancellations_enriched)
+                   WHERE week IN ('2011-W47', '2011-W48') GROUP BY 1)
+      SELECT max(v) FILTER (WHERE week = '2011-W48') AS cur, max(v) FILTER (WHERE week = '2011-W47') AS base,
+             cur - base AS change, (cur - base) / base AS change_pct
+      FROM net
+  - id: a-cancel
+    data: retail
+    group: tool
+    request: 2010-W50 的取消金额和取消率各是多少？
+    values: [cancelled_amount, cancel_rate]
+    rates: [cancel_rate]
+    reference_sql: |
+      SELECT -c.cancelled AS cancelled_amount, -c.cancelled / g.gmv AS cancel_rate
+      FROM (SELECT sum(amount) AS gmv FROM sales_enriched WHERE week = '2010-W50') g,
+           (SELECT sum(amount) AS cancelled FROM cancellations_enriched WHERE week = '2010-W50') c
+  - id: a-new-share
+    data: retail
+    group: tool
+    request: 2011-W36 的新客数是多少？新客占当周活跃客户数的比例是多少？
+    values: [new_customers, share]
+    rates: [share]
+    reference_sql: |
+      SELECT count(DISTINCT customer_id) FILTER (WHERE customer_type = '新客') AS new_customers,
+             new_customers / count(DISTINCT customer_id) AS share
+      FROM sales_enriched WHERE week = '2011-W36'
+  - id: a-top-countries
+    data: retail
+    group: tool
+    request: 2011-W48 GMV 最高的 5 个国家，以及各自的 GMV。
+    keys: [country]
+    values: [gmv]
+    reference_sql: |
+      SELECT country, sum(amount) AS gmv FROM sales_enriched WHERE week = '2011-W48' GROUP BY 1 ORDER BY 2 DESC LIMIT 5
+  - id: a-country-drops
+    data: retail
+    group: tool
+    request: 2011-W31 相比 2011-W30，GMV 下降金额最大的 3 个国家是哪些？给出各自两周的 GMV 和变化额（W31 减 W30，下降为负数）。
+    keys: [country]
+    values: [base, cur, change]
+    reference_sql: |
+      SELECT country, coalesce(sum(amount) FILTER (WHERE week = '2011-W30'), 0) AS base,
+             coalesce(sum(amount) FILTER (WHERE week = '2011-W31'), 0) AS cur, cur - base AS change
+      FROM sales_enriched WHERE week IN ('2011-W30', '2011-W31') GROUP BY 1 ORDER BY change LIMIT 3
+  - id: a-customer-types
+    data: retail
+    group: tool
+    request: 2011-W48 按客户类型（新客、老客、未知）分，GMV 各是多少？
+    keys: [customer_type]
+    values: [gmv]
+    reference_sql: |
+      SELECT customer_type, sum(amount) AS gmv FROM sales_enriched WHERE week = '2011-W48' GROUP BY 1
+  - id: a-trading-days
+    data: retail
+    group: tool
+    request: 2011-W22 和 2011-W21 各有几个交易日？两周的日均 GMV（GMV ÷ 交易天数）各是多少？
+    values: [trading_days, gmv_per_day]
+    reference_sql: |
+      SELECT week, count(DISTINCT CAST(invoice_date AS DATE)) AS trading_days,
+             sum(amount) / count(DISTINCT CAST(invoice_date AS DATE)) AS gmv_per_day
+      FROM sales_enriched WHERE week IN ('2011-W21', '2011-W22') GROUP BY 1
+  - id: a-orders-yoy
+    data: retail
+    group: tool
+    request: 2011-W48 和去年同一周（2010-W48）的订单数各是多少？同比变化率是多少？
+    values: [cur, base, change_pct]
+    rates: [change_pct]
+    reference_sql: |
+      SELECT count(DISTINCT invoice) FILTER (WHERE week = '2011-W48') AS cur,
+             count(DISTINCT invoice) FILTER (WHERE week = '2010-W48') AS base, (cur - base) / base AS change_pct
+      FROM sales_enriched WHERE week IN ('2010-W48', '2011-W48')
+  - id: a-partial-week
+    data: retail
+    group: tool
+    request: 2011-W49 的 GMV 是多少？这一周有几个交易日？
+    values: [gmv, trading_days]
+    reference_sql: |
+      SELECT sum(amount) AS gmv, count(DISTINCT CAST(invoice_date AS DATE)) AS trading_days
+      FROM sales_enriched WHERE week = '2011-W49'
+  - id: a-product-gains
+    data: retail
+    group: tool
+    request: 2011-W41 相比 2011-W40，GMV 增加金额最大的 5 个商品（按商品编码）是哪些？给出各自 W41 的 GMV 和增加额。
+    keys: [stock_code]
+    values: [cur, change]
+    reference_sql: |
+      SELECT stock_code, coalesce(sum(amount) FILTER (WHERE week = '2011-W40'), 0) AS base,
+             coalesce(sum(amount) FILTER (WHERE week = '2011-W41'), 0) AS cur, cur - base AS change
+      FROM sales_enriched WHERE week IN ('2011-W40', '2011-W41') GROUP BY 1 ORDER BY change DESC LIMIT 5
+  # —— 固定工具答不了的（10 道）——
+  - id: b-weekday
+    data: retail
+    group: beyond
+    request: 2011 年 11 月，按星期几（周一到周日）分别合计，每一天的 GMV 和订单数各是多少？
+    values: [gmv, orders]
+    reference_sql: |
+      SELECT isodow(invoice_date) AS weekday, sum(amount) AS gmv, count(DISTINCT invoice) AS orders
+      FROM sales WHERE strftime(invoice_date, '%Y-%m') = '2011-11' GROUP BY 1 ORDER BY 1
+  - id: b-top-months
+    data: retail
+    group: beyond
+    request: 2011 年 GMV 最高的 5 个月份，以及各月的 GMV。
+    values: [gmv]
+    reference_sql: |
+      SELECT strftime(invoice_date, '%Y-%m') AS month, sum(amount) AS gmv
+      FROM sales WHERE year(invoice_date) = 2011 GROUP BY 1 ORDER BY 2 DESC LIMIT 5
+  - id: b-peak-hours
+    data: retail
+    group: beyond
+    request: 2011 年 11 月，按下单的小时（0–23 点）统计订单数，订单最多的 3 个小时是哪几个，各有多少订单？
+    values: [hour, orders]
+    reference_sql: |
+      SELECT hour(invoice_date) AS hour, count(DISTINCT invoice) AS orders
+      FROM sales WHERE strftime(invoice_date, '%Y-%m') = '2011-11' GROUP BY 1 ORDER BY 2 DESC LIMIT 3
+  - id: b-frequent-buyers
+    data: retail
+    group: beyond
+    request: 2011 年全年下单不少于 10 次的可识别客户有多少位？他们在 2011 年一共贡献了多少 GMV？
+    values: [customers, gmv]
+    reference_sql: |
+      SELECT count(*) AS customers, sum(gmv) AS gmv
+      FROM (SELECT customer_id, count(DISTINCT invoice) AS orders, sum(amount) AS gmv
+            FROM sales WHERE year(invoice_date) = 2011 AND customer_id IS NOT NULL GROUP BY 1)
+      WHERE orders >= 10
+  - id: b-aov-countries
+    data: retail
+    group: beyond
+    request: 2011-W48 客单价最高的 3 个国家是哪些？只看当周订单数不少于 5 的国家，给出各自的客单价。
+    keys: [country]
+    values: [aov]
+    reference_sql: |
+      SELECT country, sum(amount) / count(DISTINCT invoice) AS aov
+      FROM sales_enriched WHERE week = '2011-W48' GROUP BY 1 HAVING count(DISTINCT invoice) >= 5 ORDER BY 2 DESC LIMIT 3
+  - id: b-overseas-share
+    data: retail
+    group: beyond
+    request: 2011 年英国（United Kingdom）以外 GMV 最高的 5 个国家，各自的 GMV，以及各占海外（英国以外）GMV 的比例。
+    keys: [country]
+    values: [gmv, share]
+    rates: [share]
+    reference_sql: |
+      SELECT country, sum(amount) AS gmv, sum(amount) / sum(sum(amount)) OVER () AS share
+      FROM sales WHERE year(invoice_date) = 2011 AND country <> 'United Kingdom' GROUP BY 1 ORDER BY 2 DESC LIMIT 5
+  - id: b-retention
+    data: retail
+    group: beyond
+    request: 2011 年 10 月有购买的可识别客户有多少位？其中多少位在 2011 年 11 月又购买了？占 10 月购买客户的比例是多少？
+    values: [october, retained, rate]
+    rates: [rate]
+    reference_sql: |
+      WITH oct AS (SELECT DISTINCT customer_id FROM sales WHERE strftime(invoice_date, '%Y-%m') = '2011-10' AND customer_id IS NOT NULL),
+           nov AS (SELECT DISTINCT customer_id FROM sales WHERE strftime(invoice_date, '%Y-%m') = '2011-11' AND customer_id IS NOT NULL)
+      SELECT count(*) AS october, count(nov.customer_id) AS retained, count(nov.customer_id) / count(*) AS rate
+      FROM oct LEFT JOIN nov USING (customer_id)
+  - id: b-net-products
+    data: retail
+    group: beyond
+    request: 2011 年净销售额最高的 5 个商品（按商品编码），以及各自的 GMV、取消金额和净销售额。
+    keys: [stock_code]
+    values: [gmv, cancelled_amount, net_sales]
+    reference_sql: |
+      SELECT stock_code, coalesce(sum(amount) FILTER (WHERE amount > 0), 0) AS gmv,
+             coalesce(-sum(amount) FILTER (WHERE amount < 0), 0) AS cancelled_amount, sum(amount) AS net_sales
+      FROM (SELECT stock_code, amount FROM sales WHERE year(invoice_date) = 2011
+            UNION ALL SELECT stock_code, amount FROM cancellations WHERE year(invoice_date) = 2011)
+      GROUP BY 1 ORDER BY net_sales DESC LIMIT 5
+  - id: b-quarters
+    data: retail
+    group: beyond
+    request: 2011 年每个季度的 GMV 和订单数各是多少？
+    values: [gmv, orders]
+    reference_sql: |
+      SELECT quarter(invoice_date) AS quarter, sum(amount) AS gmv, count(DISTINCT invoice) AS orders
+      FROM sales WHERE year(invoice_date) = 2011 GROUP BY 1 ORDER BY 1
+  - id: b-big-orders
+    data: retail
+    group: beyond
+    request: 2011 年单笔订单金额（一张发票的 GMV）超过 1,000 英镑的订单有多少张？占 2011 年全部订单的比例是多少？
+    values: [big_orders, share]
+    rates: [share]
+    reference_sql: |
+      SELECT count(*) FILTER (WHERE gmv > 1000) AS big_orders, big_orders / count(*) AS share
+      FROM (SELECT invoice, sum(amount) AS gmv FROM sales WHERE year(invoice_date) = 2011 GROUP BY 1)
+  # —— 应该拒答的（2 道）——
+  - id: c-profit
+    data: retail
+    group: decline
+    kind: decline
+    request: 2011-W48 各个国家的利润分别是多少？
+  - id: c-out-of-range
+    data: retail
+    group: decline
+    kind: decline
+    request: 2012-W10 的 GMV 是多少？
+  # —— 没有口径配置的 CSV（12 道）——
+  - id: s-visitor-types
+    data: shoppers
+    group: csv
+    request: 各访客类型（VisitorType）的会话数和转化率（Revenue 为 TRUE 的比例）。
+    keys: [VisitorType]
+    values: [sessions, rate]
+    rates: [rate]
+    reference_sql: |
+      SELECT VisitorType, count(*) AS sessions, avg(CASE WHEN Revenue = 'TRUE' THEN 1.0 ELSE 0.0 END) AS rate FROM data GROUP BY 1
+  - id: s-best-months
+    data: shoppers
+    group: csv
+    request: 转化率（Revenue 为 TRUE 的比例）最高的 3 个月份（Month）是哪些？只看会话数不少于 500 的月份，给出各自的转化率。
+    keys: [Month]
+    values: [rate]
+    rates: [rate]
+    reference_sql: |
+      SELECT Month, avg(CASE WHEN Revenue = 'TRUE' THEN 1.0 ELSE 0.0 END) AS rate
+      FROM data GROUP BY 1 HAVING count(*) >= 500 ORDER BY 2 DESC LIMIT 3
+  - id: s-weekend
+    data: shoppers
+    group: csv
+    request: 周末和非周末（Weekend）的会话数和转化率（Revenue 为 TRUE 的比例）各是多少？
+    values: [sessions, rate]
+    rates: [rate]
+    reference_sql: |
+      SELECT Weekend, count(*) AS sessions, avg(CASE WHEN Revenue = 'TRUE' THEN 1.0 ELSE 0.0 END) AS rate FROM data GROUP BY 1
+  - id: s-overall
+    data: shoppers
+    group: csv
+    request: 一共有多少会话？其中多少成交（Revenue 为 TRUE）？整体转化率是多少？
+    values: [sessions, purchases, rate]
+    rates: [rate]
+    reference_sql: |
+      SELECT count(*) AS sessions, count(*) FILTER (WHERE Revenue = 'TRUE') AS purchases, purchases / count(*) AS rate FROM data
+  - id: s-traffic-types
+    data: shoppers
+    group: csv
+    request: 会话数最多的 5 个 TrafficType，各自的会话数和转化率（Revenue 为 TRUE 的比例）。
+    keys: [TrafficType]
+    values: [sessions, rate]
+    rates: [rate]
+    reference_sql: |
+      SELECT TrafficType, count(*) AS sessions, avg(CASE WHEN Revenue = 'TRUE' THEN 1.0 ELSE 0.0 END) AS rate
+      FROM data GROUP BY 1 ORDER BY 2 DESC LIMIT 5
+  - id: s-page-values
+    data: shoppers
+    group: csv
+    request: 成交和未成交的会话（Revenue），PageValues 的平均值和 ProductRelated_Duration 的平均值各是多少？
+    values: [avg_page_values, avg_duration]
+    reference_sql: |
+      SELECT Revenue, avg(PageValues) AS avg_page_values, avg(ProductRelated_Duration) AS avg_duration FROM data GROUP BY 1
+  - id: s-regions
+    data: shoppers
+    group: csv
+    request: 会话数最多的 3 个 Region，各自的会话数和占全部会话的比例。
+    keys: [Region]
+    values: [sessions, share]
+    rates: [share]
+    reference_sql: |
+      SELECT Region, count(*) AS sessions, count(*) / sum(count(*)) OVER () AS share FROM data GROUP BY 1 ORDER BY 2 DESC LIMIT 3
+  - id: s-november
+    data: shoppers
+    group: csv
+    request: 11 月（Month 为 Nov）里，新访客（New_Visitor）和回访客（Returning_Visitor）的转化率（Revenue 为 TRUE 的比例）各是多少？
+    keys: [VisitorType]
+    values: [rate]
+    rates: [rate]
+    reference_sql: |
+      SELECT VisitorType, avg(CASE WHEN Revenue = 'TRUE' THEN 1.0 ELSE 0.0 END) AS rate
+      FROM data WHERE Month = 'Nov' AND VisitorType IN ('New_Visitor', 'Returning_Visitor') GROUP BY 1
+  - id: s-order-value
+    data: shoppers
+    group: decline
+    kind: decline
+    request: 各访客类型成交订单的平均订单金额是多少？
+  - id: k-contact
+    data: bank
+    group: csv
+    request: 按 contact（联系方式）分，各自的记录数和成功率（y 为 yes 的比例）。
+    keys: [contact]
+    values: [n, rate]
+    rates: [rate]
+    reference_sql: |
+      SELECT contact, count(*) AS n, avg(CASE WHEN y = 'yes' THEN 1.0 ELSE 0.0 END) AS rate FROM data GROUP BY 1
+  - id: k-education
+    data: bank
+    group: csv
+    request: 成功率（y 为 yes 的比例）最高的 3 个 education 是哪些？只看记录数不少于 1000 的，给出各自的成功率。
+    keys: [education]
+    values: [rate]
+    rates: [rate]
+    reference_sql: |
+      SELECT education, avg(CASE WHEN y = 'yes' THEN 1.0 ELSE 0.0 END) AS rate
+      FROM data GROUP BY 1 HAVING count(*) >= 1000 ORDER BY 2 DESC LIMIT 3
+  - id: k-previous
+    data: bank
+    group: csv
+    request: previous（之前联系过的次数）等于 0 和大于 0 的两组，各自的记录数和成功率（y 为 yes 的比例）。
+    values: [n, rate]
+    rates: [rate]
+    reference_sql: |
+      SELECT previous > 0 AS contacted_before, count(*) AS n, avg(CASE WHEN y = 'yes' THEN 1.0 ELSE 0.0 END) AS rate FROM data GROUP BY 1

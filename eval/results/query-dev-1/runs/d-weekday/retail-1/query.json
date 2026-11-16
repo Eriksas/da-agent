@@ -1,0 +1,112 @@
+{
+  "status": "answered",
+  "request": "2011 年 10 月，按星期几（周一到周日）分别合计 GMV，每一天各是多少？",
+  "data": "retail",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH dow_list AS (\n    SELECT * FROM (VALUES\n        (1, '周一'), (2, '周二'), (3, '周三'), (4, '周四'), (5, '周五'), (6, '周六'), (0, '周日')\n    ) AS t(dow_num, weekday)\n),\nagg AS (\n    SELECT\n        EXTRACT(DOW FROM order_date) AS dow_num,\n        sum(gmv_amount) AS gmv,\n        count(DISTINCT order_id) AS orders,\n        count(*) AS line_records,\n        count(DISTINCT order_date) AS active_dates\n    FROM order_lines\n    WHERE order_date >= DATE '2011-10-01' AND order_date <= DATE '2011-10-31'\n    GROUP BY 1\n)\nSELECT\n    d.weekday AS weekday,\n    round(COALESCE(a.gmv, 0), 2) AS gmv,\n    COALESCE(a.orders, 0) AS orders,\n    COALESCE(a.line_records, 0) AS line_records,\n    COALESCE(a.active_dates, 0) AS active_dates,\n    round(COALESCE(a.gmv, 0) / NULLIF(a.active_dates, 0), 2) AS gmv_per_active_date\nFROM dow_list d\nLEFT JOIN agg a USING (dow_num)\nORDER BY d.dow_num",
+  "columns": [
+    {
+      "name": "weekday",
+      "meaning": "星期几（周一→周日，ISO 顺序）"
+    },
+    {
+      "name": "gmv",
+      "meaning": "该星期几当月的 GMV 合计（英镑，下单口径，含之后被取消的订单）"
+    },
+    {
+      "name": "orders",
+      "meaning": "该星期几当月的销售订单数（去重发票号 count(DISTINCT order_id)）"
+    },
+    {
+      "name": "line_records",
+      "meaning": "该星期几当月的商品行记录数（销售行+取消行）"
+    },
+    {
+      "name": "active_dates",
+      "meaning": "该星期几当月有记录的日期数（周一/周日各 5 天，其余各 4 天）"
+    },
+    {
+      "name": "gmv_per_active_date",
+      "meaning": "该星期几每个有记录日期的平均 GMV（英镑）"
+    }
+  ],
+  "rows": [
+    {
+      "weekday": "周日",
+      "gmv": 91609.81,
+      "orders": 246,
+      "line_records": 8401,
+      "active_dates": 5,
+      "gmv_per_active_date": 18321.96
+    },
+    {
+      "weekday": "周一",
+      "gmv": 254689.55,
+      "orders": 397,
+      "line_records": 14556,
+      "active_dates": 5,
+      "gmv_per_active_date": 50937.91
+    },
+    {
+      "weekday": "周二",
+      "gmv": 183600.37,
+      "orders": 321,
+      "line_records": 10471,
+      "active_dates": 4,
+      "gmv_per_active_date": 45900.09
+    },
+    {
+      "weekday": "周三",
+      "gmv": 176360.69,
+      "orders": 356,
+      "line_records": 8683,
+      "active_dates": 4,
+      "gmv_per_active_date": 44090.17
+    },
+    {
+      "weekday": "周四",
+      "gmv": 206311.7,
+      "orders": 386,
+      "line_records": 10177,
+      "active_dates": 4,
+      "gmv_per_active_date": 51577.92
+    },
+    {
+      "weekday": "周五",
+      "gmv": 190742.13,
+      "orders": 299,
+      "line_records": 7138,
+      "active_dates": 4,
+      "gmv_per_active_date": 47685.53
+    },
+    {
+      "weekday": "周六",
+      "gmv": 0.0,
+      "orders": 0,
+      "line_records": 0,
+      "active_dates": 0,
+      "gmv_per_active_date": null
+    }
+  ],
+  "row_count": 7,
+  "definition": "时间范围：2011-10-01 至 2011-10-31（按 order_date 过滤）。星期几由 order_date 的 ISO 星期（周一为 1，周日为 0）确定，与表中 week 字段的周一起始一致。GMV 用口径表表达式 sum(gmv_amount)（销售行计 amount，取消行计 0）；订单数用 count(DISTINCT order_id)（只数销售订单）；商品行数为该星期几全部行数；日期数为 count(DISTINCT order_date)。用 VALUES 生成周一至周日 7 行并左连接聚合结果，因此无交易的日子也会保留（周六当月无任何记录，GMV=0）。GMV 保留 2 位小数。",
+  "caveats": [
+    "2011 年 10 月没有任何落在周六的交易记录（全表仅 400 行、集中在 1 个周六，属异常批量订单），故周六 GMV 记为 0，不是数据缺失。",
+    "各星期几在该月出现的次数不同（周一/周日 5 天，周二至周五各 4 天），因此单日平均 GMV 比总量更适合横向比较。",
+    "GMV 为下单口径，含之后被取消的订单；取消行自身贡献 0，但仍计入 line_records 与 active_dates。",
+    "该月个别大额订单（如快速下单又全 cancel 的发票）会抬高对应星期的 GMV，净销售额口径不受影响。"
+  ],
+  "metrics_used": [
+    "gmv",
+    "orders"
+  ],
+  "message": "已提交：2011 年 10 月按星期几（周一→周日）的 GMV 合计及样本量——周一 254,689.55 英镑（397 单）、周四 206,311.70、周五 190,742.13、周二 183,600.37、周三 176,360.69、周日 91,609.81 英镑（246 单），当月周六无任何交易记录故为 0。",
+  "sql_runs": 4,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 30030,
+    "completion_tokens": 2836,
+    "llm_calls": 6
+  },
+  "seconds": 62.96
+}

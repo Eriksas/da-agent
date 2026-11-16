@@ -144,6 +144,90 @@ def ask(question: str, llm_kind: str, script: Path | None, domain: str = "ecomme
     return 0 if run.status == "completed" else 1
 
 
+def query(request: str, data: str, llm_kind: str, script: Path | None) -> int:
+    """查询 Agent：把一个分析请求写成只读 SQL 并算出结果表。data 是口径配置的名字或一个 .csv 文件。
+
+    结果存到 runs/<编号>/：query.json（结果表、SQL、口径）和 run.json（查询 Agent 的完整运行记录）。
+    """
+    import json
+
+    from .analyst import run_query
+    from .llm import OpenAICompatibleLLM
+    from .semantic import prepare
+
+    db = prepare(data)
+    if llm_kind == "fake":
+        if script is None:
+            raise SystemExit("--llm fake 需要用 --script 指定剧本文件")
+        llm = FakeLLM.from_file(script)
+    else:
+        llm = OpenAICompatibleLLM(Settings())
+    out = run_query(request, llm=llm, db=db)
+    result, record = out["result"], out["run"]
+    run_dir = RUNS_DIR / record["run_id"]
+    run_dir.mkdir(parents=True, exist_ok=False)
+    for name, content in (("query.json", result), ("run.json", record)):
+        (run_dir / name).write_text(json.dumps(content, ensure_ascii=False, indent=2, default=str) + "\n",
+                                    encoding="utf-8", newline="\n")
+    labels = {"answered": "已算出结果", "declined": "没有提交结果（它认为数据答不了）", "failed": "失败"}
+    print(f"状态：{labels[result['status']]}；试了 {result['sql_runs']} 次查询，被退回 {result['rejected']} 次；"
+          f"{result['usage']['prompt_tokens'] + result['usage']['completion_tokens']:,} token，{result['seconds']} 秒")
+    if result["status"] == "answered":
+        names = [column["name"] for column in result["columns"]]
+        print(f"\nSQL：\n{result['sql']}\n")
+        print("| " + " | ".join(names) + " |\n|" + "---|" * len(names))
+        for row in result["rows"][:20]:
+            print("| " + " | ".join("" if row[name] is None else str(row[name]) for name in names) + " |")
+        if result["row_count"] > 20:
+            print(f"（共 {result['row_count']} 行，只显示前 20 行）")
+        print("\n列的含义：" + "；".join(f"{column['name']} = {column['meaning']}" for column in result["columns"]))
+        print(f"口径：{result['definition']}")
+        for caveat in result["caveats"]:
+            print(f"注意：{caveat}")
+    else:
+        print(result["message"])
+    print(f"\n记录：{run_dir}")
+    return 0 if result["status"] == "answered" else 1
+
+
+def evaluate_query(split: str, llm_kind: str, name: str | None, repeats: int, workers: int) -> int:
+    """查询 Agent 的评测：每道题的结果和参考 SQL 的结果逐个数对比。结果存到 eval/results/<name>/。"""
+    import json
+    from datetime import datetime
+
+    from .evaluation import RESULTS_DIR
+    from .llm import LLMReply, OpenAICompatibleLLM
+    from .query_eval import load_plan, render_summary, run_query_eval, summarize
+
+    plan = load_plan()
+    if llm_kind == "fake":
+        model = "fake"
+
+        def make_llm() -> FakeLLM:
+            return FakeLLM(replies=[LLMReply(content="（假模型）只检查评测流程，不代表任何真实结果。")])
+    else:
+        client = OpenAICompatibleLLM(Settings())
+        model = client.model
+
+        def make_llm() -> OpenAICompatibleLLM:
+            return client
+    name = name or f"query-{split}-{datetime.now():%Y-%m-%d}" + ("-fake" if llm_kind == "fake" else "")
+    out_dir = RESULTS_DIR / name
+    if out_dir.exists():
+        raise SystemExit(f"{out_dir} 已存在，请换一个 --name")
+    rows = run_query_eval(plan, split, repeats, make_llm, out_dir, workers)
+    summary = summarize(rows)
+    meta = {"name": name, "split": split, "model": model, "repeats": repeats, "finished_at": f"{datetime.now():%Y-%m-%d %H:%M}",
+            "split_label": "开发题（调提示词用，成绩不算数）" if split == "dev" else "留出题（提示词和评分定下来之后只跑一次）"}
+    for file, content in (("results.json", rows), ("summary.json", summary), ("meta.json", meta)):
+        (out_dir / file).write_text(json.dumps(content, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    markdown = render_summary(summary, meta)
+    (out_dir / "summary.md").write_text(markdown, encoding="utf-8", newline="\n")
+    print(markdown)
+    print(f"完整结果：{out_dir / 'summary.md'}")
+    return 0
+
+
 def agent_review(run_dir: Path, llm_kind: str, script: Path | None) -> int:
     """让复核 Agent 复核一次已保存的运行，把意见写进 review.json 和 review.md（不改 report.md）。发现“错误”级别的问题时返回 1。"""
     from .llm import OpenAICompatibleLLM
@@ -639,6 +723,17 @@ def main(argv: list[str] | None = None) -> int:
     review_parser.add_argument("run_dir", type=Path, help="运行目录（里面有 run.json）")
     review_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 调用真实模型（默认）；fake 按剧本回放")
     review_parser.add_argument("--script", type=Path, help="--llm fake 时使用的剧本文件")
+    query_parser = commands.add_parser("query", help="查询 Agent：把一个分析请求写成只读 SQL，算出结果表（不写报告）")
+    query_parser.add_argument("request", help="例如：2011-W48 GMV 最高的 5 个国家各是多少？")
+    query_parser.add_argument("--data", default="retail", help="口径配置的名字（semantic/<名字>.yaml，默认 retail），或一个 .csv 文件的路径")
+    query_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 调用真实模型（默认）；fake 按剧本回放")
+    query_parser.add_argument("--script", type=Path, help="--llm fake 时使用的剧本文件")
+    eval_query_parser = commands.add_parser("eval-query", help="查询 Agent 的评测：结果和参考 SQL 逐个数对比")
+    eval_query_parser.add_argument("--split", choices=["dev", "holdout"], default="dev", help="dev 开发题；holdout 留出题（只跑一次）")
+    eval_query_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="fake 只检查流程，结果不代表模型表现")
+    eval_query_parser.add_argument("--name", help="结果目录名（eval/results/<name>），默认 query-<split>-<日期>")
+    eval_query_parser.add_argument("--repeats", type=int, default=2, help="每道题每份数据跑几次，默认 2")
+    eval_query_parser.add_argument("--workers", type=int, default=3, help="同时跑几个，默认 3（太多会被模型接口限流）")
     check_attr_parser = commands.add_parser("attribution", help="实验性：核对一份已保存答案里数字的归属（没有达到自定标准，不进报告）")
     check_attr_parser.add_argument("run_dir", type=Path, help="运行目录（里面有 run.json）")
     attr_parser = commands.add_parser("eval-attribution", help="数字归属核对的评测：植入错误看能否指出、原样答案上有多少标记，不调用模型")
@@ -710,6 +805,10 @@ def main(argv: list[str] | None = None) -> int:
             return ask(args.question, args.llm, args.script)
         if args.command == "company-ask":
             return ask(args.question, args.llm, args.script, domain="company")
+        if args.command == "query":
+            return query(args.request, args.data, args.llm, args.script)
+        if args.command == "eval-query":
+            return evaluate_query(args.split, args.llm, args.name, args.repeats, args.workers)
         if args.command == "attribution":
             return check_saved_attribution(args.run_dir)
         if args.command == "eval-attribution":
