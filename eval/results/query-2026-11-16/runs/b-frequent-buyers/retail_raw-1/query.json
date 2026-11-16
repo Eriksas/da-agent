@@ -1,0 +1,71 @@
+{
+  "status": "answered",
+  "request": "2011 年全年下单不少于 10 次的可识别客户有多少位？他们在 2011 年一共贡献了多少 GMV？",
+  "data": "retail_raw",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH base AS (\n  SELECT customer_id, invoice, amount\n  FROM order_lines\n  WHERE line_type = '销售'\n    AND customer_id IS NOT NULL AND customer_id <> ''\n    AND order_date >= DATE '2011-01-01' AND order_date < DATE '2012-01-01'\n), agg AS (\n  SELECT customer_id, COUNT(DISTINCT invoice) AS order_cnt, COUNT(*) AS line_cnt, SUM(amount) AS gmv\n  FROM base GROUP BY customer_id\n), grp AS (\n  SELECT * FROM agg WHERE order_cnt >= 10\n)\nSELECT (SELECT COUNT(*) FROM grp) AS n_customers,\n       (SELECT SUM(order_cnt) FROM grp) AS total_orders,\n       (SELECT SUM(line_cnt) FROM grp) AS total_line_rows,\n       ROUND((SELECT SUM(gmv) FROM grp), 2) AS gmv_total,\n       ROUND((SELECT SUM(gmv) FROM grp) / (SELECT COUNT(*) FROM grp), 2) AS gmv_per_customer,\n       ROUND((SELECT SUM(gmv) FROM grp) / (SELECT SUM(amount) FROM base), 4) AS share_of_identifiable_gmv,\n       ROUND((SELECT SUM(amount) FROM base), 2) AS identifiable_gmv_2011,\n       (SELECT COUNT(*) FROM agg) AS all_identifiable_customers_2011",
+  "columns": [
+    {
+      "name": "n_customers",
+      "meaning": "2011 年下单不少于 10 次的可识别客户数（位）"
+    },
+    {
+      "name": "total_orders",
+      "meaning": "这批客户 2011 年的销售订单数（不同发票号个数，样本量）"
+    },
+    {
+      "name": "total_line_rows",
+      "meaning": "这批客户 2011 年的商品明细行数（记录数，样本量）"
+    },
+    {
+      "name": "gmv_total",
+      "meaning": "这批客户 2011 年贡献的 GMV（英镑，含之后被取消的订单）"
+    },
+    {
+      "name": "gmv_per_customer",
+      "meaning": "这批客户人均 GMV（英镑/人）"
+    },
+    {
+      "name": "share_of_identifiable_gmv",
+      "meaning": "这批客户 GMV 占 2011 年全部可识别客户 GMV 的比例（小数，0.4837=48.37%）"
+    },
+    {
+      "name": "identifiable_gmv_2011",
+      "meaning": "2011 年全部可识别客户（排除缺客户 ID 的订单）的 GMV（英镑）"
+    },
+    {
+      "name": "all_identifiable_customers_2011",
+      "meaning": "2011 年有购买的可识别客户总数（位）"
+    }
+  ],
+  "rows": [
+    {
+      "n_customers": 336,
+      "total_orders": 6480,
+      "total_line_rows": 130372,
+      "gmv_total": 3952500.63,
+      "gmv_per_customer": 11763.39,
+      "share_of_identifiable_gmv": 0.4837,
+      "identifiable_gmv_2011": 8172028.08,
+      "all_identifiable_customers_2011": 4214
+    }
+  ],
+  "row_count": 1,
+  "definition": "时间范围：2011-01-01 至 2011-12-09（按 order_date，数据止于 2011-12-09）。仅取 line_type='销售' 的行；排除客户 ID 缺失（NULL 或空串）的行。下单次数 = 该客户 2011 年销售行中不同发票号（invoice）的个数；筛选 order_cnt>=10 的客户。GMV = 这些客户 2011 年销售行 amount 之和（口径中的商品销售额，含之后被取消的订单），不去重商品行、不扣取消金额。占比分母为 2011 年全部可识别客户的 GMV。",
+  "caveats": [
+    "数据止于 2011-12-09（周五），2011 年最后一周不完整，因此这批客户的 2011 年 GMV 与订单数略有低估。",
+    "“下单次数”按销售发票计数，未把取消单发票算作下单；若把取消单也计入，该门槛下的客户数为 466 位而非 336 位。",
+    "GMV 含之后被取消的订单（未扣减取消金额），符合 GMV 口径；少数金额极大的订单会抬高这些客户的 GMV。",
+    "缺客户 ID 的订单（游客/未登记）不参与客户级统计，其金额也不计入本页任何 GMV 数字。"
+  ],
+  "metrics_used": [],
+  "message": "已提交：2011 年（数据止于 2011-12-09）下单不少于 10 次的可识别客户共 **336 位**，他们 2011 年合计贡献 GMV **£3,952,500.63**（占当年全部可识别客户 GMV £8,172,028.08 的 48.37%，人均 £11,763.39，共 6,480 张销售订单、130,372 行明细）。",
+  "sql_runs": 4,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 21652,
+    "completion_tokens": 2746,
+    "llm_calls": 5
+  },
+  "seconds": 26.74
+}

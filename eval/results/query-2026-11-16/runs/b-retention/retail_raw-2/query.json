@@ -1,0 +1,50 @@
+{
+  "status": "answered",
+  "request": "2011 年 10 月有购买的可识别客户有多少位？其中多少位在 2011 年 11 月又购买了？占 10 月购买客户的比例是多少？",
+  "data": "retail_raw",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH oct_cust AS (\n  SELECT DISTINCT customer_id\n  FROM order_lines\n  WHERE line_type = '销售' AND month = '2011-10' AND customer_id IS NOT NULL\n), nov_cust AS (\n  SELECT DISTINCT customer_id\n  FROM order_lines\n  WHERE line_type = '销售' AND month = '2011-11' AND customer_id IS NOT NULL\n), base AS (\n  SELECT\n    (SELECT count(*) FROM oct_cust) AS oct_customers,\n    (SELECT count(*) FROM nov_cust) AS nov_customers,\n    (SELECT count(*) FROM oct_cust o JOIN nov_cust n USING (customer_id)) AS retained_customers,\n    (SELECT count(DISTINCT invoice) FROM order_lines WHERE line_type = '销售' AND month = '2011-10') AS oct_invoices,\n    (SELECT count(DISTINCT invoice) FROM order_lines WHERE line_type = '销售' AND month = '2011-11') AS nov_invoices\n)\nSELECT\n  oct_customers,\n  nov_customers,\n  retained_customers,\n  round(retained_customers::DOUBLE / oct_customers, 4) AS retention_rate\nFROM base",
+  "columns": [
+    {
+      "name": "oct_customers",
+      "meaning": "2011 年 10 月有购买的可识别客户数（位）"
+    },
+    {
+      "name": "nov_customers",
+      "meaning": "2011 年 11 月有购买的可识别客户数（位，仅作参考）"
+    },
+    {
+      "name": "retained_customers",
+      "meaning": "其中在 2011 年 11 月又购买的可识别客户数（位）"
+    },
+    {
+      "name": "retention_rate",
+      "meaning": "11 月复购客户占 10 月购买客户的比例（小数，0.4526 = 45.26%）"
+    }
+  ],
+  "rows": [
+    {
+      "oct_customers": 1361,
+      "nov_customers": 1660,
+      "retained_customers": 616,
+      "retention_rate": 0.4526
+    }
+  ],
+  "row_count": 1,
+  "definition": "客户 = customer_id 非空的可识别客户（缺失客户 ID 的游客/未登记订单不计入客户数）；购买 = line_type='销售' 的销售行（取消单不算购买）；时间范围用 month 列（2011-10、2011-11，与 order_date 口径一致，已核对）；10 月客户集合与 11 月客户集合按 customer_id 求交集得复购客户；比例 = 复购客户数 ÷ 10 月购买客户数，保留 4 位小数。",
+  "caveats": [
+    "比例是按 10 月购买客户为分母的月度复购率，未剔除 11 月只买过一次的小额订单。",
+    "10 月样本量：1,361 位可识别客户、2,005 张销售发票；11 月：1,660 位客户、2,751 张销售发票。",
+    "约 22% 的销售行缺客户 ID，这些金额计入 GMV 但不计入客户数，可能使客户口径下的统计偏低。"
+  ],
+  "metrics_used": [],
+  "message": "已提交：2011 年 10 月有购买的可识别客户 1,361 位（11 月为 1,660 位），其中 616 位在 11 月再次购买，月度复购比例为 0.4526（45.26%）。",
+  "sql_runs": 2,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 12758,
+    "completion_tokens": 1537,
+    "llm_calls": 4
+  },
+  "seconds": 17.88
+}

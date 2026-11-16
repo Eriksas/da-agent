@@ -1,0 +1,64 @@
+{
+  "status": "answered",
+  "request": "2011 年 11 月，按下单的小时（0–23 点）统计订单数，订单最多的 3 个小时是哪几个，各有多少订单？",
+  "data": "retail",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH hourly AS (\n  SELECT EXTRACT(hour FROM order_time) AS order_hour,\n         count(DISTINCT order_id) AS orders,\n         count(*) FILTER (WHERE line_type = '销售') AS sales_lines\n  FROM order_lines\n  WHERE month = '2011-11'\n  GROUP BY 1\n)\nSELECT order_hour,\n       orders,\n       sales_lines,\n       round(orders * 1.0 / sum(orders) OVER (), 4) AS share_of_month_orders\nFROM hourly\nORDER BY orders DESC\nLIMIT 3",
+  "columns": [
+    {
+      "name": "order_hour",
+      "meaning": "下单小时（0–23，取自 order_time 的小时部分）"
+    },
+    {
+      "name": "orders",
+      "meaning": "该小时内的订单数（去重发票号 count(DISTINCT order_id)，只含销售订单）"
+    },
+    {
+      "name": "sales_lines",
+      "meaning": "该小时内的销售商品行数（记录数，用于判断样本量）"
+    },
+    {
+      "name": "share_of_month_orders",
+      "meaning": "该小时订单数占 2011-11 全部订单数（2751 单）的比例，小数，0.1585 = 15.85%"
+    }
+  ],
+  "rows": [
+    {
+      "order_hour": 12,
+      "orders": 436,
+      "sales_lines": 12111,
+      "share_of_month_orders": 0.1585
+    },
+    {
+      "order_hour": 13,
+      "orders": 396,
+      "sales_lines": 10364,
+      "share_of_month_orders": 0.1439
+    },
+    {
+      "order_hour": 14,
+      "orders": 337,
+      "sales_lines": 9847,
+      "share_of_month_orders": 0.1225
+    }
+  ],
+  "row_count": 3,
+  "definition": "时间范围：month = '2011-11'（2011-11-01 08:16 至 2011-11-30 17:42）。按 order_time 的小时（EXTRACT(hour)）分组；订单数按口径表用 count(DISTINCT order_id)（只数销售订单，取消行 order_id 为空故不计入）；sales_lines 为该小时 line_type='销售' 的行数；share 为该小时订单数除以全月订单总数 2751，round 到 4 位小数；按订单数降序取前 3。",
+  "caveats": [
+    "取消单的 order_id 为空，订单数只统计销售订单；取消单在下单小时分布上与销售订单不同。",
+    "各小时样本量差异大：15 点虽有 15422 条销售行但只有 302 单，订单数排名靠后，说明单笔订单商品件数差异明显。",
+    "19–20 点只有零星几单，不构成稳定的高峰；全月有销售的天数为 26 天。"
+  ],
+  "metrics_used": [
+    "orders"
+  ],
+  "message": "已提交：2011 年 11 月按下单小时统计的订单数 Top 3 为 12 点（436 单，占全月 15.85%）、13 点（396 单，14.39%）和 14 点（337 单，12.25%），并附带各小时销售行数与占全月订单（2751 单）的比例。",
+  "sql_runs": 3,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 17495,
+    "completion_tokens": 1946,
+    "llm_calls": 4
+  },
+  "seconds": 15.59
+}

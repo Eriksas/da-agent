@@ -1,0 +1,147 @@
+{
+  "run_id": "20261116T105220-17c42e",
+  "question": "2011 年每个季度的 GMV 和订单数各是多少？",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "max_tool_calls": 8,
+  "use_skills": true,
+  "domain": "analyst",
+  "status": "completed",
+  "answer": "已提交 2011 年分季度的 GMV（sum(gmv_amount)）与订单数（count(DISTINCT order_id)）结果，共 4 行，并附各季度数据起止日期、明细行数与交易天数作为样本量参考（注意 Q4 只到 2011-12-09、Q1 因年末停业自 01-04 起算，两端均不完整）。",
+  "error": null,
+  "budget_exhausted": false,
+  "repair": null,
+  "malformed_replies": 0,
+  "steps": [
+    {
+      "round": 1,
+      "tool": "run_sql",
+      "arguments": {
+        "sql": "SELECT\n  date_part('quarter', order_date) AS quarter,\n  min(order_date) AS first_date,\n  max(order_date) AS last_date,\n  count(*) AS line_count,\n  sum(gmv_amount) AS gmv,\n  count(DISTINCT order_id) AS orders\nFROM order_lines\nWHERE order_date >= '2011-01-01' AND order_date < '2012-01-01'\nGROUP BY 1\nORDER BY 1",
+        "purpose": "看 2011 年各季度 GMV、订单数与覆盖日期"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 17
+    },
+    {
+      "round": 2,
+      "tool": "run_sql",
+      "arguments": {
+        "sql": "SELECT\n  '2011-Q' || date_part('quarter', order_date) AS quarter,\n  min(order_date) AS data_start,\n  max(order_date) AS data_end,\n  round(sum(gmv_amount), 2) AS gmv_gbp,\n  count(DISTINCT order_id) AS orders,\n  count(*) AS line_count,\n  count(DISTINCT order_date) FILTER (WHERE line_type = '销售') AS trading_days\nFROM order_lines\nWHERE order_date >= '2011-01-01' AND order_date < '2012-01-01'\nGROUP BY date_part('quarter', order_date)\nORDER BY date_part('quarter', order_date)",
+        "purpose": "确认最终输出格式（含交易天数与明细行数）"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 26
+    },
+    {
+      "round": 3,
+      "tool": "submit_query",
+      "arguments": {
+        "sql": "SELECT\n  '2011-Q' || date_part('quarter', order_date) AS quarter,\n  min(order_date) AS data_start,\n  max(order_date) AS data_end,\n  round(sum(gmv_amount), 2) AS gmv_gbp,\n  count(DISTINCT order_id) AS orders,\n  count(*) AS line_count,\n  count(DISTINCT order_date) FILTER (WHERE line_type = '销售') AS trading_days\nFROM order_lines\nWHERE order_date >= '2011-01-01' AND order_date < '2012-01-01'\nGROUP BY date_part('quarter', order_date)\nORDER BY date_part('quarter', order_date)",
+        "columns": {
+          "quarter": "季度（2011 年内，按 order_date 自然季度划分）",
+          "data_start": "该季度内第一条记录的下单日期",
+          "data_end": "该季度内最后一条记录的下单日期",
+          "gmv_gbp": "GMV（英镑）= sum(gmv_amount)，含之后被取消的订单（取消行贡献 0）",
+          "orders": "订单数 = count(DISTINCT order_id)，只统计销售订单",
+          "line_count": "该季度的商品明细行数（样本量参考）",
+          "trading_days": "该季度有销售的日期数"
+        },
+        "definition": "时间范围：order_date 在 2011-01-01 至 2011-12-31 之间的所有行（含销售行与取消行）。按 order_date 的自然季度分组。GMV 用 sum(gmv_amount)（销售行计入 amount，取消行为 0，即下单口径）；订单数用 count(DISTINCT order_id)（只数销售发票号）。同时给出每季度明细行数与有销售的交易天数作为样本量参考。",
+        "caveats": [
+          "2011-Q4 不完整：数据只到 2011-12-09（周五），该季度缺少 12-10 至 12-31 约 3 周，含 11-12 旺季（圣诞季），因此 Q4 的 GMV 与订单数被明显低估，不可与 Q1–Q3 直接比较。",
+          "2011-Q1 也不完整：店铺 2010-12-23 至 2011-01-03 停业，Q1 只有 75 个交易日（Q2 72 天、Q3 78 天、Q4 60 天）。",
+          "GMV 为下单口径，含之后被取消的订单；取消单按取消发生时间入账，不回溯原订单季度。",
+          "个别金额极大的订单（如发票 541431、581483）会抬高所在季度的 GMV，但对净销售额无影响。"
+        ]
+      },
+      "ok": true,
+      "error": null,
+      "ms": 23
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 15138,
+    "completion_tokens": 1306,
+    "llm_calls": 4
+  },
+  "started_at": "2026-11-16T02:52:20+00:00",
+  "seconds": 12.67,
+  "messages": [
+    {
+      "role": "system",
+      "content": "你是一名数据分析师，负责把一个分析请求写成 SQL 并算出结果。你不写报告，只负责把数算对；结果会交给另一位同事去解读。\n\n## 数据\n\n数据：电商交易（UCI Online Retail II，已清洗）。一家英国线上礼品批发零售商 2009-12 至 2011-12 的商品交易明细。清洗规则已经应用： 删除了重复、坏账调整、单价为 0 等记录，运费等非商品行不在表里。金额单位是英镑。\n\n### 表 order_lines（1,021,272 行）\n每行是订单里的一个商品（销售）或取消单里的一个商品（取消）。金额和数量都是正数，用 line_type 区分。\n\n| 列 | 类型 | 说明 | 取值 |\n|---|---|---|---|\n| invoice | VARCHAR | 发票号（订单号）；C 开头的是取消单 | 46,922 种，例如 573585、581219、581492、580729、558475 |\n| line_type | VARCHAR | 销售 / 取消 | 全部取值：销售、取消 |\n| order_time | TIMESTAMP | 下单（或取消）时间 | 2009-12-01 07:45:00 至 2011-12-09 12:50:00 |\n| order_date | DATE | 下单（或取消）日期 | 2009-12-01 至 2011-12-09 |\n| week | VARCHAR | ISO 周（周一到周日），写法如 2011-W48 | 104 种，例如 2011-W46、2011-W47、2011-W45、2010-W47、2011-W48 |\n| month | VARCHAR | 月份，写法如 2011-11 | 25 种，例如 2011-11、2010-11、2011-10、2010-10、2011-09 |\n| stock_code | VARCHAR | 商品编码 | 4,909 种，例如 85123A、22423、85099B、21212、20725 |\n| description | VARCHAR | 商品名称 | 5,351 种，例如 WHITE HANGING HEART T-LIGHT HOLDER、REGENCY CAKESTAND 3 TIER、JUMBO BAG RED RETROSPOT、ASSORTED COLOUR BIRD ORNAMENT、PARTY BUNTING |\n| quantity | BIGINT | 数量（正数） | 1 至 80995 |\n| price | DOUBLE | 单价 | 0.001 至 1157.15 |\n| amount | DOUBLE | 金额 = 数量 × 单价（正数；销售行和取消行都是正数，不能直接相加） | 0.001 至 168469.6 |\n| customer_id | VARCHAR | 客户 ID；缺失表示游客或未登记客户 | 5,875 种，例如 17841、14911、12748、14606、14096；22.2% 为空 |\n| customer_type | VARCHAR | 新客（这位客户第一次购买就在这一行所在的周）/ 老客 / 未知（缺客户 ID） | 全部取值：老客、未知、新客 |\n| country | VARCHAR | 客户所在国家（英文；Unspecified、European Community 归为“国家不明确”） | 42 种，例如 United Kingdom、EIRE、Germany、France、Netherlands |\n| gmv_amount | DOUBLE | 计入 GMV 的金额：销售行等于 amount，取消行是 0 | 0.0 至 168469.6 |\n| cancelled_amount | DOUBLE | 取消金额：取消行等于 amount，销售行是 0 | 0.0 至 168469.6 |\n| net_amount | DOUBLE | 计入净销售额的金额：销售行是 amount，取消行是 -amount | -168469.6 至 168469.6 |\n| order_id | VARCHAR | 订单号：销售行等于 invoice，取消行为空（所以 count(DISTINCT order_id) 只数销售订单） | 39,516 种，例如 573585、581219、581492、580729、558475；1.8% 为空 |\n| buyer_id | VARCHAR | 购买客户：销售行等于 customer_id，取消行为空 | 5,852 种，例如 17841、14911、12748、14606、14096；24.0% 为空 |\n\n### 指标口径（用到这些指标时，必须照这里的表达式写）\n\n| 指标 | 表 | 表达式 | 口径 |\n|---|---|---|---|\n| GMV（gmv） | order_lines | `sum(gmv_amount)` | 商品销售额（下单口径）：数量 × 单价之和，含之后被取消的订单 |\n| 取消金额（cancelled_amount） | order_lines | `sum(cancelled_amount)` | 这段时间里取消单的商品金额（正数）；可能对应更早下的订单 |\n| 净销售额（net_sales） | order_lines | `sum(net_amount)` | GMV − 取消金额 |\n| 取消率（cancel_rate） | order_lines | `sum(cancelled_amount) / sum(gmv_amount)` | 取消金额 ÷ GMV；分子分母不一定是同一批订单 |\n| 订单数（orders） | order_lines | `count(DISTINCT order_id)` | 不同发票号的个数，只数销售订单 |\n| 客单价（aov） | order_lines | `sum(gmv_amount) / count(DISTINCT order_id)` | GMV ÷ 订单数 |\n| 活跃客户数（active_customers） | order_lines | `count(DISTINCT buyer_id)` | 有购买的可识别客户数（不含缺客户 ID 的订单） |\n| 新客数（new_customers） | order_lines | `count(DISTINCT buyer_id) FILTER (WHERE customer_type = '新客')` | 第一次购买落在当周的客户数；只适合按单个周统计。越靠近数据起点（2009-12），越可能把老客算成新客 |\n| 交易天数（trading_days） | order_lines | `count(DISTINCT order_date) FILTER (WHERE line_type = '销售')` | 有销售的日期数 |\n\n### 注意\n- 周是 ISO 周；数据截止到 2011-12-09（周五），所以 2011-W49 不是完整的一周，和完整的周比总量会偏低。\n- 2010-12-23 到 2011-01-03 停业，这期间没有数据。\n- 约四分之一的行缺客户 ID：按客户统计（活跃客户、新老客）时这些行不计入，但它们的金额计入 GMV。\n- 取消单按取消发生的时间入账，不回溯到原订单所在的周。\n- 有少数金额极大、下单后很快又全部取消的订单（例如发票 541431、581483），会抬高当周的 GMV 和商品排名；净销售额不受影响。\n\n\n## 怎么做\n\n1. SQL 用 DuckDB 的写法。每次只能执行一条 SELECT（可以用 WITH），只能读上面列出的表，不能修改任何东西。\n2. 上面有“指标口径”时，用到这些指标就照抄它的表达式，不要自己另写一种算法。请求里的指标不在口径表里时，自己决定怎么算，并在 definition 里写清楚。\n3. 先用 run_sql 试，看结果是否合理（行数、数量级、有没有空值、筛选条件有没有写对取值），再用 submit_query 提交最终的那一条查询。\n4. 提交的结果就是交出去的全部内容：一条查询，不超过 200 行。请求要哪些数，就只返回算出这些数需要的行和列；要对比两个时期或两个分组时，把它们放在同一条查询的结果里。\n5. 每一列用 AS 起一个看得懂的列名，并在 columns 里写明含义和单位。比率用小数表示（0.1234 表示 12.34%）并在说明里写明。\n6. 金额保留 2 位小数，比率保留 4 位小数（用 round）。\n7. 按分组比较时，带上每组的样本量（订单数、记录数）这一列，方便判断样本够不够；并按请求的要求排序。\n8. 发现结果需要提醒（样本很少、时间段不完整、有空值）时，写进 caveats。\n9. 数据里没有请求需要的信息（例如没有成本就算不了利润，日期超出数据范围），或者请求含糊到无法确定要算什么：不要提交，不要猜，直接用文字说明原因。\n10. 最多调用 8 次工具，够用就停。\n\n提交成功后，用一句话说明交出的结果是什么。\n"
+    },
+    {
+      "role": "user",
+      "content": "2011 年每个季度的 GMV 和订单数各是多少？"
+    },
+    {
+      "content": "",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_e8e0ab720dcf44d9909992bb",
+          "function": {
+            "arguments": "{\"sql\": \"SELECT\\n  date_part('quarter', order_date) AS quarter,\\n  min(order_date) AS first_date,\\n  max(order_date) AS last_date,\\n  count(*) AS line_count,\\n  sum(gmv_amount) AS gmv,\\n  count(DISTINCT order_id) AS orders\\nFROM order_lines\\nWHERE order_date >= '2011-01-01' AND order_date < '2012-01-01'\\nGROUP BY 1\\nORDER BY 1\", \"purpose\": \"看 2011 年各季度 GMV、订单数与覆盖日期\"}",
+            "name": "run_sql"
+          },
+          "type": "function",
+          "index": 0
+        }
+      ],
+      "reasoning_content": "Need quarterly GMV and orders for 2011. Use order_date quarter. Note Q4 2011 is incomplete (data ends 2011-12-09).\n\nLet's write query.\n\nNote: order_lines has order_date. Use strftime or date_part('quarter', order_date).\n\nAlso should I include record counts? The request asks GMV and orders per quarter. Include lines count maybe for sample size. Let's include line count as sample.\n\nLet's run it."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_e8e0ab720dcf44d9909992bb",
+      "content": "{\"tool\": \"run_sql\", \"purpose\": \"看 2011 年各季度 GMV、订单数与覆盖日期\", \"columns\": [\"quarter\", \"first_date\", \"last_date\", \"line_count\", \"gmv\", \"orders\"], \"rows\": [{\"quarter\": 1, \"first_date\": \"2011-01-04\", \"last_date\": \"2011-03-31\", \"line_count\": 97675, \"gmv\": 1868013.62, \"orders\": 3614}, {\"quarter\": 2, \"first_date\": \"2011-04-01\", \"last_date\": \"2011-06-30\", \"line_count\": 101742, \"gmv\": 1992889.971, \"orders\": 4428}, {\"quarter\": 3, \"first_date\": \"2011-07-01\", \"last_date\": \"2011-09-30\", \"line_count\": 123010, \"gmv\": 2440756.222, \"orders\": 4609}, {\"quarter\": 4, \"first_date\": \"2011-10-02\", \"last_date\": \"2011-12-09\", \"line_count\": 167266, \"gmv\": 3169921.15, \"orders\": 5572}], \"row_count\": 4}"
+    },
+    {
+      "content": "",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_603698110fbc43d5811a35ed",
+          "function": {
+            "arguments": "{\"sql\": \"SELECT\\n  '2011-Q' || date_part('quarter', order_date) AS quarter,\\n  min(order_date) AS data_start,\\n  max(order_date) AS data_end,\\n  round(sum(gmv_amount), 2) AS gmv_gbp,\\n  count(DISTINCT order_id) AS orders,\\n  count(*) AS line_count,\\n  count(DISTINCT order_date) FILTER (WHERE line_type = '销售') AS trading_days\\nFROM order_lines\\nWHERE order_date >= '2011-01-01' AND order_date < '2012-01-01'\\nGROUP BY date_part('quarter', order_date)\\nORDER BY date_part('quarter', order_date)\", \"purpose\": \"确认最终输出格式（含交易天数与明细行数）\"}",
+            "name": "run_sql"
+          },
+          "type": "function",
+          "index": 0
+        }
+      ],
+      "reasoning_content": "Q1 starts 2011-01-04 because shutdown 2010-12-23 to 2011-01-03. Q4 ends 2011-12-09, incomplete.\n\nAdd aov maybe? Not requested. Keep columns: quarter, gmv, orders, and maybe trading days / line count. The instruction says include sample size columns when comparing groups. Orders is the sample size essentially. I'll include line_count and trading_days maybe. Keep it simple: quarter, quarter_label, gmv, orders, and trading days count for context? I'll include line_count (明细行数) and trading_days.\n\nLet's produce final query with rounds."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_603698110fbc43d5811a35ed",
+      "content": "{\"tool\": \"run_sql\", \"purpose\": \"确认最终输出格式（含交易天数与明细行数）\", \"columns\": [\"quarter\", \"data_start\", \"data_end\", \"gmv_gbp\", \"orders\", \"line_count\", \"trading_days\"], \"rows\": [{\"quarter\": \"2011-Q1\", \"data_start\": \"2011-01-04\", \"data_end\": \"2011-03-31\", \"gmv_gbp\": 1868013.62, \"orders\": 3614, \"line_count\": 97675, \"trading_days\": 75}, {\"quarter\": \"2011-Q2\", \"data_start\": \"2011-04-01\", \"data_end\": \"2011-06-30\", \"gmv_gbp\": 1992889.97, \"orders\": 4428, \"line_count\": 101742, \"trading_days\": 72}, {\"quarter\": \"2011-Q3\", \"data_start\": \"2011-07-01\", \"data_end\": \"2011-09-30\", \"gmv_gbp\": 2440756.22, \"orders\": 4609, \"line_count\": 123010, \"trading_days\": 78}, {\"quarter\": \"2011-Q4\", \"data_start\": \"2011-10-02\", \"data_end\": \"2011-12-09\", \"gmv_gbp\": 3169921.15, \"orders\": 5572, \"line_count\": 167266, \"trading_days\": 60}], \"row_count\": 4}"
+    },
+    {
+      "content": "",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_f6f2df04316647f0b820387a",
+          "function": {
+            "arguments": "{\"sql\": \"SELECT\\n  '2011-Q' || date_part('quarter', order_date) AS quarter,\\n  min(order_date) AS data_start,\\n  max(order_date) AS data_end,\\n  round(sum(gmv_amount), 2) AS gmv_gbp,\\n  count(DISTINCT order_id) AS orders,\\n  count(*) AS line_count,\\n  count(DISTINCT order_date) FILTER (WHERE line_type = '销售') AS trading_days\\nFROM order_lines\\nWHERE order_date >= '2011-01-01' AND order_date < '2012-01-01'\\nGROUP BY date_part('quarter', order_date)\\nORDER BY date_part('quarter', order_date)\", \"columns\": {\"quarter\": \"季度（2011 年内，按 order_date 自然季度划分）\", \"data_start\": \"该季度内第一条记录的下单日期\", \"data_end\": \"该季度内最后一条记录的下单日期\", \"gmv_gbp\": \"GMV（英镑）= sum(gmv_amount)，含之后被取消的订单（取消行贡献 0）\", \"orders\": \"订单数 = count(DISTINCT order_id)，只统计销售订单\", \"line_count\": \"该季度的商品明细行数（样本量参考）\", \"trading_days\": \"该季度有销售的日期数\"}, \"definition\": \"时间范围：order_date 在 2011-01-01 至 2011-12-31 之间的所有行（含销售行与取消行）。按 order_date 的自然季度分组。GMV 用 sum(gmv_amount)（销售行计入 amount，取消行为 0，即下单口径）；订单数用 count(DISTINCT order_id)（只数销售发票号）。同时给出每季度明细行数与有销售的交易天数作为样本量参考。\", \"caveats\": [\"2011-Q4 不完整：数据只到 2011-12-09（周五），该季度缺少 12-10 至 12-31 约 3 周，含 11-12 旺季（圣诞季），因此 Q4 的 GMV 与订单数被明显低估，不可与 Q1–Q3 直接比较。\", \"2011-Q1 也不完整：店铺 2010-12-23 至 2011-01-03 停业，Q1 只有 75 个交易日（Q2 72 天、Q3 78 天、Q4 60 天）。\", \"GMV 为下单口径，含之后被取消的订单；取消单按取消发生时间入账，不回溯原订单季度。\", \"个别金额极大的订单（如发票 541431、581483）会抬高所在季度的 GMV，但对净销售额无影响。\"]}",
+            "name": "submit_query"
+          },
+          "type": "function",
+          "index": 0
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_f6f2df04316647f0b820387a",
+      "content": "{\"tool\": \"submit_query\", \"accepted\": true, \"sql\": \"SELECT\\n  '2011-Q' || date_part('quarter', order_date) AS quarter,\\n  min(order_date) AS data_start,\\n  max(order_date) AS data_end,\\n  round(sum(gmv_amount), 2) AS gmv_gbp,\\n  count(DISTINCT order_id) AS orders,\\n  count(*) AS line_count,\\n  count(DISTINCT order_date) FILTER (WHERE line_type = '销售') AS trading_days\\nFROM order_lines\\nWHERE order_date >= '2011-01-01' AND order_date < '2012-01-01'\\nGROUP BY date_part('quarter', order_date)\\nORDER BY date_part('quarter', order_date)\", \"columns\": [{\"name\": \"quarter\", \"meaning\": \"季度（2011 年内，按 order_date 自然季度划分）\"}, {\"name\": \"data_start\", \"meaning\": \"该季度内第一条记录的下单日期\"}, {\"name\": \"data_end\", \"meaning\": \"该季度内最后一条记录的下单日期\"}, {\"name\": \"gmv_gbp\", \"meaning\": \"GMV（英镑）= sum(gmv_amount)，含之后被取消的订单（取消行贡献 0）\"}, {\"name\": \"orders\", \"meaning\": \"订单数 = count(DISTINCT order_id)，只统计销售订单\"}, {\"name\": \"line_count\", \"meaning\": \"该季度的商品明细行数（样本量参考）\"}, {\"name\": \"trading_days\", \"meaning\": \"该季度有销售的日期数\"}], \"rows\": [{\"quarter\": \"2011-Q1\", \"data_start\": \"2011-01-04\", \"data_end\": \"2011-03-31\", \"gmv_gbp\": 1868013.62, \"orders\": 3614, \"line_count\": 97675, \"trading_days\": 75}, {\"quarter\": \"2011-Q2\", \"data_start\": \"2011-04-01\", \"data_end\": \"2011-06-30\", \"gmv_gbp\": 1992889.97, \"orders\": 4428, \"line_count\": 101742, \"trading_days\": 72}, {\"quarter\": \"2011-Q3\", \"data_start\": \"2011-07-01\", \"data_end\": \"2011-09-30\", \"gmv_gbp\": 2440756.22, \"orders\": 4609, \"line_count\": 123010, \"trading_days\": 78}, {\"quarter\": \"2011-Q4\", \"data_start\": \"2011-10-02\", \"data_end\": \"2011-12-09\", \"gmv_gbp\": 3169921.15, \"orders\": 5572, \"line_count\": 167266, \"trading_days\": 60}], \"row_count\": 4, \"definition\": \"时间范围：order_date 在 2011-01-01 至 2011-12-31 之间的所有行（含销售行与取消行）。按 order_date 的自然季度分组。GMV 用 sum(gmv_amount)（销售行计入 amount，取消行为 0，即下单口径）；订单数用 count(DISTINCT order_id)（只数销售发票号）。同时给出每季度明细行数与有销售的交易天数作为样本量参考。\", \"caveats\": [\"2011-Q4 不完整：数据只到 2011-12-09（周五），该季度缺少 12-10 至 12-31 约 3 周，含 11-12 旺季（圣诞季），因此 Q4 的 GMV 与订单数被明显低估，不可与 Q1–Q3 直接比较。\", \"2011-Q1 也不完整：店铺 2010-12-23 至 2011-01-03 停业，Q1 只有 75 个交易日（Q2 72 天、Q3 78 天、Q4 60 天）。\", \"GMV 为下单口径，含之后被取消的订单；取消单按取消发生时间入账，不回溯原订单季度。\", \"个别金额极大的订单（如发票 541431、581483）会抬高所在季度的 GMV，但对净销售额无影响。\"], \"metrics_used\": [\"gmv\", \"orders\", \"trading_days\"]}"
+    },
+    {
+      "content": "已提交 2011 年分季度的 GMV（sum(gmv_amount)）与订单数（count(DISTINCT order_id)）结果，共 4 行，并附各季度数据起止日期、明细行数与交易天数作为样本量参考（注意 Q4 只到 2011-12-09、Q1 因年末停业自 01-04 起算，两端均不完整）。",
+      "role": "assistant"
+    }
+  ]
+}

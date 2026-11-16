@@ -1,0 +1,123 @@
+{
+  "status": "answered",
+  "request": "2011-W41 相比 2011-W40，GMV 增加金额最大的 5 个商品（按商品编码）是哪些？给出各自 W41 的 GMV 和增加额。",
+  "data": "retail",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH desc_map AS (\n  SELECT stock_code, description\n  FROM (SELECT stock_code, description, count(*) AS c,\n               row_number() OVER (PARTITION BY stock_code ORDER BY count(*) DESC, description) AS rn\n        FROM order_lines GROUP BY stock_code, description)\n  WHERE rn = 1\n), per_week AS (\n  SELECT stock_code,\n         sum(gmv_amount) FILTER (WHERE week='2011-W41') AS gmv_w41,\n         sum(gmv_amount) FILTER (WHERE week='2011-W40') AS gmv_w40,\n         count(DISTINCT order_id) FILTER (WHERE week='2011-W41') AS orders_w41,\n         count(DISTINCT order_id) FILTER (WHERE week='2011-W40') AS orders_w40,\n         count(*) FILTER (WHERE week='2011-W41' AND line_type='销售') AS lines_w41,\n         count(*) FILTER (WHERE week='2011-W40' AND line_type='销售') AS lines_w40\n  FROM order_lines\n  WHERE week IN ('2011-W40','2011-W41')\n  GROUP BY stock_code\n)\nSELECT p.stock_code, d.description,\n       round(p.gmv_w41,2) AS gmv_w41,\n       round(p.gmv_w40,2) AS gmv_w40,\n       round(p.gmv_w41 - p.gmv_w40,2) AS gmv_increase,\n       p.orders_w41, p.orders_w40, p.lines_w41, p.lines_w40\nFROM per_week p JOIN desc_map d USING (stock_code)\nORDER BY gmv_increase DESC\nLIMIT 5",
+  "columns": [
+    {
+      "name": "stock_code",
+      "meaning": "商品编码"
+    },
+    {
+      "name": "description",
+      "meaning": "商品名称（该编码出现次数最多的名称）"
+    },
+    {
+      "name": "gmv_w41",
+      "meaning": "2011-W41 的 GMV（英镑）"
+    },
+    {
+      "name": "gmv_w40",
+      "meaning": "2011-W40 的 GMV（英镑）"
+    },
+    {
+      "name": "gmv_increase",
+      "meaning": "GMV 增加额 = W41 − W40（英镑）"
+    },
+    {
+      "name": "orders_w41",
+      "meaning": "2011-W41 含该商品的销售订单数（去重 order_id）"
+    },
+    {
+      "name": "orders_w40",
+      "meaning": "2011-W40 含该商品的销售订单数（去重 order_id）"
+    },
+    {
+      "name": "lines_w41",
+      "meaning": "2011-W41 该商品的销售明细行数"
+    },
+    {
+      "name": "lines_w40",
+      "meaning": "2011-W40 该商品的销售明细行数"
+    }
+  ],
+  "rows": [
+    {
+      "stock_code": "85123A",
+      "description": "WHITE HANGING HEART T-LIGHT HOLDER",
+      "gmv_w41": 1866.49,
+      "gmv_w40": 497.89,
+      "gmv_increase": 1368.6,
+      "orders_w41": 38,
+      "orders_w40": 30,
+      "lines_w41": 39,
+      "lines_w40": 30
+    },
+    {
+      "stock_code": "23046",
+      "description": "PAPER LANTERN 9 POINT DELUXE STAR",
+      "gmv_w41": 1419.9,
+      "gmv_w40": 73.15,
+      "gmv_increase": 1346.75,
+      "orders_w41": 4,
+      "orders_w40": 2,
+      "lines_w41": 4,
+      "lines_w40": 2
+    },
+    {
+      "stock_code": "84029E",
+      "description": "RED WOOLLY HOTTIE WHITE HEART.",
+      "gmv_w41": 1213.15,
+      "gmv_w40": 248.18,
+      "gmv_increase": 964.97,
+      "orders_w41": 16,
+      "orders_w40": 9,
+      "lines_w41": 16,
+      "lines_w40": 9
+    },
+    {
+      "stock_code": "23040",
+      "description": "PAPER LANTERN 9 POINT SNOW STAR",
+      "gmv_w41": 611.25,
+      "gmv_w40": 17.25,
+      "gmv_increase": 594.0,
+      "orders_w41": 2,
+      "orders_w40": 2,
+      "lines_w41": 3,
+      "lines_w40": 2
+    },
+    {
+      "stock_code": "21787",
+      "description": "RAIN PONCHO RETROSPOT",
+      "gmv_w41": 613.63,
+      "gmv_w40": 30.39,
+      "gmv_increase": 583.24,
+      "orders_w41": 3,
+      "orders_w40": 5,
+      "lines_w41": 3,
+      "lines_w40": 5
+    }
+  ],
+  "row_count": 5,
+  "definition": "在 order_lines 上按 week 分组、对每个商品编码汇总 GMV（口径：sum(gmv_amount)，即销售行计金额、取消行为 0，属“下单口径”）。取 2011-W41 与 2011-W40 两个完整自然周（2011-10-03~10-09 与 2011-10-10~10-16）的 per-stock_code GMV，增加额 = W41 GMV − W40 GMV，按增加额降序取前 5。样本量列：销售订单数用 count(DISTINCT order_id)（只含销售订单），明细行数只计 line_type='销售' 的行；商品名称取该编码下出现次数最多的 description。",
+  "caveats": [
+    "GMV 为下单口径（取消行 gmv_amount=0），本周发生的取消不回冲本周 GMV；同一商品若被取消，净销售额会低于此 GMV。",
+    "23046、23040、21787 的样本很小（各 2~5 笔订单），单笔大额订单即可决定其排名与增加额；85123A、84029E 样本相对较厚（38、16 笔）。",
+    "整体上 W41 GMV（221,268.10 英镑）低于 W40（310,948.14 英镑），因此这些是“逆势上升”的商品；仅比较两周可能受季节性（10 月圣诞备货）影响。",
+    "商品名称同一编码可能对应多个描述（已取最常见描述），排名按商品编码而非名称。"
+  ],
+  "metrics_used": [
+    "gmv",
+    "orders"
+  ],
+  "message": "已提交：2011-W41 相比 2011-W40 GMV 增加最多的 5 个商品编码及其 W41 GMV 与增加额——85123A（1866.49，+1368.60）、23046（1419.90，+1346.75）、84029E（1213.15，+964.97）、23040（611.25，+594.00）、21787（613.63，+583.24），并附各商品两周的销售订单数与明细行数作样本量参考。",
+  "sql_runs": 6,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 34587,
+    "completion_tokens": 3423,
+    "llm_calls": 6
+  },
+  "seconds": 33.28
+}

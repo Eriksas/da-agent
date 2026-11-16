@@ -1,0 +1,102 @@
+{
+  "status": "answered",
+  "request": "2011 年 11 月，按星期几（周一到周日）分别合计，每一天的 GMV 和订单数各是多少？",
+  "data": "retail",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH calendar(weekday_cn, dow_num) AS (\n  VALUES ('周一',1),('周二',2),('周三',3),('周四',4),('周五',5),('周六',6),('周日',7)\n), agg AS (\n  SELECT isodow(order_date) AS dow_num,\n         round(sum(gmv_amount), 2) AS gmv,\n         count(DISTINCT order_id) AS orders,\n         count(*) FILTER (WHERE line_type = '销售') AS sales_line_records,\n         count(DISTINCT order_date) FILTER (WHERE line_type = '销售') AS trading_days\n  FROM order_lines\n  WHERE month = '2011-11'\n  GROUP BY 1\n)\nSELECT c.weekday_cn AS weekday,\n       coalesce(a.trading_days, 0) AS trading_days,\n       coalesce(a.sales_line_records, 0) AS sales_line_records,\n       coalesce(a.orders, 0) AS orders,\n       coalesce(a.gmv, 0) AS gmv\nFROM calendar c LEFT JOIN agg a ON a.dow_num = c.dow_num\nORDER BY c.dow_num",
+  "columns": [
+    {
+      "name": "weekday",
+      "meaning": "星期几（周一至周日）"
+    },
+    {
+      "name": "trading_days",
+      "meaning": "该星期几在 2011-11 内有销售的日期数（天）"
+    },
+    {
+      "name": "sales_line_records",
+      "meaning": "该星期几的销售明细行数（条）"
+    },
+    {
+      "name": "orders",
+      "meaning": "订单数（不同销售发票号个数，count(DISTINCT order_id)）"
+    },
+    {
+      "name": "gmv",
+      "meaning": "GMV（英镑），sum(gmv_amount)，即数量×单价之和，含之后被取消的订单"
+    }
+  ],
+  "rows": [
+    {
+      "weekday": "周一",
+      "trading_days": 4,
+      "sales_line_records": 11539,
+      "orders": 412,
+      "gmv": 298466.81
+    },
+    {
+      "weekday": "周二",
+      "trading_days": 5,
+      "sales_line_records": 16985,
+      "orders": 559,
+      "gmv": 271653.2
+    },
+    {
+      "weekday": "周三",
+      "trading_days": 5,
+      "sales_line_records": 16068,
+      "orders": 571,
+      "gmv": 304064.38
+    },
+    {
+      "weekday": "周四",
+      "trading_days": 4,
+      "sales_line_records": 12618,
+      "orders": 477,
+      "gmv": 238643.74
+    },
+    {
+      "weekday": "周五",
+      "trading_days": 4,
+      "sales_line_records": 12605,
+      "orders": 386,
+      "gmv": 211135.76
+    },
+    {
+      "weekday": "周六",
+      "trading_days": 0,
+      "sales_line_records": 0,
+      "orders": 0,
+      "gmv": 0.0
+    },
+    {
+      "weekday": "周日",
+      "trading_days": 4,
+      "sales_line_records": 11912,
+      "orders": 346,
+      "gmv": 128152.09
+    }
+  ],
+  "row_count": 7,
+  "definition": "时间范围：order_lines.month = '2011-11'（2011-11-01 至 2011-11-30）。分组维度：按 order_date 的 ISO 星期（isodow，1=周一…7=周日），用固定日历表列出周一到周日，无数据的星期（周六）以 0 补齐。指标照抄口径表：GMV = sum(gmv_amount)（取消行贡献 0），订单数 = count(DISTINCT order_id)（只数销售订单，取消行 order_id 为空）。样本量列：trading_days = count(DISTINCT order_date) FILTER (WHERE line_type='销售')；sales_line_records = count(*) FILTER (WHERE line_type='销售')。金额保留 2 位小数。",
+  "caveats": [
+    "2011 年 11 月 5、12、19、26 四个周六在整个数据集中没有任何记录，因此周六 GMV、订单数均为 0（非真实零值，而是无数据）。全量数据中仅存在 1 个有记录的周六（共 400 行），不在 2011-11。",
+    "各星期几在月内的有销售天数不等：周二、周三各 5 天，其余为 4 天，因此 GMV/订单数的绝对值受天数差异影响，比较时应按天折算。",
+    "GMV 含之后被取消的订单（取消行不计入本周 GMV，也按取消发生日入账），个别大额且迅速全退的订单会抬高当日 GMV。",
+    "约四分之一的行缺客户 ID，但不影响 GMV 与订单数统计。"
+  ],
+  "metrics_used": [
+    "gmv",
+    "orders",
+    "trading_days"
+  ],
+  "message": "已提交：2011 年 11 月按周一到周日汇总的 GMV（英镑）与订单数，含每个星期几的有销售天数和明细行数作样本量，其中周六在数据中无任何记录（以 0 补齐）。",
+  "sql_runs": 4,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 29958,
+    "completion_tokens": 2778,
+    "llm_calls": 6
+  },
+  "seconds": 25.44
+}

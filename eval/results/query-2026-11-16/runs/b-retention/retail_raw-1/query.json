@@ -1,0 +1,61 @@
+{
+  "status": "answered",
+  "request": "2011 年 10 月有购买的可识别客户有多少位？其中多少位在 2011 年 11 月又购买了？占 10 月购买客户的比例是多少？",
+  "data": "retail_raw",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH oct_c AS (\n  SELECT DISTINCT customer_id FROM order_lines\n  WHERE line_type = '销售' AND customer_id IS NOT NULL AND customer_id <> ''\n    AND order_date >= DATE '2011-10-01' AND order_date < DATE '2011-11-01'\n), nov_c AS (\n  SELECT DISTINCT customer_id FROM order_lines\n  WHERE line_type = '销售' AND customer_id IS NOT NULL AND customer_id <> ''\n    AND order_date >= DATE '2011-11-01' AND order_date < DATE '2011-12-01'\n)\nSELECT\n  (SELECT count(*) FROM oct_c) AS oct_customers,\n  (SELECT count(*) FROM oct_c JOIN nov_c USING (customer_id)) AS retained_customers,\n  round((SELECT count(*) FROM oct_c JOIN nov_c USING (customer_id))::DOUBLE / (SELECT count(*) FROM oct_c), 4) AS repeat_rate,\n  (SELECT count(DISTINCT invoice) FROM order_lines WHERE line_type='销售' AND order_date >= DATE '2011-10-01' AND order_date < DATE '2011-11-01') AS oct_sales_orders,\n  (SELECT count(DISTINCT invoice) FROM order_lines WHERE line_type='销售' AND order_date >= DATE '2011-11-01' AND order_date < DATE '2011-12-01') AS nov_sales_orders,\n  (SELECT count(*) FROM nov_c) AS nov_customers",
+  "columns": [
+    {
+      "name": "oct_customers",
+      "meaning": "2011-10 有购买的可识别客户数（人）"
+    },
+    {
+      "name": "retained_customers",
+      "meaning": "其中 2011-11 又有购买的可识别客户数（人）"
+    },
+    {
+      "name": "repeat_rate",
+      "meaning": "11 月复购客户占 10 月购买客户的比例（小数，0.4526 = 45.26%）"
+    },
+    {
+      "name": "oct_sales_orders",
+      "meaning": "样本量：2011-10 销售订单数（不同发票号，笔）"
+    },
+    {
+      "name": "nov_sales_orders",
+      "meaning": "样本量：2011-11 销售订单数（不同发票号，笔）"
+    },
+    {
+      "name": "nov_customers",
+      "meaning": "2011-11 有购买的可识别客户数（人）"
+    }
+  ],
+  "rows": [
+    {
+      "oct_customers": 1361,
+      "retained_customers": 616,
+      "repeat_rate": 0.4526,
+      "oct_sales_orders": 2005,
+      "nov_sales_orders": 2751,
+      "nov_customers": 1660
+    }
+  ],
+  "row_count": 1,
+  "definition": "购买 = order_lines 中 line_type='销售' 的下单行（按 order_date 落在对应自然月）；可识别客户 = customer_id 非空（非 NULL 且非空串），游客/未登记客户剔除；10 月购买客户 = 2011-10-01 至 2011-10-31 有销售行且可识别的去重 customer_id；11 月复购客户 = 上述集合与 2011-11-01 至 2011-11-30 有销售行且可识别的去重 customer_id 的交集；复购率 = 交集人数 ÷ 10 月购买客户数（round 4 位）；样本量为各月 line_type='销售' 的不同发票号个数与去重可识别客户数。",
+  "caveats": [
+    "“购买”按销售行口径统计；若某客户 10 月仅有取消行，则不计入 10 月购买客户。",
+    "10 月客户若其订单随后被取消，仍按 10 月有购买计入（GMV 口径含之后被取消的订单）。",
+    "缺失 customer_id 的订单（约占全部行四分之一）不参与客户层面的统计。",
+    "11 月为完整自然月；2011 年 12 月数据截止到 2011-12-09，未参与本次计算。"
+  ],
+  "metrics_used": [],
+  "message": "已提交：2011 年 10 月有购买的可识别客户 1,361 位，其中 616 位在 11 月再次购买，复购率 0.4526（45.26%），并附带 10 月 2,005 笔、11 月 2,751 笔销售订单及 11 月 1,660 位客户的样本量列。",
+  "sql_runs": 5,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 23543,
+    "completion_tokens": 2909,
+    "llm_calls": 6
+  },
+  "seconds": 36.52
+}

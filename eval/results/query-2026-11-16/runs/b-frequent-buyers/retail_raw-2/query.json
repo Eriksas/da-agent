@@ -1,0 +1,41 @@
+{
+  "status": "answered",
+  "request": "2011 年全年下单不少于 10 次的可识别客户有多少位？他们在 2011 年一共贡献了多少 GMV？",
+  "data": "retail_raw",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH cust_2011 AS (\n  SELECT customer_id,\n         COUNT(DISTINCT invoice) AS order_cnt_2011,\n         SUM(amount) AS gmv_2011\n  FROM order_lines\n  WHERE line_type = '销售'\n    AND customer_id IS NOT NULL\n    AND order_time >= TIMESTAMP '2011-01-01 00:00:00'\n    AND order_time <  TIMESTAMP '2012-01-01 00:00:00'\n  GROUP BY customer_id\n)\nSELECT\n  COUNT(*) FILTER (WHERE order_cnt_2011 >= 10) AS customers_ge_10_orders,\n  ROUND(SUM(gmv_2011) FILTER (WHERE order_cnt_2011 >= 10), 2) AS gmv_of_them_2011\nFROM cust_2011",
+  "columns": [
+    {
+      "name": "customers_ge_10_orders",
+      "meaning": "2011 年下单（销售发票）不少于 10 次的可识别客户数（位）"
+    },
+    {
+      "name": "gmv_of_them_2011",
+      "meaning": "这些客户 2011 年全年贡献的 GMV（英镑，下单口径，含之后被取消的订单）"
+    }
+  ],
+  "rows": [
+    {
+      "customers_ge_10_orders": 336,
+      "gmv_of_them_2011": 3952500.63
+    }
+  ],
+  "row_count": 1,
+  "definition": "时间范围：2011-01-01 至 2011-12-31（按 order_time，用 order_date 复核结果一致）。筛选：line_type='销售'（取消单不计入订单数与 GMV），customer_id IS NOT NULL（可识别客户）。订单数 = 每位客户 2011 年不同销售发票号个数（去重）。入选条件：订单数 >= 10。GMV = 这些客户 2011 年所有销售行的 amount 之和（数量×单价，下单口径，未扣减之后发生的取消）。先按客户分组，再汇总为一行。",
+  "caveats": [
+    "数据截止到 2011-12-09（周五），12 月 10-31 日无数据，因此“2011 全年”实际只覆盖到 12 月 9 日。",
+    "口径为下单口径：GMV 含之后被取消的订单，未扣除取消金额，净销售额会低于此值。",
+    "缺客户 ID 的行（约四分之一的行）不计入这些客户，但其金额仍计入全站 GMV。",
+    "阈值边界：恰为 10 单的客户 47 位计入；这些客户 2011 年下单数最高 185 单，长尾客户对结果有影响。"
+  ],
+  "metrics_used": [],
+  "message": "交出的结果是：2011 年（实际数据截至 12-09）下单不少于 10 次的可识别客户共 **336 位**，他们在 2011 年合计贡献 GMV **£3,952,500.63**（下单口径，含之后被取消的订单，未扣减取消金额）。",
+  "sql_runs": 2,
+  "rejected": 1,
+  "usage": {
+    "prompt_tokens": 18718,
+    "completion_tokens": 2494,
+    "llm_calls": 5
+  },
+  "seconds": 30.6
+}

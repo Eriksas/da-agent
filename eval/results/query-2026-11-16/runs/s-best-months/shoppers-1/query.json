@@ -1,0 +1,63 @@
+{
+  "status": "answered",
+  "request": "转化率（Revenue 为 TRUE 的比例）最高的 3 个月份（Month）是哪些？只看会话数不少于 500 的月份，给出各自的转化率。",
+  "data": "csv:online_shoppers_intention.csv",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH monthly AS (\n  SELECT Month AS month,\n         COUNT(*) AS sessions,\n         SUM(CASE WHEN Revenue = 'TRUE' THEN 1 ELSE 0 END) AS orders,\n         ROUND(AVG(CASE WHEN Revenue = 'TRUE' THEN 1.0 ELSE 0.0 END), 4) AS conversion_rate\n  FROM data\n  GROUP BY Month\n)\nSELECT month, sessions, orders, conversion_rate\nFROM monthly\nWHERE sessions >= 500\nORDER BY conversion_rate DESC, month\nLIMIT 3",
+  "columns": [
+    {
+      "name": "month",
+      "meaning": "月份（原 Month 列取值，英文缩写）"
+    },
+    {
+      "name": "sessions",
+      "meaning": "该月会话数（记录数）"
+    },
+    {
+      "name": "orders",
+      "meaning": "该月 Revenue = TRUE 的会话数"
+    },
+    {
+      "name": "conversion_rate",
+      "meaning": "转化率 = Revenue 为 TRUE 的会话数 / 该月会话数（小数，0.2535 表示 25.35%）"
+    }
+  ],
+  "rows": [
+    {
+      "month": "Nov",
+      "sessions": 2998,
+      "orders": 760,
+      "conversion_rate": 0.2535
+    },
+    {
+      "month": "Oct",
+      "sessions": 549,
+      "orders": 115,
+      "conversion_rate": 0.2095
+    },
+    {
+      "month": "Dec",
+      "sessions": 1727,
+      "orders": 216,
+      "conversion_rate": 0.1251
+    }
+  ],
+  "row_count": 3,
+  "definition": "一行 = 一个会话（CSV 每行一条会话记录，共 12,330 行）。按 Month 分组统计会话数 COUNT(*)，成交会话数 SUM(CASE WHEN Revenue='TRUE' THEN 1 ELSE 0 END)（Revenue 为字符串 'TRUE'/'FALSE'），转化率 = AVG(CASE WHEN Revenue='TRUE' THEN 1.0 ELSE 0.0 END)，即成交会话占该月全部会话的比例，保留 4 位小数。筛选条件：会话数 >= 500 的月份，按转化率降序取前 3；未做去重（同一访客可能出现多行，按会话计）。",
+  "caveats": [
+    "Month 只表示月份，没有年份，数据覆盖 10 个月份（Feb 至 Nov，含两个 10 月前的月份），无法判断各年季节性可比。",
+    "第二名 Oct 只有 549 条会话，样本偏小，转化率估计的波动性明显高于 Nov 与 Dec。",
+    "Revenue 为字符串列，判定用的是精确匹配 'TRUE'，请确认没有大小写或其他取值（已核对仅 TRUE/FALSE 两种）。",
+    "会话数为记录行数，同一访客可能多次访问，未按访客去重。"
+  ],
+  "metrics_used": [],
+  "message": "已提交：在会话数不少于 500 的月份中，转化率最高的三名是 **Nov（25.35%，2998 次会话 / 760 次成交）、Oct（20.95%，549 / 115）、Dec（12.51%，1727 / 216）**，并同时给出各组会话数与成交会话数供样本量判断。",
+  "sql_runs": 2,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 10346,
+    "completion_tokens": 987,
+    "llm_calls": 4
+  },
+  "seconds": 10.7
+}

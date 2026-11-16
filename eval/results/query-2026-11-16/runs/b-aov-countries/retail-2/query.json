@@ -1,0 +1,73 @@
+{
+  "status": "answered",
+  "request": "2011-W48 客单价最高的 3 个国家是哪些？只看当周订单数不少于 5 的国家，给出各自的客单价。",
+  "data": "retail",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH c AS (\n  SELECT country,\n         count(DISTINCT order_id) AS orders,\n         count(*) AS line_count,\n         sum(gmv_amount) AS gmv\n  FROM order_lines\n  WHERE week = '2011-W48' AND line_type = '销售'\n  GROUP BY country\n  HAVING count(DISTINCT order_id) >= 5\n)\nSELECT country,\n       orders,\n       line_count,\n       round(gmv, 2) AS gmv,\n       round(gmv / orders, 2) AS aov\nFROM c\nORDER BY aov DESC\nLIMIT 3",
+  "columns": [
+    {
+      "name": "country",
+      "meaning": "国家（customer_id 所属国家口径，含\"国家不明确\"合并类）"
+    },
+    {
+      "name": "orders",
+      "meaning": "该国当周销售订单数（distinct order_id）"
+    },
+    {
+      "name": "line_count",
+      "meaning": "该国当周商品明细行数"
+    },
+    {
+      "name": "gmv",
+      "meaning": "该国当周 GMV（英镑）= sum(gmv_amount)"
+    },
+    {
+      "name": "aov",
+      "meaning": "客单价（英镑/单）= sum(gmv_amount) / count(DISTINCT order_id)"
+    }
+  ],
+  "rows": [
+    {
+      "country": "EIRE",
+      "orders": 9,
+      "line_count": 233,
+      "gmv": 5035.93,
+      "aov": 559.55
+    },
+    {
+      "country": "United Kingdom",
+      "orders": 607,
+      "line_count": 17233,
+      "gmv": 279907.53,
+      "aov": 461.13
+    },
+    {
+      "country": "France",
+      "orders": 18,
+      "line_count": 344,
+      "gmv": 8058.58,
+      "aov": 447.7
+    }
+  ],
+  "row_count": 3,
+  "definition": "时间范围：week = '2011-W48'（2011-11-28 至 2011-12-04，完整一周）。只统计 line_type = '销售' 的行（取消单不计入订单数与 GMV）。按 country 分组；GMV = sum(gmv_amount)，订单数 = count(DISTINCT order_id)，客单价 = sum(gmv_amount) / count(DISTINCT order_id)。筛选条件：HAVING count(DISTINCT order_id) >= 5（当周订单数不少于 5）。按客单价降序取前 3。",
+  "caveats": [
+    "EIRE 仅 9 单、France 18 单，样本很小，客单价易被个别大额订单拉高；只有 United Kingdom（607 单）样本充分。",
+    "低于 5 单的国家未参与排名，其中 Japan（1 单，3651.60 英镑）、Norway（1 单）、Portugal（1 单）等客单价更高，属小样本噪声。",
+    "客单价用下单口径 GMV，含后来被取消的订单（2011-W48 当周另有 237 行取消单，未从本指标中扣除）；金额为下单时点的金额，未考虑退款。",
+    "当周部分大额订单（如英国发票 579196、580115，单笔 6,000 英镑以上）抬高了英国客单价。"
+  ],
+  "metrics_used": [
+    "gmv",
+    "orders"
+  ],
+  "message": "2011-W48（2011-11-28 至 12-04）订单数≥5 的国家中，客单价前 3 名为：EIRE 559.55 英镑/单（9 单）、United Kingdom 461.13 英镑/单（607 单）、France 447.70 英镑/单（18 单），其中 EIRE 与 France 样本很小，解读需谨慎。",
+  "sql_runs": 4,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 18448,
+    "completion_tokens": 1725,
+    "llm_calls": 4
+  },
+  "seconds": 17.09
+}

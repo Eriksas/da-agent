@@ -1,0 +1,104 @@
+{
+  "status": "answered",
+  "request": "2011-W41 相比 2011-W40，GMV 增加金额最大的 5 个商品（按商品编码）是哪些？给出各自 W41 的 GMV 和增加额。",
+  "data": "retail",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH w AS (\n  SELECT stock_code,\n         max(description) AS description,\n         sum(gmv_amount) FILTER (WHERE week = '2011-W40') AS gmv_w40,\n         sum(gmv_amount) FILTER (WHERE week = '2011-W41') AS gmv_w41,\n         count(DISTINCT order_id) FILTER (WHERE week = '2011-W41') AS orders_w41,\n         count(*) FILTER (WHERE week = '2011-W41' AND line_type = '销售') AS sales_lines_w41\n  FROM order_lines\n  WHERE week IN ('2011-W40','2011-W41')\n  GROUP BY stock_code\n)\nSELECT stock_code,\n       description,\n       round(gmv_w41,2) AS gmv_w41,\n       round(gmv_w40,2) AS gmv_w40,\n       round(gmv_w41 - gmv_w40,2) AS gmv_increase,\n       orders_w41,\n       sales_lines_w41\nFROM w\nWHERE gmv_w41 > gmv_w40\nORDER BY gmv_increase DESC\nLIMIT 5",
+  "columns": [
+    {
+      "name": "stock_code",
+      "meaning": "商品编码"
+    },
+    {
+      "name": "description",
+      "meaning": "商品名称（同一编码可能对应多个名称描述，取其中一个）"
+    },
+    {
+      "name": "gmv_w41",
+      "meaning": "2011-W41 该商品的 GMV（英镑）"
+    },
+    {
+      "name": "gmv_w40",
+      "meaning": "2011-W40 该商品的 GMV（英镑），作为对比基数"
+    },
+    {
+      "name": "gmv_increase",
+      "meaning": "GMV 增加额 = W41 GMV − W40 GMV（英镑）"
+    },
+    {
+      "name": "orders_w41",
+      "meaning": "2011-W41 该商品涉及的销售订单数（distinct order_id）"
+    },
+    {
+      "name": "sales_lines_w41",
+      "meaning": "2011-W41 该商品的销售明细行数"
+    }
+  ],
+  "rows": [
+    {
+      "stock_code": "85123A",
+      "description": "WHITE HANGING HEART T-LIGHT HOLDER",
+      "gmv_w41": 1866.49,
+      "gmv_w40": 497.89,
+      "gmv_increase": 1368.6,
+      "orders_w41": 38,
+      "sales_lines_w41": 39
+    },
+    {
+      "stock_code": "23046",
+      "description": "PAPER LANTERN 9 POINT DELUXE STAR",
+      "gmv_w41": 1419.9,
+      "gmv_w40": 73.15,
+      "gmv_increase": 1346.75,
+      "orders_w41": 4,
+      "sales_lines_w41": 4
+    },
+    {
+      "stock_code": "84029E",
+      "description": "RED WOOLLY HOTTIE WHITE HEART.",
+      "gmv_w41": 1213.15,
+      "gmv_w40": 248.18,
+      "gmv_increase": 964.97,
+      "orders_w41": 16,
+      "sales_lines_w41": 16
+    },
+    {
+      "stock_code": "23040",
+      "description": "PAPER LANTERN 9 POINT SNOW STAR",
+      "gmv_w41": 611.25,
+      "gmv_w40": 17.25,
+      "gmv_increase": 594.0,
+      "orders_w41": 2,
+      "sales_lines_w41": 3
+    },
+    {
+      "stock_code": "21787",
+      "description": "RAIN PONCHO RETROSPOT",
+      "gmv_w41": 613.63,
+      "gmv_w40": 30.39,
+      "gmv_increase": 583.24,
+      "orders_w41": 3,
+      "sales_lines_w41": 3
+    }
+  ],
+  "row_count": 5,
+  "definition": "口径：GMV = sum(gmv_amount)（销售行计入、取消行为 0）；按商品编码 stock_code 汇总 2011-W40 与 2011-W41 两周 GMV，增加额 = W41 GMV − W40 GMV，取增加额最大的 5 个商品（仅保留增加额为正的编码）。订单数用 count(DISTINCT order_id)（取消行 order_id 为空，不计入），销售行数为 line_type='销售' 的明细行数。两周均为完整 ISO 周。",
+  "caveats": [
+    "23046、23040 的增量高度集中于个别大额订单（23046 的 1380 英镑、23040 的 594 英镑均来自单张发票 570253），订单数仅 2–4 单，样本小、波动大。",
+    "GMV 为下单口径，含之后被取消的订单；本数据中 2011-W41 内发生的取消单金额很小（23046 的 1380 英镑发票截至数据截止未取消），但若后续被取消，净销售额不会同步增加。",
+    "两周总体 GMV 为 W40 310,948.14 英镑、W41 221,268.10 英镑，全站 GMV 实际是下降的；此处只列出下降后仍实现增长最多的商品。"
+  ],
+  "metrics_used": [
+    "gmv",
+    "orders"
+  ],
+  "message": "已提交：按商品编码汇总 2011-W41 与 2011-W40 的 GMV（sum(gmv_amount)），取增幅最大的 5 个商品——85123A（+1,368.60）、23046（+1,346.75）、84029E（+964.97）、23040（+594.00）、21787（+583.24）英镑，并附各商品 W41 的 GMV、W40 基数与 W41 订单数/销售行数作为样本量参考。",
+  "sql_runs": 4,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 26443,
+    "completion_tokens": 1951,
+    "llm_calls": 5
+  },
+  "seconds": 46.41
+}

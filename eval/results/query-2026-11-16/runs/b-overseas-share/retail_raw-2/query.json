@@ -1,0 +1,84 @@
+{
+  "status": "answered",
+  "request": "2011 年英国（United Kingdom）以外 GMV 最高的 5 个国家，各自的 GMV，以及各占海外（英国以外）GMV 的比例。",
+  "data": "retail_raw",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH overseas AS (\n  SELECT country,\n         SUM(amount) AS gmv,\n         COUNT(DISTINCT invoice) AS orders,\n         COUNT(*) AS line_rows\n  FROM order_lines\n  WHERE line_type = '销售'\n    AND order_time >= TIMESTAMP '2011-01-01 00:00:00'\n    AND order_time <  TIMESTAMP '2012-01-01 00:00:00'\n    AND country <> 'United Kingdom'\n  GROUP BY country\n),\ntot AS (SELECT SUM(gmv) AS overseas_gmv FROM overseas)\nSELECT o.country AS country,\n       ROUND(o.gmv, 2) AS gmv_gbp,\n       ROUND(o.gmv / t.overseas_gmv, 4) AS share_of_overseas_gmv,\n       o.orders AS order_count,\n       o.line_rows AS line_count\nFROM overseas o, tot t\nORDER BY o.gmv DESC\nLIMIT 5",
+  "columns": [
+    {
+      "name": "country",
+      "meaning": "国家/地区名称（数据中的原始写法，EIRE 即爱尔兰）"
+    },
+    {
+      "name": "gmv_gbp",
+      "meaning": "2011 年该国 GMV（商品销售额，下单口径，销售额行 amount 之和，含之后被取消的订单；英镑）"
+    },
+    {
+      "name": "share_of_overseas_gmv",
+      "meaning": "该国 GMV 占 2011 年海外（英国以外）GMV 的比例（小数，0.1894 = 18.94%）"
+    },
+    {
+      "name": "order_count",
+      "meaning": "该国 2011 年销售订单数（不同发票号个数，样本量）"
+    },
+    {
+      "name": "line_count",
+      "meaning": "该国 2011 年销售明细行数（商品行条数，样本量）"
+    }
+  ],
+  "rows": [
+    {
+      "country": "Netherlands",
+      "gmv_gbp": 275134.86,
+      "share_of_overseas_gmv": 0.1894,
+      "order_count": 90,
+      "line_count": 2252
+    },
+    {
+      "country": "EIRE",
+      "gmv_gbp": 261167.6,
+      "share_of_overseas_gmv": 0.1798,
+      "order_count": 265,
+      "line_count": 7402
+    },
+    {
+      "country": "Germany",
+      "gmv_gbp": 192137.41,
+      "share_of_overseas_gmv": 0.1323,
+      "order_count": 414,
+      "line_count": 8158
+    },
+    {
+      "country": "France",
+      "gmv_gbp": 175962.69,
+      "share_of_overseas_gmv": 0.1212,
+      "order_count": 362,
+      "line_count": 7669
+    },
+    {
+      "country": "Australia",
+      "gmv_gbp": 137138.46,
+      "share_of_overseas_gmv": 0.0944,
+      "order_count": 53,
+      "line_count": 1149
+    }
+  ],
+  "row_count": 5,
+  "definition": "GMV = 销售行（line_type='销售'）的 amount 之和（下单口径，含之后被取消的订单，取消单不计入 GMV）；时间范围为 order_time 在 2011-01-01 至 2011-12-09（数据截止日）之间；海外 = country <> 'United Kingdom'；海外 GMV 分母 = 所有非英国国家的 2011 年销售 GMV 合计；按国家 GMV 降序取前 5；订单数 = 不同发票号个数；比例保留 4 位小数。",
+  "caveats": [
+    "数据截止 2011-12-09（周五），2011 年最后一周不完整，12 月 GMV 略偏低。",
+    "country 字段中的“国家不明确”（原 Unspecified、European Community）不是国家，但仍计入海外 GMV 分母（2011 年 5,900.19 英镑、16 个订单）；其金额低于第 5 名，未进入前 5，不影响排名。",
+    "EIRE 为数据中的原始写法，即爱尔兰（Ireland）。",
+    "海外各国样本量普遍偏小（第 5 名 Australia 仅 53 个订单），GMV 易受个别大额订单影响；比例之和不是 100%，因为只返回前 5 名。"
+  ],
+  "metrics_used": [],
+  "message": "已提交：2011 年英国以外 GMV 前 5 国家为 Netherlands（275,134.86 英镑，占海外 18.94%）、EIRE/爱尔兰（261,167.60，17.98%）、Germany（192,137.41，13.23%）、France（175,962.69，12.12%）、Australia（137,138.46，9.44%），并附各自订单数与明细行数作为样本量。",
+  "sql_runs": 3,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 17560,
+    "completion_tokens": 2298,
+    "llm_calls": 4
+  },
+  "seconds": 16.85
+}

@@ -1,0 +1,48 @@
+{
+  "status": "answered",
+  "request": "2011 年单笔订单金额（一张发票的 GMV）超过 1,000 英镑的订单有多少张？占 2011 年全部订单的比例是多少？",
+  "data": "retail",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH invoice_gmv AS (\n  SELECT invoice,\n         sum(gmv_amount) AS invoice_gmv\n  FROM order_lines\n  WHERE line_type = '销售'\n    AND year(order_date) = 2011\n  GROUP BY invoice\n)\nSELECT\n  count(*)                                                                AS orders_2011,\n  sum(CASE WHEN invoice_gmv > 1000 THEN 1 ELSE 0 END)                    AS orders_over_1000,\n  round(sum(CASE WHEN invoice_gmv > 1000 THEN 1 ELSE 0 END)::DOUBLE / count(*), 4) AS share_over_1000\nFROM invoice_gmv",
+  "columns": [
+    {
+      "name": "orders_2011",
+      "meaning": "2011 年全部销售订单数（按发票号去重，等同 count(DISTINCT order_id)；张，也是本结果的样本量）"
+    },
+    {
+      "name": "orders_over_1000",
+      "meaning": "2011 年单张发票 GMV 严格大于 1,000 英镑的订单数（张）"
+    },
+    {
+      "name": "share_over_1000",
+      "meaning": "上述订单占 2011 年全部订单的比例（小数，0.0882 = 8.82%）"
+    }
+  ],
+  "rows": [
+    {
+      "orders_2011": 18223,
+      "orders_over_1000": 1607,
+      "share_over_1000": 0.0882
+    }
+  ],
+  "row_count": 1,
+  "definition": "时间范围：2011 年（按 order_date 年份；已验证 order_time 与 order_date 的发票集合完全一致）。订单 = 销售行（line_type='销售'，即排除 C 开头的取消单），按 invoice 去重，与口径表 count(DISTINCT order_id) 一致（2011 年为 18,223 张）。单张发票的 GMV = 该发票所有销售行的 sum(gmv_amount)（取消行不计入销售发票）。订单数 = count(*)；超千订单数 = 单张发票 GMV > 1000 的发票数；比例 = 超千订单数 ÷ 2011 年全部订单数，保留 4 位小数。",
+  "caveats": [
+    "订单为下单口径：之后被取消的订单仍按原下单金额算作一张订单并计入全部订单数；取消单（C 开头发票）本身不计入订单数，其金额体现在取消金额而非此处的订单 GMV 中。",
+    "2011 年数据不完整：全年只有 285 个有销售的日期，2011-12-09 截止（最后一周只到周五），且 2010-12-23 至 2011-01-03 停业；因此 2011 年 12 月偏低，比例是按现有 18,223 张订单计算的。",
+    "存在下单后很快全额取消的极端大单（单张发票最高 168,469.60 英镑），会拉高金额分布但不影响订单计数与占比。",
+    "阈值取严格大于 1,000；金额恰为 1,000.00 英镑的发票有 1 张，未计入超千订单。"
+  ],
+  "metrics_used": [
+    "gmv"
+  ],
+  "message": "已提交：2011 年共 18,223 张销售订单，其中单张发票 GMV 严格超过 1,000 英镑的有 1,607 张，占比 8.82%（数据止于 2011-12-09，12 月不完整）。",
+  "sql_runs": 3,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 25507,
+    "completion_tokens": 4096,
+    "llm_calls": 5
+  },
+  "seconds": 30.81
+}

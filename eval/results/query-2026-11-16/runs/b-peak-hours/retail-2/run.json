@@ -1,0 +1,166 @@
+{
+  "run_id": "20261116T104933-f5a62a",
+  "question": "2011 年 11 月，按下单的小时（0–23 点）统计订单数，订单最多的 3 个小时是哪几个，各有多少订单？",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "max_tool_calls": 8,
+  "use_skills": true,
+  "domain": "analyst",
+  "status": "completed",
+  "answer": "2011 年 11 月订单最多的 3 个下单小时是 **12 点（436 单）、13 点（396 单）、14 点（337 单）**，合计占当月 2751 单的约 42.5%。",
+  "error": null,
+  "budget_exhausted": false,
+  "repair": null,
+  "malformed_replies": 0,
+  "steps": [
+    {
+      "round": 1,
+      "tool": "run_sql",
+      "arguments": {
+        "sql": "SELECT EXTRACT(hour FROM order_time) AS hour_of_day,\n       count(DISTINCT order_id) AS orders,\n       count(*) AS line_rows,\n       round(sum(gmv_amount), 2) AS gmv\nFROM order_lines\nWHERE month = '2011-11'\nGROUP BY 1\nORDER BY orders DESC",
+        "purpose": "先看 2011-11 各小时（0-23）的订单数、记录数和 GMV，确认量级与分布"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 9
+    },
+    {
+      "round": 1,
+      "tool": "run_sql",
+      "arguments": {
+        "sql": "SELECT line_type, count(*) AS rows, count(DISTINCT order_id) AS orders,\n       min(order_time) AS min_t, max(order_time) AS max_t\nFROM order_lines\nWHERE month = '2011-11'\nGROUP BY 1",
+        "purpose": "确认 2011-11 数据范围与销售/取消行的订单号情况"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 7
+    },
+    {
+      "round": 2,
+      "tool": "run_sql",
+      "arguments": {
+        "sql": "WITH h AS (\n  SELECT EXTRACT(hour FROM order_time) AS hour_of_day,\n         count(DISTINCT order_id) AS orders,\n         count(*) AS line_rows,\n         sum(gmv_amount) AS gmv\n  FROM order_lines\n  WHERE month = '2011-11'\n  GROUP BY 1\n)\nSELECT hour_of_day,\n       orders,\n       round(orders * 1.0 / sum(orders) OVER (), 4) AS share_of_month_orders,\n       line_rows,\n       round(gmv, 2) AS gmv\nFROM h\nORDER BY orders DESC\nLIMIT 3",
+        "purpose": "验证最终查询：2011-11 订单数最多的 3 个小时及其订单数、占比"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 8
+    },
+    {
+      "round": 3,
+      "tool": "submit_query",
+      "arguments": {
+        "sql": "WITH h AS (\n  SELECT EXTRACT(hour FROM order_time) AS hour_of_day,\n         count(DISTINCT order_id) AS orders,\n         count(*) AS line_rows,\n         sum(gmv_amount) AS gmv\n  FROM order_lines\n  WHERE month = '2011-11'\n  GROUP BY 1\n)\nSELECT hour_of_day,\n       orders,\n       round(orders * 1.0 / sum(orders) OVER (), 4) AS share_of_month_orders,\n       line_rows,\n       round(gmv, 2) AS gmv\nFROM h\nORDER BY orders DESC\nLIMIT 3",
+        "columns": {
+          "hour_of_day": "下单小时（0–23 点，取自 order_time 的小时部分）",
+          "orders": "该小时内的订单数（count(DISTINCT order_id)，只计销售订单）",
+          "share_of_month_orders": "该小时订单数占 2011-11 全月订单数 2751 的比例（小数）",
+          "line_rows": "该小时内的商品明细行数（销售行 + 取消行，样本量参考）",
+          "gmv": "该小时的 GMV（英镑），sum(gmv_amount)"
+        },
+        "definition": "时间范围：month = '2011-11'（2011-11-01 08:16 至 2011-11-30 17:42）。按 EXTRACT(hour FROM order_time) 分组；订单数用口径表表达式 count(DISTINCT order_id)（取消行 order_id 为空，天然只计销售订单）；GMV 用 sum(gmv_amount)。占比 = 该小时订单数 ÷ 当月全部小时订单数合计（2751）。结果按订单数降序取前 3 行。",
+        "caveats": [
+          "第 3 名（14 点，337 单）与第 4 名（11 点，331 单）仅差 6 单，若改用 GMV 排名，15 点（302 单、219,872 英镑）会进入前 3",
+          "11 月内营业时段集中在 8–17 点，夜间及 20 点后几乎无单，因此不存在 0–23 全部小时都有数据的情况",
+          "订单按发票号去重，取消单按取消发生时间入账，不回溯原订单小时"
+        ]
+      },
+      "ok": true,
+      "error": null,
+      "ms": 8
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 16547,
+    "completion_tokens": 1430,
+    "llm_calls": 4
+  },
+  "started_at": "2026-11-16T02:49:33+00:00",
+  "seconds": 17.06,
+  "messages": [
+    {
+      "role": "system",
+      "content": "你是一名数据分析师，负责把一个分析请求写成 SQL 并算出结果。你不写报告，只负责把数算对；结果会交给另一位同事去解读。\n\n## 数据\n\n数据：电商交易（UCI Online Retail II，已清洗）。一家英国线上礼品批发零售商 2009-12 至 2011-12 的商品交易明细。清洗规则已经应用： 删除了重复、坏账调整、单价为 0 等记录，运费等非商品行不在表里。金额单位是英镑。\n\n### 表 order_lines（1,021,272 行）\n每行是订单里的一个商品（销售）或取消单里的一个商品（取消）。金额和数量都是正数，用 line_type 区分。\n\n| 列 | 类型 | 说明 | 取值 |\n|---|---|---|---|\n| invoice | VARCHAR | 发票号（订单号）；C 开头的是取消单 | 46,922 种，例如 573585、581219、581492、580729、558475 |\n| line_type | VARCHAR | 销售 / 取消 | 全部取值：销售、取消 |\n| order_time | TIMESTAMP | 下单（或取消）时间 | 2009-12-01 07:45:00 至 2011-12-09 12:50:00 |\n| order_date | DATE | 下单（或取消）日期 | 2009-12-01 至 2011-12-09 |\n| week | VARCHAR | ISO 周（周一到周日），写法如 2011-W48 | 104 种，例如 2011-W46、2011-W47、2011-W45、2010-W47、2011-W48 |\n| month | VARCHAR | 月份，写法如 2011-11 | 25 种，例如 2011-11、2010-11、2011-10、2010-10、2011-09 |\n| stock_code | VARCHAR | 商品编码 | 4,909 种，例如 85123A、22423、85099B、21212、20725 |\n| description | VARCHAR | 商品名称 | 5,351 种，例如 WHITE HANGING HEART T-LIGHT HOLDER、REGENCY CAKESTAND 3 TIER、JUMBO BAG RED RETROSPOT、ASSORTED COLOUR BIRD ORNAMENT、PARTY BUNTING |\n| quantity | BIGINT | 数量（正数） | 1 至 80995 |\n| price | DOUBLE | 单价 | 0.001 至 1157.15 |\n| amount | DOUBLE | 金额 = 数量 × 单价（正数；销售行和取消行都是正数，不能直接相加） | 0.001 至 168469.6 |\n| customer_id | VARCHAR | 客户 ID；缺失表示游客或未登记客户 | 5,875 种，例如 17841、14911、12748、14606、14096；22.2% 为空 |\n| customer_type | VARCHAR | 新客（这位客户第一次购买就在这一行所在的周）/ 老客 / 未知（缺客户 ID） | 全部取值：老客、未知、新客 |\n| country | VARCHAR | 客户所在国家（英文；Unspecified、European Community 归为“国家不明确”） | 42 种，例如 United Kingdom、EIRE、Germany、France、Netherlands |\n| gmv_amount | DOUBLE | 计入 GMV 的金额：销售行等于 amount，取消行是 0 | 0.0 至 168469.6 |\n| cancelled_amount | DOUBLE | 取消金额：取消行等于 amount，销售行是 0 | 0.0 至 168469.6 |\n| net_amount | DOUBLE | 计入净销售额的金额：销售行是 amount，取消行是 -amount | -168469.6 至 168469.6 |\n| order_id | VARCHAR | 订单号：销售行等于 invoice，取消行为空（所以 count(DISTINCT order_id) 只数销售订单） | 39,516 种，例如 573585、581219、581492、580729、558475；1.8% 为空 |\n| buyer_id | VARCHAR | 购买客户：销售行等于 customer_id，取消行为空 | 5,852 种，例如 17841、14911、12748、14606、14096；24.0% 为空 |\n\n### 指标口径（用到这些指标时，必须照这里的表达式写）\n\n| 指标 | 表 | 表达式 | 口径 |\n|---|---|---|---|\n| GMV（gmv） | order_lines | `sum(gmv_amount)` | 商品销售额（下单口径）：数量 × 单价之和，含之后被取消的订单 |\n| 取消金额（cancelled_amount） | order_lines | `sum(cancelled_amount)` | 这段时间里取消单的商品金额（正数）；可能对应更早下的订单 |\n| 净销售额（net_sales） | order_lines | `sum(net_amount)` | GMV − 取消金额 |\n| 取消率（cancel_rate） | order_lines | `sum(cancelled_amount) / sum(gmv_amount)` | 取消金额 ÷ GMV；分子分母不一定是同一批订单 |\n| 订单数（orders） | order_lines | `count(DISTINCT order_id)` | 不同发票号的个数，只数销售订单 |\n| 客单价（aov） | order_lines | `sum(gmv_amount) / count(DISTINCT order_id)` | GMV ÷ 订单数 |\n| 活跃客户数（active_customers） | order_lines | `count(DISTINCT buyer_id)` | 有购买的可识别客户数（不含缺客户 ID 的订单） |\n| 新客数（new_customers） | order_lines | `count(DISTINCT buyer_id) FILTER (WHERE customer_type = '新客')` | 第一次购买落在当周的客户数；只适合按单个周统计。越靠近数据起点（2009-12），越可能把老客算成新客 |\n| 交易天数（trading_days） | order_lines | `count(DISTINCT order_date) FILTER (WHERE line_type = '销售')` | 有销售的日期数 |\n\n### 注意\n- 周是 ISO 周；数据截止到 2011-12-09（周五），所以 2011-W49 不是完整的一周，和完整的周比总量会偏低。\n- 2010-12-23 到 2011-01-03 停业，这期间没有数据。\n- 约四分之一的行缺客户 ID：按客户统计（活跃客户、新老客）时这些行不计入，但它们的金额计入 GMV。\n- 取消单按取消发生的时间入账，不回溯到原订单所在的周。\n- 有少数金额极大、下单后很快又全部取消的订单（例如发票 541431、581483），会抬高当周的 GMV 和商品排名；净销售额不受影响。\n\n\n## 怎么做\n\n1. SQL 用 DuckDB 的写法。每次只能执行一条 SELECT（可以用 WITH），只能读上面列出的表，不能修改任何东西。\n2. 上面有“指标口径”时，用到这些指标就照抄它的表达式，不要自己另写一种算法。请求里的指标不在口径表里时，自己决定怎么算，并在 definition 里写清楚。\n3. 先用 run_sql 试，看结果是否合理（行数、数量级、有没有空值、筛选条件有没有写对取值），再用 submit_query 提交最终的那一条查询。\n4. 提交的结果就是交出去的全部内容：一条查询，不超过 200 行。请求要哪些数，就只返回算出这些数需要的行和列；要对比两个时期或两个分组时，把它们放在同一条查询的结果里。\n5. 每一列用 AS 起一个看得懂的列名，并在 columns 里写明含义和单位。比率用小数表示（0.1234 表示 12.34%）并在说明里写明。\n6. 金额保留 2 位小数，比率保留 4 位小数（用 round）。\n7. 按分组比较时，带上每组的样本量（订单数、记录数）这一列，方便判断样本够不够；并按请求的要求排序。\n8. 发现结果需要提醒（样本很少、时间段不完整、有空值）时，写进 caveats。\n9. 数据里没有请求需要的信息（例如没有成本就算不了利润，日期超出数据范围），或者请求含糊到无法确定要算什么：不要提交，不要猜，直接用文字说明原因。\n10. 最多调用 8 次工具，够用就停。\n\n提交成功后，用一句话说明交出的结果是什么。\n"
+    },
+    {
+      "role": "user",
+      "content": "2011 年 11 月，按下单的小时（0–23 点）统计订单数，订单最多的 3 个小时是哪几个，各有多少订单？"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_396121ef57b76f861aaa0e03",
+          "function": {
+            "arguments": "{\"sql\": \"SELECT EXTRACT(hour FROM order_time) AS hour_of_day,\\n       count(DISTINCT order_id) AS orders,\\n       count(*) AS line_rows,\\n       round(sum(gmv_amount), 2) AS gmv\\nFROM order_lines\\nWHERE month = '2011-11'\\nGROUP BY 1\\nORDER BY orders DESC\", \"purpose\": \"先看 2011-11 各小时（0-23）的订单数、记录数和 GMV，确认量级与分布\"}",
+            "name": "run_sql"
+          },
+          "type": "function",
+          "index": 0
+        },
+        {
+          "id": "call_396121ef57b76f861aaa0e04",
+          "function": {
+            "arguments": "{\"sql\": \"SELECT line_type, count(*) AS rows, count(DISTINCT order_id) AS orders,\\n       min(order_time) AS min_t, max(order_time) AS max_t\\nFROM order_lines\\nWHERE month = '2011-11'\\nGROUP BY 1\", \"purpose\": \"确认 2011-11 数据范围与销售/取消行的订单号情况\"}",
+            "name": "run_sql"
+          },
+          "type": "function",
+          "index": 0
+        }
+      ],
+      "reasoning_content": "We need to count orders by hour of order_time for November 2011, and find top 3 hours by number of orders (distinct order_id).\n\nLet me query.\n\nNote: order_time is a timestamp. The \"下单的小时\" for cancellation rows too? Order counting uses count(DISTINCT order_id) which only counts sales orders (order_id null for cancellations). So group by hour from order_time, but maybe restrict to line_type='销售'? The metric expression is count(DISTINCT order_id), which handles it. But to be safe, filter month = '2011-11'.\n\nLet me first check the data: verify month values, and count distinct order_id by hour.\n\nAlso should I consider whether order_time for sales lines is the order time. Yes.\n\nLet me run a query to get all 24 hours with orders count, then submit top 3.\n\nLet's do it in one query: group by hour, order by orders desc, limit 3. But first let me run a broader query to see all 24 hours for sanity."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_396121ef57b76f861aaa0e03",
+      "content": "{\"tool\": \"run_sql\", \"purpose\": \"先看 2011-11 各小时（0-23）的订单数、记录数和 GMV，确认量级与分布\", \"columns\": [\"hour_of_day\", \"orders\", \"line_rows\", \"gmv\"], \"rows\": [{\"hour_of_day\": 12, \"orders\": 436, \"line_rows\": 12207, \"gmv\": 156621.23}, {\"hour_of_day\": 13, \"orders\": 396, \"line_rows\": 10544, \"gmv\": 153428.23}, {\"hour_of_day\": 14, \"orders\": 337, \"line_rows\": 9940, \"gmv\": 148641.02}, {\"hour_of_day\": 11, \"orders\": 331, \"line_rows\": 8867, \"gmv\": 152594.87}, {\"hour_of_day\": 15, \"orders\": 302, \"line_rows\": 15531, \"gmv\": 219872.13}, {\"hour_of_day\": 10, \"orders\": 269, \"line_rows\": 5901, \"gmv\": 187141.95}, {\"hour_of_day\": 16, \"orders\": 222, \"line_rows\": 7906, \"gmv\": 110813.64}, {\"hour_of_day\": 9, \"orders\": 197, \"line_rows\": 4976, \"gmv\": 103382.08}, {\"hour_of_day\": 8, \"orders\": 116, \"line_rows\": 1357, \"gmv\": 47579.58}, {\"hour_of_day\": 17, \"orders\": 109, \"line_rows\": 3739, \"gmv\": 149571.56}, {\"hour_of_day\": 19, \"orders\": 17, \"line_rows\": 511, \"gmv\": 7853.11}, {\"hour_of_day\": 18, \"orders\": 15, \"line_rows\": 1198, \"gmv\": 12464.89}, {\"hour_of_day\": 7, \"orders\": 3, \"line_rows\": 25, \"gmv\": 1982.0}, {\"hour_of_day\": 20, \"orders\": 1, \"line_rows\": 38, \"gmv\": 169.69}], \"row_count\": 14}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_396121ef57b76f861aaa0e04",
+      "content": "{\"tool\": \"run_sql\", \"purpose\": \"确认 2011-11 数据范围与销售/取消行的订单号情况\", \"columns\": [\"line_type\", \"rows\", \"orders\", \"min_t\", \"max_t\"], \"rows\": [{\"line_type\": \"销售\", \"rows\": 81727, \"orders\": 2751, \"min_t\": \"2011-11-01 08:16:00\", \"max_t\": \"2011-11-30 17:37:00\"}, {\"line_type\": \"取消\", \"rows\": 1013, \"orders\": 0, \"min_t\": \"2011-11-01 09:29:00\", \"max_t\": \"2011-11-30 17:42:00\"}], \"row_count\": 2}"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_51ec8b451199991938f6edee",
+          "function": {
+            "arguments": "{\"sql\": \"WITH h AS (\\n  SELECT EXTRACT(hour FROM order_time) AS hour_of_day,\\n         count(DISTINCT order_id) AS orders,\\n         count(*) AS line_rows,\\n         sum(gmv_amount) AS gmv\\n  FROM order_lines\\n  WHERE month = '2011-11'\\n  GROUP BY 1\\n)\\nSELECT hour_of_day,\\n       orders,\\n       round(orders * 1.0 / sum(orders) OVER (), 4) AS share_of_month_orders,\\n       line_rows,\\n       round(gmv, 2) AS gmv\\nFROM h\\nORDER BY orders DESC\\nLIMIT 3\", \"purpose\": \"验证最终查询：2011-11 订单数最多的 3 个小时及其订单数、占比\"}",
+            "name": "run_sql"
+          },
+          "type": "function",
+          "index": 0
+        }
+      ],
+      "reasoning_content": "Top 3 hours: 12 (436), 13 (396), 14 (337). Note hour 11 has 331, close to 14's 337.\n\nLet me submit the final query with top 3. Include order counts plus maybe sample sizes (line rows). The request: \"按下单的小时（0–23 点）统计订单数，订单最多的 3 个小时是哪几个，各有多少订单？\" — return top 3 hours with order counts. I'll include line_rows and gmv maybe as supporting columns. Rule 4: only return rows/columns needed. I'll include hour, orders, and maybe share. Keep it simple: hour_of_day, orders, line_rows (records in that hour), gmv. Maybe add share of monthly orders.\n\nLet me produce final query with ordering by orders desc, limit 3, plus share of the month's total orders.\n\nI'll verify final query runs."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_51ec8b451199991938f6edee",
+      "content": "{\"tool\": \"run_sql\", \"purpose\": \"验证最终查询：2011-11 订单数最多的 3 个小时及其订单数、占比\", \"columns\": [\"hour_of_day\", \"orders\", \"share_of_month_orders\", \"line_rows\", \"gmv\"], \"rows\": [{\"hour_of_day\": 12, \"orders\": 436, \"share_of_month_orders\": 0.1585, \"line_rows\": 12207, \"gmv\": 156621.23}, {\"hour_of_day\": 13, \"orders\": 396, \"share_of_month_orders\": 0.1439, \"line_rows\": 10544, \"gmv\": 153428.23}, {\"hour_of_day\": 14, \"orders\": 337, \"share_of_month_orders\": 0.1225, \"line_rows\": 9940, \"gmv\": 148641.02}], \"row_count\": 3}"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_8e09293db52c82b8123f18a1",
+          "function": {
+            "arguments": "{\"sql\": \"WITH h AS (\\n  SELECT EXTRACT(hour FROM order_time) AS hour_of_day,\\n         count(DISTINCT order_id) AS orders,\\n         count(*) AS line_rows,\\n         sum(gmv_amount) AS gmv\\n  FROM order_lines\\n  WHERE month = '2011-11'\\n  GROUP BY 1\\n)\\nSELECT hour_of_day,\\n       orders,\\n       round(orders * 1.0 / sum(orders) OVER (), 4) AS share_of_month_orders,\\n       line_rows,\\n       round(gmv, 2) AS gmv\\nFROM h\\nORDER BY orders DESC\\nLIMIT 3\", \"columns\": {\"hour_of_day\": \"下单小时（0–23 点，取自 order_time 的小时部分）\", \"orders\": \"该小时内的订单数（count(DISTINCT order_id)，只计销售订单）\", \"share_of_month_orders\": \"该小时订单数占 2011-11 全月订单数 2751 的比例（小数）\", \"line_rows\": \"该小时内的商品明细行数（销售行 + 取消行，样本量参考）\", \"gmv\": \"该小时的 GMV（英镑），sum(gmv_amount)\"}, \"definition\": \"时间范围：month = '2011-11'（2011-11-01 08:16 至 2011-11-30 17:42）。按 EXTRACT(hour FROM order_time) 分组；订单数用口径表表达式 count(DISTINCT order_id)（取消行 order_id 为空，天然只计销售订单）；GMV 用 sum(gmv_amount)。占比 = 该小时订单数 ÷ 当月全部小时订单数合计（2751）。结果按订单数降序取前 3 行。\", \"caveats\": [\"第 3 名（14 点，337 单）与第 4 名（11 点，331 单）仅差 6 单，若改用 GMV 排名，15 点（302 单、219,872 英镑）会进入前 3\", \"11 月内营业时段集中在 8–17 点，夜间及 20 点后几乎无单，因此不存在 0–23 全部小时都有数据的情况\", \"订单按发票号去重，取消单按取消发生时间入账，不回溯原订单小时\"]}",
+            "name": "submit_query"
+          },
+          "type": "function",
+          "index": 0
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_8e09293db52c82b8123f18a1",
+      "content": "{\"tool\": \"submit_query\", \"accepted\": true, \"sql\": \"WITH h AS (\\n  SELECT EXTRACT(hour FROM order_time) AS hour_of_day,\\n         count(DISTINCT order_id) AS orders,\\n         count(*) AS line_rows,\\n         sum(gmv_amount) AS gmv\\n  FROM order_lines\\n  WHERE month = '2011-11'\\n  GROUP BY 1\\n)\\nSELECT hour_of_day,\\n       orders,\\n       round(orders * 1.0 / sum(orders) OVER (), 4) AS share_of_month_orders,\\n       line_rows,\\n       round(gmv, 2) AS gmv\\nFROM h\\nORDER BY orders DESC\\nLIMIT 3\", \"columns\": [{\"name\": \"hour_of_day\", \"meaning\": \"下单小时（0–23 点，取自 order_time 的小时部分）\"}, {\"name\": \"orders\", \"meaning\": \"该小时内的订单数（count(DISTINCT order_id)，只计销售订单）\"}, {\"name\": \"share_of_month_orders\", \"meaning\": \"该小时订单数占 2011-11 全月订单数 2751 的比例（小数）\"}, {\"name\": \"line_rows\", \"meaning\": \"该小时内的商品明细行数（销售行 + 取消行，样本量参考）\"}, {\"name\": \"gmv\", \"meaning\": \"该小时的 GMV（英镑），sum(gmv_amount)\"}], \"rows\": [{\"hour_of_day\": 12, \"orders\": 436, \"share_of_month_orders\": 0.1585, \"line_rows\": 12207, \"gmv\": 156621.23}, {\"hour_of_day\": 13, \"orders\": 396, \"share_of_month_orders\": 0.1439, \"line_rows\": 10544, \"gmv\": 153428.23}, {\"hour_of_day\": 14, \"orders\": 337, \"share_of_month_orders\": 0.1225, \"line_rows\": 9940, \"gmv\": 148641.02}], \"row_count\": 3, \"definition\": \"时间范围：month = '2011-11'（2011-11-01 08:16 至 2011-11-30 17:42）。按 EXTRACT(hour FROM order_time) 分组；订单数用口径表表达式 count(DISTINCT order_id)（取消行 order_id 为空，天然只计销售订单）；GMV 用 sum(gmv_amount)。占比 = 该小时订单数 ÷ 当月全部小时订单数合计（2751）。结果按订单数降序取前 3 行。\", \"caveats\": [\"第 3 名（14 点，337 单）与第 4 名（11 点，331 单）仅差 6 单，若改用 GMV 排名，15 点（302 单、219,872 英镑）会进入前 3\", \"11 月内营业时段集中在 8–17 点，夜间及 20 点后几乎无单，因此不存在 0–23 全部小时都有数据的情况\", \"订单按发票号去重，取消单按取消发生时间入账，不回溯原订单小时\"], \"metrics_used\": [\"gmv\", \"orders\"]}"
+    },
+    {
+      "content": "2011 年 11 月订单最多的 3 个下单小时是 **12 点（436 单）、13 点（396 单）、14 点（337 单）**，合计占当月 2751 单的约 42.5%。",
+      "role": "assistant"
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "status": "answered",
+  "request": "2011 年 11 月，按下单的小时（0–23 点）统计订单数，订单最多的 3 个小时是哪几个，各有多少订单？",
+  "data": "retail_raw",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH nov AS (\n  SELECT invoice, hour(order_time) AS order_hour, amount\n  FROM order_lines\n  WHERE line_type = '销售'\n    AND order_date >= DATE '2011-11-01'\n    AND order_date < DATE '2011-12-01'\n),\nh AS (\n  SELECT order_hour,\n         count(DISTINCT invoice) AS order_cnt,\n         count(*) AS line_cnt,\n         sum(amount) AS gmv\n  FROM nov\n  GROUP BY 1\n),\ntot AS (SELECT count(DISTINCT invoice) AS month_orders FROM nov)\nSELECT h.order_hour            AS order_hour,\n       h.order_cnt             AS order_cnt,\n       h.line_cnt              AS line_cnt,\n       round(h.gmv, 2)          AS gmv,\n       round(h.order_cnt * 1.0 / tot.month_orders, 4) AS order_share,\n       tot.month_orders        AS month_total_orders\nFROM h CROSS JOIN tot\nORDER BY h.order_cnt DESC, h.order_hour\nLIMIT 3",
+  "columns": [
+    {
+      "name": "order_hour",
+      "meaning": "下单小时（0–23，按 order_time 取小时）"
+    },
+    {
+      "name": "order_cnt",
+      "meaning": "该小时的订单数（销售订单，不同发票号去重）"
+    },
+    {
+      "name": "line_cnt",
+      "meaning": "该小时的销售商品行数（记录数）"
+    },
+    {
+      "name": "gmv",
+      "meaning": "该小时的 GMV（英镑）"
+    },
+    {
+      "name": "order_share",
+      "meaning": "该小时订单数占 2011 年 11 月全部销售订单数的比例（小数，0.1585 = 15.85%）"
+    },
+    {
+      "name": "month_total_orders",
+      "meaning": "2011 年 11 月销售订单总数（去重发票号），用于核对占比分母"
+    }
+  ],
+  "rows": [
+    {
+      "order_hour": 12,
+      "order_cnt": 436,
+      "line_cnt": 12111,
+      "gmv": 156621.23,
+      "order_share": 0.1585,
+      "month_total_orders": 2751
+    },
+    {
+      "order_hour": 13,
+      "order_cnt": 396,
+      "line_cnt": 10364,
+      "gmv": 153428.23,
+      "order_share": 0.1439,
+      "month_total_orders": 2751
+    },
+    {
+      "order_hour": 14,
+      "order_cnt": 337,
+      "line_cnt": 9847,
+      "gmv": 148641.02,
+      "order_share": 0.1225,
+      "month_total_orders": 2751
+    }
+  ],
+  "row_count": 3,
+  "definition": "时间范围：order_date 在 2011-11-01 至 2011-11-30（按下单日期）；只取 line_type='销售' 的行。订单数 = count(DISTINCT invoice)（销售订单，按发票号去重）。分组键 = hour(order_time)，即下单时间的小时（0–23）。GMV = 该小时销售行 amount 之和（英镑）。order_share = 该小时订单数 ÷ 2011 年 11 月销售订单总数（2751）。按订单数降序取前 3 行。",
+  "caveats": [
+    "第 3 名（14 点，337 单）与第 4 名（11 点，331 单）差距很小，只有 6 单，如需严格区分排名结论建议再核对。",
+    "订单按发票号去重；若同一发票的多条商品行出现在不同小时，会分别计入各自小时，但实际同一订单通常集中在同一小时内。",
+    "早于 7 点、晚于 20 点的订单极少（20 点仅 1 单），未进入前 3。",
+    "order_time 为下单时间戳，与英国当地时间一致，未做时区转换。"
+  ],
+  "metrics_used": [],
+  "message": "已提交：2011 年 11 月按下单小时统计的销售订单数 Top 3 为 12 点（436 单）、13 点（396 单）、14 点（337 单），三者合计占当月 2,751 个销售订单的 42.5%（含第 4 名 11 点仅 331 单，差距很小需注意）。",
+  "sql_runs": 2,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 14091,
+    "completion_tokens": 1406,
+    "llm_calls": 4
+  },
+  "seconds": 14.48
+}

@@ -16,6 +16,7 @@ import duckdb
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .abtest import proportion_test, sample_size_proportions, srm_check
+from .analyst import RunSqlArgs, SubmitQueryArgs, run_sql, submit_query
 from .autodash.compile import compile_dashboard, preview_chart
 from .autodash.sources import profile_table
 from .autodash.spec import MAX_SUBMIT_CHARTS, Chart, DashboardSpec, Metric
@@ -267,6 +268,16 @@ TOOLS: dict[str, Tool] = {tool.name: tool for tool in (
          '正确写法：{"verdict": "有问题", "findings": [{"quote": "从答案原样照抄的一句", "category": "方向或比较说反", '
          '"severity": "错误", "explanation": "第 2 次工具调用里 GMV 环比是 -6.00%，答案写成了增长", "evidence": [2]}], '
          '"checked": "核对了……"}；没有问题时 findings 留空、verdict 写“通过”'),
+    Tool("run_sql",
+         "试一条只读查询（DuckDB 的 SELECT），返回前几行和总行数。用来确认筛选条件、数量级和口径；出错时返回原因。",
+         RunSqlArgs, run_sql),
+    Tool("submit_query",
+         "提交最终的那一条查询：程序重新执行，执行结果就是交出去的内容。要说明每一列的含义和口径。"
+         "结果为空、超过行数上限或列没有说明时会被退回。",
+         SubmitQueryArgs, submit_query,
+         '正确写法：{"sql": "SELECT country, round(sum(gmv_amount), 2) AS gmv FROM order_lines WHERE week = \'2011-W48\' '
+         'GROUP BY 1 ORDER BY 2 DESC LIMIT 5", "columns": {"country": "国家", "gmv": "GMV（英镑）"}, '
+         '"definition": "2011-W48 各国 GMV，取前 5", "caveats": []}'),
 )}
 # 每个领域给模型看的工具。电商的顺序和 M7b 评测时一致；load_skill 和 calculate 两个领域共用
 DOMAIN_TOOLS: dict[str, tuple[str, ...]] = {
@@ -275,6 +286,7 @@ DOMAIN_TOOLS: dict[str, tuple[str, ...]] = {
     "company": ("company_overview", "financial_summary", "dupont", "peer_compare", "load_skill", "calculate"),
     "dashboard": ("profile_table", "preview_chart", "submit_dashboard", "load_skill", "calculate"),
     "review": ("calculate", "submit_review"),  # 复核 Agent：不查数据，只验算和提交意见
+    "analyst": ("run_sql", "submit_query"),  # 查询 Agent：只写只读 SQL，上下文是 analyst.QueryContext
 }
 
 

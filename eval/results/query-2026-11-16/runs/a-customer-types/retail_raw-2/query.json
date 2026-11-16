@@ -1,0 +1,76 @@
+{
+  "status": "answered",
+  "request": "2011-W48 按客户类型（新客、老客、未知）分，GMV 各是多少？",
+  "data": "retail_raw",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH w AS (\n  SELECT * FROM order_lines WHERE week = '2011-W48'\n), t AS (\n  SELECT customer_type,\n         ROUND(SUM(CASE WHEN line_type = '销售' THEN amount ELSE 0 END), 2) AS gmv,\n         COUNT(DISTINCT CASE WHEN line_type = '销售' THEN invoice END) AS order_cnt,\n         COUNT(DISTINCT CASE WHEN line_type = '销售' AND customer_id IS NOT NULL THEN customer_id END) AS active_customers,\n         SUM(CASE WHEN line_type = '销售' THEN 1 ELSE 0 END) AS sale_line_cnt\n  FROM w\n  GROUP BY customer_type\n)\nSELECT customer_type,\n       gmv,\n       ROUND(gmv / SUM(gmv) OVER (), 4) AS gmv_share,\n       order_cnt,\n       active_customers,\n       sale_line_cnt\nFROM t\nORDER BY gmv DESC",
+  "columns": [
+    {
+      "name": "customer_type",
+      "meaning": "客户类型（新客/老客/未知）"
+    },
+    {
+      "name": "gmv",
+      "meaning": "该客户类型在 2011-W48 的 GMV（英镑，下单口径，含之后被取消的订单）"
+    },
+    {
+      "name": "gmv_share",
+      "meaning": "该客户类型 GMV 占 2011-W48 全周 GMV 的比例（小数，0.1234 = 12.34%）"
+    },
+    {
+      "name": "order_cnt",
+      "meaning": "销售订单数（该类型下不同发票号的个数）"
+    },
+    {
+      "name": "active_customers",
+      "meaning": "有购买且有客户 ID 的去重客户数（未知类型为 0）"
+    },
+    {
+      "name": "sale_line_cnt",
+      "meaning": "销售明细行数（商品条数）"
+    }
+  ],
+  "rows": [
+    {
+      "customer_type": "老客",
+      "gmv": 236766.93,
+      "gmv_share": 0.7653,
+      "order_cnt": 595,
+      "active_customers": 483,
+      "sale_line_cnt": 12142
+    },
+    {
+      "customer_type": "未知",
+      "gmv": 62564.34,
+      "gmv_share": 0.2022,
+      "order_cnt": 32,
+      "active_customers": 0,
+      "sale_line_cnt": 4947
+    },
+    {
+      "customer_type": "新客",
+      "gmv": 10050.46,
+      "gmv_share": 0.0325,
+      "order_cnt": 36,
+      "active_customers": 31,
+      "sale_line_cnt": 1209
+    }
+  ],
+  "row_count": 3,
+  "definition": "时间范围：week = '2011-W48'（ISO 周，2011-11-28 至 2011-12-04）。GMV 按口径 = 销售行（下单口径，line_type='销售'）的 amount 求和，含之后被取消的订单，不扣取消金额；取消单按取消发生时间入账，不在本查询口径内。按 customer_type 分组，订单数 = 销售订单中不同 invoice 的个数；活跃客户数 = 销售订单中 customer_id 非空的不同客户数。金额保留 2 位小数，占比保留 4 位小数。",
+  "caveats": [
+    "“未知”组即缺客户 ID 的订单（约占全站四分之一行），其金额计入 GMV 但不计入活跃客户数；该组仅 32 个订单却有 4947 条明细行，是少数大额批量订单，GMV 被少数订单抬高，与新客/老客不可直接按人均比较。",
+    "2011-W48 为完整一周（周一至周日），与 2011-W49（数据仅到 12-09 周五）不同；若与其他周比较请注意 W49 不完整。",
+    "新客/老客按“首次购买落在本周”判定，同一客户在不同周的分组会变化；老客取消金额 3235.77 英镑未从 GMV 中扣除。"
+  ],
+  "metrics_used": [],
+  "message": "已提交：2011-W48（完整一周）按客户类型的 GMV 为 老客 236,766.93 英镑（占 76.53%，595 单）、未知（缺客户 ID）62,564.34 英镑（占 20.22%，32 单）、新客 10,050.46 英镑（占 3.25%，36 单），全周合计 309,381.73 英镑。",
+  "sql_runs": 3,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 15127,
+    "completion_tokens": 1967,
+    "llm_calls": 4
+  },
+  "seconds": 14.4
+}

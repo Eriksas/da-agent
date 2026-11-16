@@ -1,0 +1,74 @@
+{
+  "status": "answered",
+  "request": "2011-W48 相比 2011-W47，净销售额变化了多少？给出两周的净销售额、差额（W48 减 W47）和变化率。",
+  "data": "retail",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH w AS (\n  SELECT\n    sum(net_amount) FILTER (WHERE week = '2011-W47') AS net_w47,\n    sum(net_amount) FILTER (WHERE week = '2011-W48') AS net_w48,\n    count(DISTINCT order_id) FILTER (WHERE week = '2011-W47') AS orders_w47,\n    count(DISTINCT order_id) FILTER (WHERE week = '2011-W48') AS orders_w48,\n    count(*) FILTER (WHERE week = '2011-W47') AS lines_w47,\n    count(*) FILTER (WHERE week = '2011-W48') AS lines_w48\n  FROM order_lines\n  WHERE week IN ('2011-W47', '2011-W48')\n)\nSELECT\n  round(net_w47, 2) AS net_sales_w47,\n  round(net_w48, 2) AS net_sales_w48,\n  round(net_w48 - net_w47, 2) AS net_sales_diff_w48_minus_w47,\n  round((net_w48 - net_w47) / net_w47, 4) AS net_sales_change_rate,\n  orders_w47,\n  orders_w48,\n  lines_w47,\n  lines_w48\nFROM w",
+  "columns": [
+    {
+      "name": "net_sales_w47",
+      "meaning": "2011-W47 净销售额（英镑）"
+    },
+    {
+      "name": "net_sales_w48",
+      "meaning": "2011-W48 净销售额（英镑）"
+    },
+    {
+      "name": "net_sales_diff_w48_minus_w47",
+      "meaning": "净销售额差额 = W48 − W47（英镑）"
+    },
+    {
+      "name": "net_sales_change_rate",
+      "meaning": "净销售额变化率 = (W48 − W47) / W47（小数，0.0369 表示 +3.69%）"
+    },
+    {
+      "name": "orders_w47",
+      "meaning": "2011-W47 销售订单数（count(DISTINCT order_id)）"
+    },
+    {
+      "name": "orders_w48",
+      "meaning": "2011-W48 销售订单数（count(DISTINCT order_id)）"
+    },
+    {
+      "name": "lines_w47",
+      "meaning": "2011-W47 明细行数（含销售与取消）"
+    },
+    {
+      "name": "lines_w48",
+      "meaning": "2011-W48 明细行数（含销售与取消）"
+    }
+  ],
+  "rows": [
+    {
+      "net_sales_w47": 295233.31,
+      "net_sales_w48": 306115.06,
+      "net_sales_diff_w48_minus_w47": 10881.75,
+      "net_sales_change_rate": 0.0369,
+      "orders_w47": 616,
+      "orders_w48": 663,
+      "lines_w47": 19429,
+      "lines_w48": 18535
+    }
+  ],
+  "row_count": 1,
+  "definition": "净销售额按口径表取 sum(net_amount)（销售行为正、取消行为负，即 GMV − 取消金额），按 ISO 周字段 week 分组，仅取 2011-W47 与 2011-W48 两周的全部行（含销售行与取消单，取消单按取消发生周入账）。差额 = W48 净销售额 − W47 净销售额；变化率 = 差额 ÷ W47 净销售额，保留 4 位小数。订单数取 count(DISTINCT order_id)（只数销售订单），行数为两周明细行数，用于样本量参考。",
+  "caveats": [
+    "取消单按取消发生的时间入账、不回溯原订单周，因此两周的净销售额各自包含本周发生取消的金额，差额中含取消时点波动的影响（W47 取消金额 7,158.91 英镑，高于 W48 的 3,266.67 英镑）。",
+    "两周各有 6 个有销售的日期（W47 缺 2011-11-26、W48 缺 2011-12-03，均为周六），覆盖天数对称，可比性较好。",
+    "2011-W48 是完整周（2011-11-28 至 2011-12-04），不受数据截止日 2011-12-09 的截断影响。",
+    "少数金额极大且很快全额取消的订单会抬高当周 GMV，但净销售额不受其影响；单周波动仍可能由个别大订单驱动。"
+  ],
+  "metrics_used": [
+    "net_sales",
+    "orders"
+  ],
+  "message": "已提交：2011-W48 净销售额 306,115.06 英镑，2011-W47 为 295,233.31 英镑，差额 +10,881.75 英镑，变化率 +0.0369（约 +3.69%），并附两周订单数与明细行数作样本量参考。",
+  "sql_runs": 3,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 21594,
+    "completion_tokens": 2315,
+    "llm_calls": 5
+  },
+  "seconds": 24.5
+}

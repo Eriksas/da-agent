@@ -1,0 +1,112 @@
+{
+  "status": "answered",
+  "request": "2011 年 10 月，按星期几（周一到周日）分别合计 GMV，每一天各是多少？",
+  "data": "retail",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH month_tot AS (\n  SELECT sum(gmv_amount) AS month_gmv FROM order_lines\n  WHERE order_date >= DATE '2011-10-01' AND order_date < DATE '2011-11-01'\n), agg AS (\n  SELECT isodow(order_date) AS dow,\n         sum(gmv_amount) AS gmv,\n         count(DISTINCT order_id) AS orders,\n         count(DISTINCT order_date) AS trading_days,\n         count(*) AS line_rows\n  FROM order_lines\n  WHERE order_date >= DATE '2011-10-01' AND order_date < DATE '2011-11-01'\n  GROUP BY 1\n), dow_list AS (SELECT unnest([1,2,3,4,5,6,7]) AS dow)\nSELECT CASE d.dow\n         WHEN 1 THEN '星期一' WHEN 2 THEN '星期二' WHEN 3 THEN '星期三'\n         WHEN 4 THEN '星期四' WHEN 5 THEN '星期五' WHEN 6 THEN '星期六'\n         WHEN 7 THEN '星期日' END AS weekday,\n       round(coalesce(a.gmv, 0), 2) AS gmv,\n       round(coalesce(a.gmv, 0) / t.month_gmv, 4) AS gmv_share_of_month,\n       coalesce(a.orders, 0) AS orders,\n       coalesce(a.trading_days, 0) AS trading_days,\n       coalesce(a.line_rows, 0) AS line_rows\nFROM dow_list d\nLEFT JOIN agg a ON a.dow = d.dow\nCROSS JOIN month_tot t\nORDER BY d.dow",
+  "columns": [
+    {
+      "name": "weekday",
+      "meaning": "星期几（星期一至星期日，按 ISO 周排序）"
+    },
+    {
+      "name": "gmv",
+      "meaning": "2011 年 10 月该星期几合计 GMV（英镑），sum(gmv_amount)；周六无任何记录，为 0"
+    },
+    {
+      "name": "gmv_share_of_month",
+      "meaning": "该星期几 GMV 占 2011-10 全月 GMV 的比例（小数，0.2308 = 23.08%）"
+    },
+    {
+      "name": "orders",
+      "meaning": "该星期几的销售订单数（count(DISTINCT order_id)，只数销售订单）"
+    },
+    {
+      "name": "trading_days",
+      "meaning": "该星期几在 2011-10 内有交易的日期数（count(DISTINCT order_date)）"
+    },
+    {
+      "name": "line_rows",
+      "meaning": "该星期几的行数（订单行，含销售与取消行；用于判断样本量）"
+    }
+  ],
+  "rows": [
+    {
+      "weekday": "星期一",
+      "gmv": 254689.55,
+      "gmv_share_of_month": 0.2308,
+      "orders": 397,
+      "trading_days": 5,
+      "line_rows": 14556
+    },
+    {
+      "weekday": "星期二",
+      "gmv": 183600.37,
+      "gmv_share_of_month": 0.1664,
+      "orders": 321,
+      "trading_days": 4,
+      "line_rows": 10471
+    },
+    {
+      "weekday": "星期三",
+      "gmv": 176360.69,
+      "gmv_share_of_month": 0.1598,
+      "orders": 356,
+      "trading_days": 4,
+      "line_rows": 8683
+    },
+    {
+      "weekday": "星期四",
+      "gmv": 206311.7,
+      "gmv_share_of_month": 0.187,
+      "orders": 386,
+      "trading_days": 4,
+      "line_rows": 10177
+    },
+    {
+      "weekday": "星期五",
+      "gmv": 190742.13,
+      "gmv_share_of_month": 0.1729,
+      "orders": 299,
+      "trading_days": 4,
+      "line_rows": 7138
+    },
+    {
+      "weekday": "星期六",
+      "gmv": 0.0,
+      "gmv_share_of_month": 0.0,
+      "orders": 0,
+      "trading_days": 0,
+      "line_rows": 0
+    },
+    {
+      "weekday": "星期日",
+      "gmv": 91609.81,
+      "gmv_share_of_month": 0.083,
+      "orders": 246,
+      "trading_days": 5,
+      "line_rows": 8401
+    }
+  ],
+  "row_count": 7,
+  "definition": "时间范围：order_date 在 2011-10-01 至 2011-10-31（2011 年 10 月，含月末 31 日）。按 ISO 星期几分组：isodow(order_date)，1=周一 … 7=周日。GMV 口径照抄指标表：sum(gmv_amount)（销售行金额之和，取消行为 0，即下单口径）。订单数照抄口径：count(DISTINCT order_id)（只数销售订单）。交易天数：count(DISTINCT order_date)。用 unnest([1..7]) 构造完整周一至周日列表并 LEFT JOIN，保证没有数据的星期几（如 2011-10 的周六）也保留为 0 行。gmv_share_of_month = 该组 GMV / 同月全量 sum(gmv_amount)。金额 round 到 2 位，比率 round 到 4 位小数。",
+  "caveats": [
+    "2011 年 10 月共有 5 个周六（1、8、15、22、29 日），该月没有任何周六记录（GMV、订单数均为 0），所以星期六一行是 0 而非缺失；全量数据中仅极少量周六记录（400 行），该零售商基本不营业。",
+    "各星期几的日期数不同：周一与周日各 5 天，周二至周五各 4 天，因此 GMV 总量不可直接横向比较下单日均值；如需可比口径应除以 trading_days。",
+    "GMV 为下单口径，含之后被取消的订单；本结果未扣除取消金额（2011-10 内取消单按取消发生时间入账，可能对应其他月份的订单）。",
+    "约四分之一的行缺客户 ID，但金额仍计入 GMV，因此 GMV 不受客户 ID 缺失影响；个别金额极大的订单会抬高当周 GMV。"
+  ],
+  "metrics_used": [
+    "gmv",
+    "orders"
+  ],
+  "message": "已提交：2011 年 10 月按星期几（ISO 星期，周一→周日）汇总的 GMV（sum(gmv_amount)）——周一 254,689.55、周二 183,600.37、周三 176,360.69、周四 206,311.70、周五 190,742.13、周六 0（该月无任何周六记录）、周日 91,609.81 英镑，并附各组订单数、有交易天数与行数供判断样本量。",
+  "sql_runs": 4,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 27526,
+    "completion_tokens": 2753,
+    "llm_calls": 6
+  },
+  "seconds": 45.03
+}

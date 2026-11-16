@@ -1,0 +1,167 @@
+{
+  "run_id": "20261116T104654-65d565",
+  "question": "2011-W48 和去年同一周（2010-W48）的订单数各是多少？同比变化率是多少？",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "max_tool_calls": 8,
+  "use_skills": true,
+  "domain": "analyst",
+  "status": "completed",
+  "answer": "已提交：2010-W48 销售订单数 652 单、2011-W48 为 663 单，同比增加 11 单、变化率 +1.69%（0.0169），并附两周销售行数（15,876 / 18,298 条）作为样本量参考。",
+  "error": null,
+  "budget_exhausted": false,
+  "repair": null,
+  "malformed_replies": 0,
+  "steps": [
+    {
+      "round": 1,
+      "tool": "run_sql",
+      "arguments": {
+        "sql": "SELECT week, line_type, count(*) AS lines, count(DISTINCT invoice) AS orders, min(order_date) AS d1, max(order_date) AS d2\nFROM order_lines\nWHERE week IN ('2011-W48','2010-W48')\nGROUP BY week, line_type\nORDER BY week, line_type",
+        "purpose": "确认 2010-W48 与 2011-W48 的销售/取消订单数与行数、日期范围"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 16
+    },
+    {
+      "round": 1,
+      "tool": "run_sql",
+      "arguments": {
+        "sql": "SELECT week, count(DISTINCT invoice) AS orders, sum(amount) AS gmv, count(*) AS lines\nFROM order_lines\nWHERE line_type = '销售' AND week LIKE '2011-W4%'\nGROUP BY week ORDER BY week",
+        "purpose": "看 2011 年 W45-W49 附近周的订单数与 GMV，确认周是否完整"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 14
+    },
+    {
+      "round": 2,
+      "tool": "run_sql",
+      "arguments": {
+        "sql": "WITH w AS (\n  SELECT week,\n         COUNT(DISTINCT invoice) AS order_count,\n         COUNT(*) AS line_count\n  FROM order_lines\n  WHERE line_type = '销售'\n    AND week IN ('2010-W48', '2011-W48')\n  GROUP BY week\n)\nSELECT\n  MAX(CASE WHEN week = '2010-W48' THEN order_count END) AS orders_2010_w48,\n  MAX(CASE WHEN week = '2011-W48' THEN order_count END) AS orders_2011_w48,\n  MAX(CASE WHEN week = '2011-W48' THEN order_count END) - MAX(CASE WHEN week = '2010-W48' THEN order_count END) AS order_diff,\n  ROUND((MAX(CASE WHEN week = '2011-W48' THEN order_count END) - MAX(CASE WHEN week = '2010-W48' THEN order_count END))\n        / MAX(CASE WHEN week = '2010-W48' THEN order_count END), 4) AS yoy_change_rate,\n  MAX(CASE WHEN week = '2010-W48' THEN line_count END) AS lines_2010_w48,\n  MAX(CASE WHEN week = '2011-W48' THEN line_count END) AS lines_2011_w48\nFROM w",
+        "purpose": "验证最终单行汇总查询：两年 W48 订单数与同比变化率"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 16
+    },
+    {
+      "round": 3,
+      "tool": "submit_query",
+      "arguments": {
+        "sql": "WITH w AS (\n  SELECT week,\n         COUNT(DISTINCT invoice) AS order_count,\n         COUNT(*) AS line_count\n  FROM order_lines\n  WHERE line_type = '销售'\n    AND week IN ('2010-W48', '2011-W48')\n  GROUP BY week\n)\nSELECT\n  MAX(CASE WHEN week = '2010-W48' THEN order_count END) AS orders_2010_w48,\n  MAX(CASE WHEN week = '2011-W48' THEN order_count END) AS orders_2011_w48,\n  MAX(CASE WHEN week = '2011-W48' THEN order_count END) - MAX(CASE WHEN week = '2010-W48' THEN order_count END) AS order_diff,\n  ROUND((MAX(CASE WHEN week = '2011-W48' THEN order_count END) - MAX(CASE WHEN week = '2010-W48' THEN order_count END))\n        / MAX(CASE WHEN week = '2010-W48' THEN order_count END), 4) AS yoy_change_rate,\n  MAX(CASE WHEN week = '2010-W48' THEN line_count END) AS lines_2010_w48,\n  MAX(CASE WHEN week = '2011-W48' THEN line_count END) AS lines_2011_w48\nFROM w",
+        "columns": {
+          "orders_2010_w48": "2010-W48 销售订单数（个）",
+          "orders_2011_w48": "2011-W48 销售订单数（个）",
+          "order_diff": "订单数同比增减（个）",
+          "yoy_change_rate": "订单数同比变化率（小数，0.0169 = +1.69%）",
+          "lines_2010_w48": "2010-W48 销售行数（条，样本量参考）",
+          "lines_2011_w48": "2011-W48 销售行数（条，样本量参考）"
+        },
+        "definition": "订单数 = 只统计 line_type='销售' 的行，按发票号 invoice 去重计数（同口径：2010-W48 与 2011-W48 各取一次）；时间范围为 ISO 周 2010-W48（2010-11-29~2010-12-05）与 2011-W48（2011-11-28~2011-12-04）；同比变化率 =（2011-W48 订单数 − 2010-W48 订单数）÷ 2010-W48 订单数，round 到 4 位小数；同时给出两周的销售行数作为样本量参考。",
+        "caveats": [
+          "2011-W48 与 2010-W48 均为完整 7 天周（周一至周日），可比；数据末尾的 2011-W49 是不完整周，不在本结果内。",
+          "订单数仅统计销售单，不含取消单；取消单按取消发生周入账，与原订单周不同。",
+          "2010-12-23 至 2011-01-03 停业，不影响这两周。",
+          "订单数为周级计数（约 650 单），同比 +1.69% 属于小幅波动，未做显著性检验。"
+        ]
+      },
+      "ok": true,
+      "error": null,
+      "ms": 16
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 15648,
+    "completion_tokens": 2080,
+    "llm_calls": 4
+  },
+  "started_at": "2026-11-16T02:46:54+00:00",
+  "seconds": 16.24,
+  "messages": [
+    {
+      "role": "system",
+      "content": "你是一名数据分析师，负责把一个分析请求写成 SQL 并算出结果。你不写报告，只负责把数算对；结果会交给另一位同事去解读。\n\n## 数据\n\n数据：电商交易（UCI Online Retail II，已清洗）。一家英国线上礼品批发零售商 2009-12 至 2011-12 的商品交易明细。清洗规则已经应用： 删除了重复、坏账调整、单价为 0 等记录，运费等非商品行不在表里。金额单位是英镑。\n\n### 表 order_lines（1,021,272 行）\n每行是订单里的一个商品（销售）或取消单里的一个商品（取消）。金额和数量都是正数，用 line_type 区分。\n\n| 列 | 类型 | 说明 | 取值 |\n|---|---|---|---|\n| invoice | VARCHAR | 发票号（订单号）；C 开头的是取消单 | 46,922 种，例如 573585、581219、581492、580729、558475 |\n| line_type | VARCHAR | 销售 / 取消 | 全部取值：销售、取消 |\n| order_time | TIMESTAMP | 下单（或取消）时间 | 2009-12-01 07:45:00 至 2011-12-09 12:50:00 |\n| order_date | DATE | 下单（或取消）日期 | 2009-12-01 至 2011-12-09 |\n| week | VARCHAR | ISO 周（周一到周日），写法如 2011-W48 | 104 种，例如 2011-W46、2011-W47、2011-W45、2010-W47、2011-W48 |\n| month | VARCHAR | 月份，写法如 2011-11 | 25 种，例如 2011-11、2010-11、2011-10、2010-10、2011-09 |\n| stock_code | VARCHAR | 商品编码 | 4,909 种，例如 85123A、22423、85099B、21212、20725 |\n| description | VARCHAR | 商品名称 | 5,351 种，例如 WHITE HANGING HEART T-LIGHT HOLDER、REGENCY CAKESTAND 3 TIER、JUMBO BAG RED RETROSPOT、ASSORTED COLOUR BIRD ORNAMENT、PARTY BUNTING |\n| quantity | BIGINT | 数量（正数） | 1 至 80995 |\n| price | DOUBLE | 单价 | 0.001 至 1157.15 |\n| amount | DOUBLE | 金额 = 数量 × 单价（正数；销售行和取消行都是正数，不能直接相加） | 0.001 至 168469.6 |\n| customer_id | VARCHAR | 客户 ID；缺失表示游客或未登记客户 | 5,875 种，例如 17841、14911、12748、14606、14096；22.2% 为空 |\n| customer_type | VARCHAR | 新客（这位客户第一次购买就在这一行所在的周）/ 老客 / 未知（缺客户 ID） | 全部取值：老客、未知、新客 |\n| country | VARCHAR | 客户所在国家（英文；Unspecified、European Community 归为“国家不明确”） | 42 种，例如 United Kingdom、EIRE、Germany、France、Netherlands |\n\n### 注意\n- 指标口径（文字）：GMV = 商品销售额（下单口径），数量 × 单价之和，含之后被取消的订单；取消金额 = 取消单的商品金额（正数）；净销售额 = GMV − 取消金额；取消率 = 取消金额 ÷ GMV；订单数 = 不同发票号的个数，只数销售订单；客单价 = GMV ÷ 订单数；活跃客户数 = 有购买的可识别客户数（不含缺客户 ID 的订单）；新客数 = 第一次购买落在当周的客户数；交易天数 = 有销售的日期数。\n- 周是 ISO 周；数据截止到 2011-12-09（周五），所以 2011-W49 不是完整的一周，和完整的周比总量会偏低。\n- 2010-12-23 到 2011-01-03 停业，这期间没有数据。\n- 约四分之一的行缺客户 ID：按客户统计（活跃客户、新老客）时这些行不计入，但它们的金额计入 GMV。\n- 取消单按取消发生的时间入账，不回溯到原订单所在的周。\n- 有少数金额极大、下单后很快又全部取消的订单（例如发票 541431、581483），会抬高当周的 GMV 和商品排名；净销售额不受影响。\n\n\n## 怎么做\n\n1. SQL 用 DuckDB 的写法。每次只能执行一条 SELECT（可以用 WITH），只能读上面列出的表，不能修改任何东西。\n2. 上面有“指标口径”时，用到这些指标就照抄它的表达式，不要自己另写一种算法。请求里的指标不在口径表里时，自己决定怎么算，并在 definition 里写清楚。\n3. 先用 run_sql 试，看结果是否合理（行数、数量级、有没有空值、筛选条件有没有写对取值），再用 submit_query 提交最终的那一条查询。\n4. 提交的结果就是交出去的全部内容：一条查询，不超过 200 行。请求要哪些数，就只返回算出这些数需要的行和列；要对比两个时期或两个分组时，把它们放在同一条查询的结果里。\n5. 每一列用 AS 起一个看得懂的列名，并在 columns 里写明含义和单位。比率用小数表示（0.1234 表示 12.34%）并在说明里写明。\n6. 金额保留 2 位小数，比率保留 4 位小数（用 round）。\n7. 按分组比较时，带上每组的样本量（订单数、记录数）这一列，方便判断样本够不够；并按请求的要求排序。\n8. 发现结果需要提醒（样本很少、时间段不完整、有空值）时，写进 caveats。\n9. 数据里没有请求需要的信息（例如没有成本就算不了利润，日期超出数据范围），或者请求含糊到无法确定要算什么：不要提交，不要猜，直接用文字说明原因。\n10. 最多调用 8 次工具，够用就停。\n\n提交成功后，用一句话说明交出的结果是什么。\n"
+    },
+    {
+      "role": "user",
+      "content": "2011-W48 和去年同一周（2010-W48）的订单数各是多少？同比变化率是多少？"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_ef64acabdecf6ba0cb0f2a27",
+          "function": {
+            "arguments": "{\"sql\": \"SELECT week, line_type, count(*) AS lines, count(DISTINCT invoice) AS orders, min(order_date) AS d1, max(order_date) AS d2\\nFROM order_lines\\nWHERE week IN ('2011-W48','2010-W48')\\nGROUP BY week, line_type\\nORDER BY week, line_type\", \"purpose\": \"确认 2010-W48 与 2011-W48 的销售/取消订单数与行数、日期范围\"}",
+            "name": "run_sql"
+          },
+          "type": "function",
+          "index": 0
+        },
+        {
+          "id": "call_ef64acabdecf6ba0cb0f2a28",
+          "function": {
+            "arguments": "{\"sql\": \"SELECT week, count(DISTINCT invoice) AS orders, sum(amount) AS gmv, count(*) AS lines\\nFROM order_lines\\nWHERE line_type = '销售' AND week LIKE '2011-W4%'\\nGROUP BY week ORDER BY week\", \"purpose\": \"看 2011 年 W45-W49 附近周的订单数与 GMV，确认周是否完整\"}",
+            "name": "run_sql"
+          },
+          "type": "function",
+          "index": 0
+        }
+      ],
+      "reasoning_content": "We need order counts for 2011-W48 and 2010-W48, plus YoY change rate.\n\n订单数 = 不同发票号的个数，只数销售订单 (line_type = '销售').\n\nLet me check the data. 2010-W48: ISO week 48 of 2010 starts Monday 2010-11-29, ends Sunday 2010-12-05. Data ends 2011-12-09 which is in W49. 2011-W48 starts Monday 2011-11-28, ends 2011-12-04. Both complete weeks (data range ends 2011-12-09, so W49 partial but W48 full).\n\nLet's run the query.\n\nAlso note the metric definition: 订单数 = 不同发票号的个数，只数销售订单.\n\nLet me run a query to check counts.\n\nAlso I should include sample size (记录数 = 行数) per the instructions (\"按分组比较时，带上每组的样本量（订单数、记录数）\"). Let me include both order count and line count.\n\nLet's first run an exploratory query."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_ef64acabdecf6ba0cb0f2a27",
+      "content": "{\"tool\": \"run_sql\", \"purpose\": \"确认 2010-W48 与 2011-W48 的销售/取消订单数与行数、日期范围\", \"columns\": [\"week\", \"line_type\", \"lines\", \"orders\", \"d1\", \"d2\"], \"rows\": [{\"week\": \"2010-W48\", \"line_type\": \"取消\", \"lines\": 239, \"orders\": 93, \"d1\": \"2010-11-29\", \"d2\": \"2010-12-05\"}, {\"week\": \"2010-W48\", \"line_type\": \"销售\", \"lines\": 15876, \"orders\": 652, \"d1\": \"2010-11-29\", \"d2\": \"2010-12-05\"}, {\"week\": \"2011-W48\", \"line_type\": \"取消\", \"lines\": 237, \"orders\": 112, \"d1\": \"2011-11-28\", \"d2\": \"2011-12-04\"}, {\"week\": \"2011-W48\", \"line_type\": \"销售\", \"lines\": 18298, \"orders\": 663, \"d1\": \"2011-11-28\", \"d2\": \"2011-12-04\"}], \"row_count\": 4}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_ef64acabdecf6ba0cb0f2a28",
+      "content": "{\"tool\": \"run_sql\", \"purpose\": \"看 2011 年 W45-W49 附近周的订单数与 GMV，确认周是否完整\", \"columns\": [\"week\", \"orders\", \"gmv\", \"lines\"], \"rows\": [{\"week\": \"2011-W40\", \"orders\": 488, \"gmv\": 310948.14, \"lines\": 13688}, {\"week\": \"2011-W41\", \"orders\": 448, \"gmv\": 221268.1, \"lines\": 12722}, {\"week\": \"2011-W42\", \"orders\": 446, \"gmv\": 264358.21, \"lines\": 13212}, {\"week\": \"2011-W43\", \"orders\": 519, \"gmv\": 242683.19, \"lines\": 13937}, {\"week\": \"2011-W44\", \"orders\": 527, \"gmv\": 292747.79, \"lines\": 16103}, {\"week\": \"2011-W45\", \"orders\": 634, \"gmv\": 357706.72, \"lines\": 18651}, {\"week\": \"2011-W46\", \"orders\": 687, \"gmv\": 373178.36, \"lines\": 20342}, {\"week\": \"2011-W47\", \"orders\": 616, \"gmv\": 302392.22, \"lines\": 19209}, {\"week\": \"2011-W48\", \"orders\": 663, \"gmv\": 309381.73, \"lines\": 18298}, {\"week\": \"2011-W49\", \"orders\": 509, \"gmv\": 483725.13, \"lines\": 17225}], \"row_count\": 10}"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_075e7c2fed449c8d08eedf2f",
+          "function": {
+            "arguments": "{\"sql\": \"WITH w AS (\\n  SELECT week,\\n         COUNT(DISTINCT invoice) AS order_count,\\n         COUNT(*) AS line_count\\n  FROM order_lines\\n  WHERE line_type = '销售'\\n    AND week IN ('2010-W48', '2011-W48')\\n  GROUP BY week\\n)\\nSELECT\\n  MAX(CASE WHEN week = '2010-W48' THEN order_count END) AS orders_2010_w48,\\n  MAX(CASE WHEN week = '2011-W48' THEN order_count END) AS orders_2011_w48,\\n  MAX(CASE WHEN week = '2011-W48' THEN order_count END) - MAX(CASE WHEN week = '2010-W48' THEN order_count END) AS order_diff,\\n  ROUND((MAX(CASE WHEN week = '2011-W48' THEN order_count END) - MAX(CASE WHEN week = '2010-W48' THEN order_count END))\\n        / MAX(CASE WHEN week = '2010-W48' THEN order_count END), 4) AS yoy_change_rate,\\n  MAX(CASE WHEN week = '2010-W48' THEN line_count END) AS lines_2010_w48,\\n  MAX(CASE WHEN week = '2011-W48' THEN line_count END) AS lines_2011_w48\\nFROM w\", \"purpose\": \"验证最终单行汇总查询：两年 W48 订单数与同比变化率\"}",
+            "name": "run_sql"
+          },
+          "type": "function",
+          "index": 0
+        }
+      ],
+      "reasoning_content": "2010-W48: 652 sales orders; 2011-W48: 663 sales orders. YoY = (663-652)/652 = 1.687%... let's compute: 11/652 = 0.016871 = 1.69%.\n\nLet me produce final query with both weeks in one result plus YoY rate. Include line counts as sample size.\n\nQuery:\n\nWITH w AS (\n  SELECT week, COUNT(DISTINCT invoice) AS order_count, COUNT(*) AS line_count\n  FROM order_lines WHERE line_type='销售' AND week IN ('2010-W48','2011-W48')\n  GROUP BY week\n)\nSELECT ... pivot into one row: week_2010_orders, week_2011_orders, yoy_rate.\n\nFinal SQL returning a single row with columns: week_2010, week_2011, orders_2010, orders_2011, lines_2010, lines_2011, yoy_change_rate.\n\nLet me write it carefully with DuckDB syntax. Use conditional aggregation.\n\nWITH w AS (\n SELECT week,\n        COUNT(DISTINCT invoice) AS order_count,\n        COUNT(*) AS line_count\n FROM order_lines\n WHERE line_type = '销售' AND week IN ('2010-W48','2011-W48')\n GROUP BY week\n)\nSELECT\n max(CASE WHEN week='2010-W48' THEN order_count END) AS orders_2010_w48,\n max(CASE WHEN week='2011-W48' THEN order_count END) AS orders_2011_w48,\n round((max(CASE WHEN week='2011-W48' THEN order_count END) - max(CASE WHEN week='2010-W48' THEN order_count END)) / max(CASE WHEN week='2010-W48' THEN order_count END), 4) AS yoy_change_rate,\n ...\n\nAlso add GMV maybe? The request only asks order counts and YoY. Keep it minimal but include line counts as sample size. I'll include gmv maybe not needed. Keep it focused: order counts, line counts, and YoY rate. Perhaps also 同比变化的订单数差 (11).\n\nLet me verify the final query runs."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_075e7c2fed449c8d08eedf2f",
+      "content": "{\"tool\": \"run_sql\", \"purpose\": \"验证最终单行汇总查询：两年 W48 订单数与同比变化率\", \"columns\": [\"orders_2010_w48\", \"orders_2011_w48\", \"order_diff\", \"yoy_change_rate\", \"lines_2010_w48\", \"lines_2011_w48\"], \"rows\": [{\"orders_2010_w48\": 652, \"orders_2011_w48\": 663, \"order_diff\": 11, \"yoy_change_rate\": 0.0169, \"lines_2010_w48\": 15876, \"lines_2011_w48\": 18298}], \"row_count\": 1}"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_4738383eb8e0484094cb7d70",
+          "function": {
+            "arguments": "{\"sql\":\"WITH w AS (\\n  SELECT week,\\n         COUNT(DISTINCT invoice) AS order_count,\\n         COUNT(*) AS line_count\\n  FROM order_lines\\n  WHERE line_type = '销售'\\n    AND week IN ('2010-W48', '2011-W48')\\n  GROUP BY week\\n)\\nSELECT\\n  MAX(CASE WHEN week = '2010-W48' THEN order_count END) AS orders_2010_w48,\\n  MAX(CASE WHEN week = '2011-W48' THEN order_count END) AS orders_2011_w48,\\n  MAX(CASE WHEN week = '2011-W48' THEN order_count END) - MAX(CASE WHEN week = '2010-W48' THEN order_count END) AS order_diff,\\n  ROUND((MAX(CASE WHEN week = '2011-W48' THEN order_count END) - MAX(CASE WHEN week = '2010-W48' THEN order_count END))\\n        / MAX(CASE WHEN week = '2010-W48' THEN order_count END), 4) AS yoy_change_rate,\\n  MAX(CASE WHEN week = '2010-W48' THEN line_count END) AS lines_2010_w48,\\n  MAX(CASE WHEN week = '2011-W48' THEN line_count END) AS lines_2011_w48\\nFROM w\",\"columns\":{\"orders_2010_w48\":\"2010-W48 销售订单数（个）\",\"orders_2011_w48\":\"2011-W48 销售订单数（个）\",\"order_diff\":\"订单数同比增减（个）\",\"yoy_change_rate\":\"订单数同比变化率（小数，0.0169 = +1.69%）\",\"lines_2010_w48\":\"2010-W48 销售行数（条，样本量参考）\",\"lines_2011_w48\":\"2011-W48 销售行数（条，样本量参考）\"},\"definition\":\"订单数 = 只统计 line_type='销售' 的行，按发票号 invoice 去重计数（同口径：2010-W48 与 2011-W48 各取一次）；时间范围为 ISO 周 2010-W48（2010-11-29~2010-12-05）与 2011-W48（2011-11-28~2011-12-04）；同比变化率 =（2011-W48 订单数 − 2010-W48 订单数）÷ 2010-W48 订单数，round 到 4 位小数；同时给出两周的销售行数作为样本量参考。\",\"caveats\":[\"2011-W48 与 2010-W48 均为完整 7 天周（周一至周日），可比；数据末尾的 2011-W49 是不完整周，不在本结果内。\",\"订单数仅统计销售单，不含取消单；取消单按取消发生周入账，与原订单周不同。\",\"2010-12-23 至 2011-01-03 停业，不影响这两周。\",\"订单数为周级计数（约 650 单），同比 +1.69% 属于小幅波动，未做显著性检验。\"]}",
+            "name": "submit_query"
+          },
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_4738383eb8e0484094cb7d70",
+      "content": "{\"tool\": \"submit_query\", \"accepted\": true, \"sql\": \"WITH w AS (\\n  SELECT week,\\n         COUNT(DISTINCT invoice) AS order_count,\\n         COUNT(*) AS line_count\\n  FROM order_lines\\n  WHERE line_type = '销售'\\n    AND week IN ('2010-W48', '2011-W48')\\n  GROUP BY week\\n)\\nSELECT\\n  MAX(CASE WHEN week = '2010-W48' THEN order_count END) AS orders_2010_w48,\\n  MAX(CASE WHEN week = '2011-W48' THEN order_count END) AS orders_2011_w48,\\n  MAX(CASE WHEN week = '2011-W48' THEN order_count END) - MAX(CASE WHEN week = '2010-W48' THEN order_count END) AS order_diff,\\n  ROUND((MAX(CASE WHEN week = '2011-W48' THEN order_count END) - MAX(CASE WHEN week = '2010-W48' THEN order_count END))\\n        / MAX(CASE WHEN week = '2010-W48' THEN order_count END), 4) AS yoy_change_rate,\\n  MAX(CASE WHEN week = '2010-W48' THEN line_count END) AS lines_2010_w48,\\n  MAX(CASE WHEN week = '2011-W48' THEN line_count END) AS lines_2011_w48\\nFROM w\", \"columns\": [{\"name\": \"orders_2010_w48\", \"meaning\": \"2010-W48 销售订单数（个）\"}, {\"name\": \"orders_2011_w48\", \"meaning\": \"2011-W48 销售订单数（个）\"}, {\"name\": \"order_diff\", \"meaning\": \"订单数同比增减（个）\"}, {\"name\": \"yoy_change_rate\", \"meaning\": \"订单数同比变化率（小数，0.0169 = +1.69%）\"}, {\"name\": \"lines_2010_w48\", \"meaning\": \"2010-W48 销售行数（条，样本量参考）\"}, {\"name\": \"lines_2011_w48\", \"meaning\": \"2011-W48 销售行数（条，样本量参考）\"}], \"rows\": [{\"orders_2010_w48\": 652, \"orders_2011_w48\": 663, \"order_diff\": 11, \"yoy_change_rate\": 0.0169, \"lines_2010_w48\": 15876, \"lines_2011_w48\": 18298}], \"row_count\": 1, \"definition\": \"订单数 = 只统计 line_type='销售' 的行，按发票号 invoice 去重计数（同口径：2010-W48 与 2011-W48 各取一次）；时间范围为 ISO 周 2010-W48（2010-11-29~2010-12-05）与 2011-W48（2011-11-28~2011-12-04）；同比变化率 =（2011-W48 订单数 − 2010-W48 订单数）÷ 2010-W48 订单数，round 到 4 位小数；同时给出两周的销售行数作为样本量参考。\", \"caveats\": [\"2011-W48 与 2010-W48 均为完整 7 天周（周一至周日），可比；数据末尾的 2011-W49 是不完整周，不在本结果内。\", \"订单数仅统计销售单，不含取消单；取消单按取消发生周入账，与原订单周不同。\", \"2010-12-23 至 2011-01-03 停业，不影响这两周。\", \"订单数为周级计数（约 650 单），同比 +1.69% 属于小幅波动，未做显著性检验。\"], \"metrics_used\": []}"
+    },
+    {
+      "content": "已提交：2010-W48 销售订单数 652 单、2011-W48 为 663 单，同比增加 11 单、变化率 +1.69%（0.0169），并附两周销售行数（15,876 / 18,298 条）作为样本量参考。",
+      "role": "assistant"
+    }
+  ]
+}

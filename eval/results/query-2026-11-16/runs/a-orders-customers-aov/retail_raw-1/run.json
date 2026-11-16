@@ -1,0 +1,195 @@
+{
+  "run_id": "20261116T104336-10c551",
+  "question": "2011-W47 的订单数、活跃客户数和客单价各是多少？",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "max_tool_calls": 8,
+  "use_skills": true,
+  "domain": "analyst",
+  "status": "completed",
+  "answer": "已提交：2011-W47（2011-11-21 至 11-27）销售订单 616 张、活跃（可识别）客户 492 人、客单价 £490.90（GMV £302,392.22 / 616），并附销售明细行数、交易天数等样本量列。",
+  "error": null,
+  "budget_exhausted": false,
+  "repair": null,
+  "malformed_replies": 0,
+  "steps": [
+    {
+      "round": 1,
+      "tool": "run_sql",
+      "arguments": {
+        "sql": "SELECT\n  week,\n  COUNT(*) FILTER (WHERE line_type = '销售') AS line_cnt,\n  COUNT(DISTINCT invoice) FILTER (WHERE line_type = '销售') AS order_cnt,\n  COUNT(DISTINCT customer_id) FILTER (WHERE line_type = '销售' AND customer_id IS NOT NULL AND customer_id <> '') AS active_customers,\n  COUNT(DISTINCT order_date) FILTER (WHERE line_type = '销售') AS active_days,\n  ROUND(SUM(amount) FILTER (WHERE line_type = '销售'), 2) AS gmv,\n  ROUND(SUM(amount) FILTER (WHERE line_type = '取消'), 2) AS cancel_amt,\n  COUNT(DISTINCT invoice) FILTER (WHERE line_type = '取消') AS cancel_orders\nFROM order_lines\nWHERE week = '2011-W47'\nGROUP BY week",
+        "purpose": "检查 2011-W47 的销售/取消行量级、订单数、活跃客户数、GMV"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 18
+    },
+    {
+      "round": 1,
+      "tool": "run_sql",
+      "arguments": {
+        "sql": "SELECT week, COUNT(*) AS n, MIN(order_date) AS min_d, MAX(order_date) AS max_d\nFROM order_lines\nWHERE week IN ('2011-W46','2011-W47','2011-W48')\nGROUP BY week ORDER BY week",
+        "purpose": "确认相邻周的日期覆盖，判断 2011-W47 是否完整周"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 6
+    },
+    {
+      "round": 2,
+      "tool": "run_sql",
+      "arguments": {
+        "sql": "SELECT\n  COUNT(*) FILTER (WHERE line_type='销售') AS sales_lines,\n  COUNT(*) FILTER (WHERE line_type='销售' AND (customer_id IS NULL OR customer_id='')) AS sales_lines_no_cust,\n  COUNT(DISTINCT customer_id) FILTER (WHERE line_type='销售' AND customer_id IS NOT NULL AND customer_id<>'') AS act_cust,\n  COUNT(DISTINCT customer_id) FILTER (WHERE line_type='销售') AS act_cust_lenient,\n  ROUND(SUM(amount) FILTER (WHERE line_type='销售'),2) AS gmv,\n  ROUND(SUM(amount) FILTER (WHERE line_type='销售') / COUNT(DISTINCT invoice) FILTER (WHERE line_type='销售'), 2) AS aov\nFROM order_lines WHERE week='2011-W47'",
+        "purpose": "核对客户ID缺失处理方式与客单价计算"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 10
+    },
+    {
+      "round": 2,
+      "tool": "run_sql",
+      "arguments": {
+        "sql": "SELECT order_date, COUNT(DISTINCT invoice) AS orders, ROUND(SUM(amount),2) AS gmv\nFROM order_lines WHERE week='2011-W47' AND line_type='销售'\nGROUP BY order_date ORDER BY order_date",
+        "purpose": "看 2011-W47 每天的销售分布（是否有无销售日）"
+      },
+      "ok": true,
+      "error": null,
+      "ms": 6
+    },
+    {
+      "round": 3,
+      "tool": "submit_query",
+      "arguments": {
+        "sql": "SELECT\n  '2011-W47' AS week,\n  COUNT(DISTINCT invoice) FILTER (WHERE line_type = '销售') AS order_cnt,\n  COUNT(DISTINCT customer_id) FILTER (WHERE line_type = '销售' AND customer_id IS NOT NULL AND customer_id <> '') AS active_customer_cnt,\n  ROUND(SUM(amount) FILTER (WHERE line_type = '销售') / COUNT(DISTINCT invoice) FILTER (WHERE line_type = '销售'), 2) AS avg_order_value,\n  ROUND(SUM(amount) FILTER (WHERE line_type = '销售'), 2) AS gmv,\n  COUNT(*) FILTER (WHERE line_type = '销售') AS sales_line_cnt,\n  COUNT(DISTINCT order_date) FILTER (WHERE line_type = '销售') AS sales_day_cnt\nFROM order_lines\nWHERE week = '2011-W47'",
+        "columns": {
+          "week": "ISO 周标识",
+          "order_cnt": "订单数（销售订单的不同发票号个数，只数销售行）",
+          "active_customer_cnt": "活跃客户数（当周有购买且有客户ID的不同客户数，不含缺客户ID的订单）",
+          "avg_order_value": "客单价（英镑）= 当周 GMV ÷ 当周订单数",
+          "gmv": "GMV（英镑）= 当周销售行金额合计（数量×单价，含之后被取消的订单）",
+          "sales_line_cnt": "销售明细行数（样本量参考）",
+          "sales_day_cnt": "有销售的日期数（交易天数）"
+        },
+        "definition": "时间范围：week = '2011-W47'（2011-11-21 至 2011-11-27）。筛选 line_type='销售' 的行：订单数 = 不同发票号个数；活跃客户数 = 有购买的可识别客户数（customer_id 非空）；GMV = 销售行 amount 求和（下单口径，含之后被取消的订单）；客单价 = GMV ÷ 订单数。取消单不计入本查询任何指标（其金额单列在核查中：7,158.91 英镑 / 61 张取消单）。",
+        "caveats": [
+          "当周 7 天中只有 6 天有销售（2011-11-26 无销售记录），客单价与订单数受此影响。",
+          "19,209 条销售明细中有 4,621 条（24.0%）缺客户 ID，这些行的金额计入 GMV，但不计入活跃客户数。",
+          "GMV 含之后被取消的订单，净销售额 = 302,392.22 − 7,158.91 = 295,233.31 英镑，取消率约 2.37%。",
+          "客单价分母仅 616 张订单，且少数大额高量订单会明显拉高均值（中位数口径会低得多）。"
+        ]
+      },
+      "ok": true,
+      "error": null,
+      "ms": 9
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 14594,
+    "completion_tokens": 1777,
+    "llm_calls": 4
+  },
+  "started_at": "2026-11-16T02:43:36+00:00",
+  "seconds": 19.77,
+  "messages": [
+    {
+      "role": "system",
+      "content": "你是一名数据分析师，负责把一个分析请求写成 SQL 并算出结果。你不写报告，只负责把数算对；结果会交给另一位同事去解读。\n\n## 数据\n\n数据：电商交易（UCI Online Retail II，已清洗）。一家英国线上礼品批发零售商 2009-12 至 2011-12 的商品交易明细。清洗规则已经应用： 删除了重复、坏账调整、单价为 0 等记录，运费等非商品行不在表里。金额单位是英镑。\n\n### 表 order_lines（1,021,272 行）\n每行是订单里的一个商品（销售）或取消单里的一个商品（取消）。金额和数量都是正数，用 line_type 区分。\n\n| 列 | 类型 | 说明 | 取值 |\n|---|---|---|---|\n| invoice | VARCHAR | 发票号（订单号）；C 开头的是取消单 | 46,922 种，例如 573585、581219、581492、580729、558475 |\n| line_type | VARCHAR | 销售 / 取消 | 全部取值：销售、取消 |\n| order_time | TIMESTAMP | 下单（或取消）时间 | 2009-12-01 07:45:00 至 2011-12-09 12:50:00 |\n| order_date | DATE | 下单（或取消）日期 | 2009-12-01 至 2011-12-09 |\n| week | VARCHAR | ISO 周（周一到周日），写法如 2011-W48 | 104 种，例如 2011-W46、2011-W47、2011-W45、2010-W47、2011-W48 |\n| month | VARCHAR | 月份，写法如 2011-11 | 25 种，例如 2011-11、2010-11、2011-10、2010-10、2011-09 |\n| stock_code | VARCHAR | 商品编码 | 4,909 种，例如 85123A、22423、85099B、21212、20725 |\n| description | VARCHAR | 商品名称 | 5,351 种，例如 WHITE HANGING HEART T-LIGHT HOLDER、REGENCY CAKESTAND 3 TIER、JUMBO BAG RED RETROSPOT、ASSORTED COLOUR BIRD ORNAMENT、PARTY BUNTING |\n| quantity | BIGINT | 数量（正数） | 1 至 80995 |\n| price | DOUBLE | 单价 | 0.001 至 1157.15 |\n| amount | DOUBLE | 金额 = 数量 × 单价（正数；销售行和取消行都是正数，不能直接相加） | 0.001 至 168469.6 |\n| customer_id | VARCHAR | 客户 ID；缺失表示游客或未登记客户 | 5,875 种，例如 17841、14911、12748、14606、14096；22.2% 为空 |\n| customer_type | VARCHAR | 新客（这位客户第一次购买就在这一行所在的周）/ 老客 / 未知（缺客户 ID） | 全部取值：老客、未知、新客 |\n| country | VARCHAR | 客户所在国家（英文；Unspecified、European Community 归为“国家不明确”） | 42 种，例如 United Kingdom、EIRE、Germany、France、Netherlands |\n\n### 注意\n- 指标口径（文字）：GMV = 商品销售额（下单口径），数量 × 单价之和，含之后被取消的订单；取消金额 = 取消单的商品金额（正数）；净销售额 = GMV − 取消金额；取消率 = 取消金额 ÷ GMV；订单数 = 不同发票号的个数，只数销售订单；客单价 = GMV ÷ 订单数；活跃客户数 = 有购买的可识别客户数（不含缺客户 ID 的订单）；新客数 = 第一次购买落在当周的客户数；交易天数 = 有销售的日期数。\n- 周是 ISO 周；数据截止到 2011-12-09（周五），所以 2011-W49 不是完整的一周，和完整的周比总量会偏低。\n- 2010-12-23 到 2011-01-03 停业，这期间没有数据。\n- 约四分之一的行缺客户 ID：按客户统计（活跃客户、新老客）时这些行不计入，但它们的金额计入 GMV。\n- 取消单按取消发生的时间入账，不回溯到原订单所在的周。\n- 有少数金额极大、下单后很快又全部取消的订单（例如发票 541431、581483），会抬高当周的 GMV 和商品排名；净销售额不受影响。\n\n\n## 怎么做\n\n1. SQL 用 DuckDB 的写法。每次只能执行一条 SELECT（可以用 WITH），只能读上面列出的表，不能修改任何东西。\n2. 上面有“指标口径”时，用到这些指标就照抄它的表达式，不要自己另写一种算法。请求里的指标不在口径表里时，自己决定怎么算，并在 definition 里写清楚。\n3. 先用 run_sql 试，看结果是否合理（行数、数量级、有没有空值、筛选条件有没有写对取值），再用 submit_query 提交最终的那一条查询。\n4. 提交的结果就是交出去的全部内容：一条查询，不超过 200 行。请求要哪些数，就只返回算出这些数需要的行和列；要对比两个时期或两个分组时，把它们放在同一条查询的结果里。\n5. 每一列用 AS 起一个看得懂的列名，并在 columns 里写明含义和单位。比率用小数表示（0.1234 表示 12.34%）并在说明里写明。\n6. 金额保留 2 位小数，比率保留 4 位小数（用 round）。\n7. 按分组比较时，带上每组的样本量（订单数、记录数）这一列，方便判断样本够不够；并按请求的要求排序。\n8. 发现结果需要提醒（样本很少、时间段不完整、有空值）时，写进 caveats。\n9. 数据里没有请求需要的信息（例如没有成本就算不了利润，日期超出数据范围），或者请求含糊到无法确定要算什么：不要提交，不要猜，直接用文字说明原因。\n10. 最多调用 8 次工具，够用就停。\n\n提交成功后，用一句话说明交出的结果是什么。\n"
+    },
+    {
+      "role": "user",
+      "content": "2011-W47 的订单数、活跃客户数和客单价各是多少？"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_qpgkWT9DBw2pWsu9A3qG6J2l",
+          "function": {
+            "arguments": "{\"sql\": \"SELECT\\n  week,\\n  COUNT(*) FILTER (WHERE line_type = '销售') AS line_cnt,\\n  COUNT(DISTINCT invoice) FILTER (WHERE line_type = '销售') AS order_cnt,\\n  COUNT(DISTINCT customer_id) FILTER (WHERE line_type = '销售' AND customer_id IS NOT NULL AND customer_id <> '') AS active_customers,\\n  COUNT(DISTINCT order_date) FILTER (WHERE line_type = '销售') AS active_days,\\n  ROUND(SUM(amount) FILTER (WHERE line_type = '销售'), 2) AS gmv,\\n  ROUND(SUM(amount) FILTER (WHERE line_type = '取消'), 2) AS cancel_amt,\\n  COUNT(DISTINCT invoice) FILTER (WHERE line_type = '取消') AS cancel_orders\\nFROM order_lines\\nWHERE week = '2011-W47'\\nGROUP BY week\", \"purpose\": \"检查 2011-W47 的销售/取消行量级、订单数、活跃客户数、GMV\"}",
+            "name": "run_sql"
+          },
+          "type": "function",
+          "index": 0
+        },
+        {
+          "id": "call_vPKRREcIoF8AlW6OVbGzXsPt",
+          "function": {
+            "arguments": "{\"sql\": \"SELECT week, COUNT(*) AS n, MIN(order_date) AS min_d, MAX(order_date) AS max_d\\nFROM order_lines\\nWHERE week IN ('2011-W46','2011-W47','2011-W48')\\nGROUP BY week ORDER BY week\", \"purpose\": \"确认相邻周的日期覆盖，判断 2011-W47 是否完整周\"}",
+            "name": "run_sql"
+          },
+          "type": "function",
+          "index": 1
+        }
+      ],
+      "reasoning_content": "We need week 2011-W47 metrics: order count (distinct invoices, sales only), active customers (identified customers with purchases, sales only), 客单价 = GMV / 订单数.\n\nLet me write a query.\n\nMetrics per the spec: GMV = sum of amount for sales lines; 订单数 = count distinct invoice for sales; 活跃客户数 = distinct customer_id among sales lines where customer_id is not null (and not empty); 客单价 = GMV / 订单数.\n\nLet me test.\n\nAlso check whether week column '2011-W47' exists and whether there are cancellations that week (not needed for these metrics but maybe worth a caveat).\n\nLet's run."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_qpgkWT9DBw2pWsu9A3qG6J2l",
+      "content": "{\"tool\": \"run_sql\", \"purpose\": \"检查 2011-W47 的销售/取消行量级、订单数、活跃客户数、GMV\", \"columns\": [\"week\", \"line_cnt\", \"order_cnt\", \"active_customers\", \"active_days\", \"gmv\", \"cancel_amt\", \"cancel_orders\"], \"rows\": [{\"week\": \"2011-W47\", \"line_cnt\": 19209, \"order_cnt\": 616, \"active_customers\": 492, \"active_days\": 6, \"gmv\": 302392.22, \"cancel_amt\": 7158.91, \"cancel_orders\": 61}], \"row_count\": 1}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_vPKRREcIoF8AlW6OVbGzXsPt",
+      "content": "{\"tool\": \"run_sql\", \"purpose\": \"确认相邻周的日期覆盖，判断 2011-W47 是否完整周\", \"columns\": [\"week\", \"n\", \"min_d\", \"max_d\"], \"rows\": [{\"week\": \"2011-W46\", \"n\": 20580, \"min_d\": \"2011-11-14\", \"max_d\": \"2011-11-20\"}, {\"week\": \"2011-W47\", \"n\": 19429, \"min_d\": \"2011-11-21\", \"max_d\": \"2011-11-27\"}, {\"week\": \"2011-W48\", \"n\": 18535, \"min_d\": \"2011-11-28\", \"max_d\": \"2011-12-04\"}], \"row_count\": 3}"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_Gmz1Xmior3IkCplaWSTBkXPz",
+          "function": {
+            "arguments": "{\"sql\": \"SELECT\\n  COUNT(*) FILTER (WHERE line_type='销售') AS sales_lines,\\n  COUNT(*) FILTER (WHERE line_type='销售' AND (customer_id IS NULL OR customer_id='')) AS sales_lines_no_cust,\\n  COUNT(DISTINCT customer_id) FILTER (WHERE line_type='销售' AND customer_id IS NOT NULL AND customer_id<>'') AS act_cust,\\n  COUNT(DISTINCT customer_id) FILTER (WHERE line_type='销售') AS act_cust_lenient,\\n  ROUND(SUM(amount) FILTER (WHERE line_type='销售'),2) AS gmv,\\n  ROUND(SUM(amount) FILTER (WHERE line_type='销售') / COUNT(DISTINCT invoice) FILTER (WHERE line_type='销售'), 2) AS aov\\nFROM order_lines WHERE week='2011-W47'\", \"purpose\": \"核对客户ID缺失处理方式与客单价计算\"}",
+            "name": "run_sql"
+          },
+          "type": "function",
+          "index": 0
+        },
+        {
+          "id": "call_4IT30Hac9KnETLdNBr8HkyhX",
+          "function": {
+            "arguments": "{\"sql\": \"SELECT order_date, COUNT(DISTINCT invoice) AS orders, ROUND(SUM(amount),2) AS gmv\\nFROM order_lines WHERE week='2011-W47' AND line_type='销售'\\nGROUP BY order_date ORDER BY order_date\", \"purpose\": \"看 2011-W47 每天的销售分布（是否有无销售日）\"}",
+            "name": "run_sql"
+          },
+          "type": "function",
+          "index": 1
+        }
+      ],
+      "reasoning_content": "2011-W47 spans 2011-11-21 to 2011-11-27, a complete Monday-Sunday week. Good.\n\nActive days = 6 for sales (one day with no sales? likely Sunday closed). Let me check which date has no sales. Not essential.\n\n客单价 = GMV / 订单数 = 302392.22 / 616 = 490.896... Let me compute precisely with the query.\n\nNote active_days = 6 out of 7 — likely Sunday no sales. Let's just note.\n\nLet me run the final query.\n\nAlso check customer_id empty string vs null handling — I used both filters. Let me also verify how many sales lines have null vs empty customer_id.\n\nLet me run final query with aov computed and also check distinct customer counts with different null handling."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_Gmz1Xmior3IkCplaWSTBkXPz",
+      "content": "{\"tool\": \"run_sql\", \"purpose\": \"核对客户ID缺失处理方式与客单价计算\", \"columns\": [\"sales_lines\", \"sales_lines_no_cust\", \"act_cust\", \"act_cust_lenient\", \"gmv\", \"aov\"], \"rows\": [{\"sales_lines\": 19209, \"sales_lines_no_cust\": 4621, \"act_cust\": 492, \"act_cust_lenient\": 492, \"gmv\": 302392.22, \"aov\": 490.9}], \"row_count\": 1}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_4IT30Hac9KnETLdNBr8HkyhX",
+      "content": "{\"tool\": \"run_sql\", \"purpose\": \"看 2011-W47 每天的销售分布（是否有无销售日）\", \"columns\": [\"order_date\", \"orders\", \"gmv\"], \"rows\": [{\"order_date\": \"2011-11-21\", \"orders\": 100, \"gmv\": 48538.76}, {\"order_date\": \"2011-11-22\", \"orders\": 134, \"gmv\": 61948.8}, {\"order_date\": \"2011-11-23\", \"orders\": 130, \"gmv\": 75984.45}, {\"order_date\": \"2011-11-24\", \"orders\": 112, \"gmv\": 48737.6}, {\"order_date\": \"2011-11-25\", \"orders\": 83, \"gmv\": 46909.52}, {\"order_date\": \"2011-11-27\", \"orders\": 57, \"gmv\": 20273.09}], \"row_count\": 6}"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_xfE6DxkESFcVI5pZiWqNdqAa",
+          "function": {
+            "arguments": "{\"sql\": \"SELECT\\n  '2011-W47' AS week,\\n  COUNT(DISTINCT invoice) FILTER (WHERE line_type = '销售') AS order_cnt,\\n  COUNT(DISTINCT customer_id) FILTER (WHERE line_type = '销售' AND customer_id IS NOT NULL AND customer_id <> '') AS active_customer_cnt,\\n  ROUND(SUM(amount) FILTER (WHERE line_type = '销售') / COUNT(DISTINCT invoice) FILTER (WHERE line_type = '销售'), 2) AS avg_order_value,\\n  ROUND(SUM(amount) FILTER (WHERE line_type = '销售'), 2) AS gmv,\\n  COUNT(*) FILTER (WHERE line_type = '销售') AS sales_line_cnt,\\n  COUNT(DISTINCT order_date) FILTER (WHERE line_type = '销售') AS sales_day_cnt\\nFROM order_lines\\nWHERE week = '2011-W47'\", \"columns\": {\"week\": \"ISO 周标识\", \"order_cnt\": \"订单数（销售订单的不同发票号个数，只数销售行）\", \"active_customer_cnt\": \"活跃客户数（当周有购买且有客户ID的不同客户数，不含缺客户ID的订单）\", \"avg_order_value\": \"客单价（英镑）= 当周 GMV ÷ 当周订单数\", \"gmv\": \"GMV（英镑）= 当周销售行金额合计（数量×单价，含之后被取消的订单）\", \"sales_line_cnt\": \"销售明细行数（样本量参考）\", \"sales_day_cnt\": \"有销售的日期数（交易天数）\"}, \"definition\": \"时间范围：week = '2011-W47'（2011-11-21 至 2011-11-27）。筛选 line_type='销售' 的行：订单数 = 不同发票号个数；活跃客户数 = 有购买的可识别客户数（customer_id 非空）；GMV = 销售行 amount 求和（下单口径，含之后被取消的订单）；客单价 = GMV ÷ 订单数。取消单不计入本查询任何指标（其金额单列在核查中：7,158.91 英镑 / 61 张取消单）。\", \"caveats\": [\"当周 7 天中只有 6 天有销售（2011-11-26 无销售记录），客单价与订单数受此影响。\", \"19,209 条销售明细中有 4,621 条（24.0%）缺客户 ID，这些行的金额计入 GMV，但不计入活跃客户数。\", \"GMV 含之后被取消的订单，净销售额 = 302,392.22 − 7,158.91 = 295,233.31 英镑，取消率约 2.37%。\", \"客单价分母仅 616 张订单，且少数大额高量订单会明显拉高均值（中位数口径会低得多）。\"]}",
+            "name": "submit_query"
+          },
+          "type": "function",
+          "index": 0
+        }
+      ],
+      "reasoning_content": "Everything checks out. 2011-11-26 (Saturday) had no sales. Now submit the final query.\n\nFinal query returns one row for 2011-W47 with order count, active customers, AOV, plus supporting sample size columns (sales line count, sales days, GMV)."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_xfE6DxkESFcVI5pZiWqNdqAa",
+      "content": "{\"tool\": \"submit_query\", \"accepted\": true, \"sql\": \"SELECT\\n  '2011-W47' AS week,\\n  COUNT(DISTINCT invoice) FILTER (WHERE line_type = '销售') AS order_cnt,\\n  COUNT(DISTINCT customer_id) FILTER (WHERE line_type = '销售' AND customer_id IS NOT NULL AND customer_id <> '') AS active_customer_cnt,\\n  ROUND(SUM(amount) FILTER (WHERE line_type = '销售') / COUNT(DISTINCT invoice) FILTER (WHERE line_type = '销售'), 2) AS avg_order_value,\\n  ROUND(SUM(amount) FILTER (WHERE line_type = '销售'), 2) AS gmv,\\n  COUNT(*) FILTER (WHERE line_type = '销售') AS sales_line_cnt,\\n  COUNT(DISTINCT order_date) FILTER (WHERE line_type = '销售') AS sales_day_cnt\\nFROM order_lines\\nWHERE week = '2011-W47'\", \"columns\": [{\"name\": \"week\", \"meaning\": \"ISO 周标识\"}, {\"name\": \"order_cnt\", \"meaning\": \"订单数（销售订单的不同发票号个数，只数销售行）\"}, {\"name\": \"active_customer_cnt\", \"meaning\": \"活跃客户数（当周有购买且有客户ID的不同客户数，不含缺客户ID的订单）\"}, {\"name\": \"avg_order_value\", \"meaning\": \"客单价（英镑）= 当周 GMV ÷ 当周订单数\"}, {\"name\": \"gmv\", \"meaning\": \"GMV（英镑）= 当周销售行金额合计（数量×单价，含之后被取消的订单）\"}, {\"name\": \"sales_line_cnt\", \"meaning\": \"销售明细行数（样本量参考）\"}, {\"name\": \"sales_day_cnt\", \"meaning\": \"有销售的日期数（交易天数）\"}], \"rows\": [{\"week\": \"2011-W47\", \"order_cnt\": 616, \"active_customer_cnt\": 492, \"avg_order_value\": 490.9, \"gmv\": 302392.22, \"sales_line_cnt\": 19209, \"sales_day_cnt\": 6}], \"row_count\": 1, \"definition\": \"时间范围：week = '2011-W47'（2011-11-21 至 2011-11-27）。筛选 line_type='销售' 的行：订单数 = 不同发票号个数；活跃客户数 = 有购买的可识别客户数（customer_id 非空）；GMV = 销售行 amount 求和（下单口径，含之后被取消的订单）；客单价 = GMV ÷ 订单数。取消单不计入本查询任何指标（其金额单列在核查中：7,158.91 英镑 / 61 张取消单）。\", \"caveats\": [\"当周 7 天中只有 6 天有销售（2011-11-26 无销售记录），客单价与订单数受此影响。\", \"19,209 条销售明细中有 4,621 条（24.0%）缺客户 ID，这些行的金额计入 GMV，但不计入活跃客户数。\", \"GMV 含之后被取消的订单，净销售额 = 302,392.22 − 7,158.91 = 295,233.31 英镑，取消率约 2.37%。\", \"客单价分母仅 616 张订单，且少数大额高量订单会明显拉高均值（中位数口径会低得多）。\"], \"metrics_used\": []}"
+    },
+    {
+      "content": "已提交：2011-W47（2011-11-21 至 11-27）销售订单 616 张、活跃（可识别）客户 492 人、客单价 £490.90（GMV £302,392.22 / 616），并附销售明细行数、交易天数等样本量列。",
+      "role": "assistant"
+    }
+  ]
+}
