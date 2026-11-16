@@ -26,7 +26,8 @@ class Settings(BaseSettings):
 
     llm_base_url: str = "https://api.minimax.cn/v1"
     llm_api_key: SecretStr | None = None
-    llm_model: str = "MiniMax-M3"
+    # 2026-11-16 起默认用 MiniMax-M3.1-Flash（之前评测用的 MiniMax-M3.1-Flash-Preview 的正式版，接口模型列表里最新的一个）
+    llm_model: str = "MiniMax-M3.1-Flash"
     # 复核 Agent 用的模型；不填就和写答案的模型相同。换一个模型来复核，两者不容易犯同样的错
     review_llm_model: str | None = None
     llm_max_tool_calls: int = Field(default=15, ge=1, le=50)  # 评测用 15；calculate 也占次数
