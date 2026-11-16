@@ -127,3 +127,33 @@ def test_a_bare_share_in_brackets_gets_a_hint() -> None:
     table = "| 因子 | 金额 | 占总变化 |\n|---|---|---|\n| 活跃客户数 | -13,310.62 | 53.52% |"
     assert flags(table, DECOMPOSE) == []  # 表头说了是占比
     assert [f["kind"] for f in flags(table.replace("占总变化", "变化"), DECOMPOSE)] == ["含义"]
+
+
+def test_the_name_search_stops_at_the_previous_number() -> None:
+    """“GMV 120,064.77 高于 118,850.04”：GMV 说的是前一个数，后一个数前面没有名字。"""
+    assert flags("GMV 120,064.77 高于 118,850.04。", SUMMARY) == []
+    assert [f["text"] for f in flags("GMV 高于 118,850.04。", SUMMARY)] == ["118,850.04"]
+
+
+def test_its_own_name_right_after_the_number_is_enough() -> None:
+    assert flags("GMV 对应 118,850.04 的净销售额。", SUMMARY) == []
+    assert [f["sentence_says"] for f in flags("GMV 对应 118,850.04。", SUMMARY)] == ["GMV"]
+    assert [f["sentence_says"] for f in flags("GMV 对应 118,850.04，另外再看取消和退货之后的净销售额。", SUMMARY)] == ["GMV"]  # 离得远不算
+
+
+def test_shares_of_the_total_change_are_not_checked_for_the_object() -> None:
+    """占比同时关系到部分和整体：“占净销售额降幅的 50.78%”里的名字可能是整体，不标记。"""
+    assert flags("占净销售额降幅的 50.78%。", SUMMARY, DRILL) == []
+    other = {"tool": "metric_summary", "metrics": [{"metric": "new_customers", "label": "新客数", "change_pct": 0.5078}]}
+    assert flags("占净销售额降幅的 50.78%。", SUMMARY, DRILL, other) == []  # 碰巧也是别的数：只要有一处出处是占比就不查
+
+
+def test_short_numbers_are_not_checked_for_the_object() -> None:
+    """两位数太容易碰巧对上别的数：不查。三位有效数字起才查。"""
+    assert flags("英国订单 14 单。", SUMMARY, DRILL) == []  # 14 是荷兰的订单数
+    assert [f["sentence_says"] for f in flags("荷兰订单 263 单。", SUMMARY, DRILL)] == ["Netherlands"]
+
+
+def test_text_in_backticks_is_not_a_name() -> None:
+    assert flags("`decompose_gmv` 算出 -13,310.62。", SUMMARY, DECOMPOSE) == []  # 工具名里的 gmv 不是在说 GMV
+    assert [f["sentence_says"] for f in flags("decompose_gmv 算出 -13,310.62。", SUMMARY, DECOMPOSE)] == ["GMV"]

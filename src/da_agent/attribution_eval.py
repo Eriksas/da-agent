@@ -27,24 +27,36 @@ def load_plan(path: Path = PLAN_PATH) -> dict[str, Any]:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
-def bases(plan: dict[str, Any], split: str, root: Path = ROOT) -> list[dict[str, Any]]:
-    """这一份材料里的答案：{id, set, run 目录, 要不要植入错误}。留出集 B 按规则从评测目录里机械地取。"""
-    if split == "dev":
-        return [{"id": b["id"], "set": "dev", "run": b["run"], "seed": True} for b in plan["dev"]]
-    out = [{"id": b["id"], "set": "A", "run": b["run"], "seed": True} for b in load_review_plan(root / plan["test_a"])["bases"]]
-    b = plan["test_b"]
-    for model in b["models"]:
-        for suite in b["suites"]:
-            folder = root / "eval" / "results" / f"{b['prefix']}-{model}-{suite}" / "runs"
+def _from_runs(spec: dict[str, Any], name: str, root: Path) -> list[dict[str, Any]]:
+    """从评测目录里按规则机械地取答案：指定的模型、套题、对比组里正常结束、有答案的运行。"""
+    out = []
+    for model in spec["models"]:
+        for suite in spec["suites"]:
+            folder = root / "eval" / "results" / f"{spec['prefix']}-{model}-{suite}" / "runs"
             for case in sorted(p.name for p in folder.iterdir()):
-                run_dir = folder / case / b["run"]
-                if not (run_dir / "run.json").exists():
-                    continue
-                run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
-                if run["status"] == "completed" and run.get("answer"):
-                    out.append({"id": f"{model}-{suite}-{case}", "set": "B", "run": str(run_dir.relative_to(root).as_posix()),
-                                "seed": model in b["seeded_models"]})
+                for run_name in spec["runs"]:
+                    run_dir = folder / case / run_name
+                    if not (run_dir / "run.json").exists():
+                        continue
+                    run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+                    if run["status"] == "completed" and run.get("answer"):
+                        suffix = "" if len(spec["runs"]) == 1 else f"-{run_name}"
+                        out.append({"id": f"{model}-{suite}-{case}{suffix}", "set": name,
+                                    "run": run_dir.relative_to(root).as_posix(), "seed": model in spec["seeded_models"]})
     return out
+
+
+def bases(plan: dict[str, Any], split: str, root: Path = ROOT) -> list[dict[str, Any]]:
+    """这一份材料里的答案：{id, set, run 目录, 要不要植入错误}。
+
+    dev：第一轮的开发集。test：第一轮的留出集（A、B）。
+    dev2：第二轮的开发材料 = dev + A + B（第一轮跑完后，A、B 的结果已经看过，不能再当留出集）。
+    test2：第二轮的留出集 C，两轮调规则时都没有跑过。
+    """
+    dev = [{"id": b["id"], "set": "dev", "run": b["run"], "seed": True} for b in plan["dev"]]
+    first = [{"id": b["id"], "set": "A", "run": b["run"], "seed": True} for b in load_review_plan(root / plan["test_a"])["bases"]]
+    first += _from_runs(plan["test_b"], "B", root)
+    return {"dev": dev, "test": first, "dev2": dev + first, "test2": _from_runs(plan["test_c"], "C", root)}[split]
 
 
 def build_materials(plan: dict[str, Any], split: str, root: Path = ROOT) -> list[dict[str, Any]]:

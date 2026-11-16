@@ -18,6 +18,13 @@
 - 数字前面的分句里没有认得出的名字，不标记（常见的是承接上文）；
 - 自己的名字从宽（提到一部分就算，“订单数”写成“订单”），别的名字从严（必须整个出现）；
 - 表格里的数不查对象（名字在表头和首列，离得远，容易误判）。
+
+第一次在留出的答案上检验时，8 条“对象”标记没有一条成立（eval/results/attribution-2026-11-15）。按误报的原因又收紧了五处：
+- 名字只往前找到上一个数字为止：“订单数只降 8.2% 而单均金额降 22.5%”里，“订单数”属于 8.2%；
+- 数字后面紧跟着它自己的名字，就不标记：“1,035.92 亿元净利润对应仅 501.50 亿元经营利润”；
+- “占总变化的比重”这类数不查对象（只要有一处出处是占比）：它同时关系到部分和整体（“占 ROE 降幅 45.09%”里的 ROE 是整体）；
+- 不到 3 位有效数字的数不查：“整体掉了 11%”会碰巧对上别的数；
+- 反引号里的文字不当名字：`decompose_gmv` 是工具名，不是在说 GMV。
 """
 
 import json
@@ -30,10 +37,13 @@ from .checks import IGNORED, NUMBER, SCALES, extract_numbers
 Name = tuple[str, str]  # （类别，名字）；类别：metric 指标、segment 分组、company 公司
 METRIC_IDS = ("metric", "factor", "item", "ratio")  # 一行里有这些代号，这一行的 label 就是指标名
 SHARE_FIELDS = ("share_of_total_change",)
-SHARE_WORDS = ("占", "贡献", "比重", "份额", "解释", "来自")
+SHARE_WORDS = ("占", "贡献", "比重", "份额", "解释", "来自", "总变化", "抵消", "抵掉", "share")
 SENTENCE_END = re.compile(r"[。；;！!\n]")
 WINDOW = 24  # 只看数字前面这么多个字符以内的名字：再远就说不清这个名字是不是在说这个数
 CLAUSE_BREAK = re.compile(r"[，,；;、（(：:]")  # 而且不跨过逗号、括号、冒号：隔了一个分句，名字说的多半是别的东西
+AFTER = 14  # 数字后面这么多个字符以内出现它自己的名字，也算说对了
+MIN_DIGITS = 3  # 有效数字不到 3 位的数不查
+CODE_SPAN = re.compile(r"`[^`\n]*`")
 GENERIC_TOKENS = {"base", "current", "change", "pct", "prev", "last"}  # 字段名里不改变含义的部分：base_orders 仍然是订单数
 # 这份数据里国家是英文写的，答案常写中文：两种写法算同一个名字
 ALIASES = {"United Kingdom": ("英国", "UK"), "EIRE": ("爱尔兰",), "Netherlands": ("荷兰",), "France": ("法国",),
@@ -247,12 +257,25 @@ def _line(answer: str, start: int, end: int) -> str:
     return answer[answer.rfind("\n", 0, start) + 1:end]
 
 
+def _significant_digits(text: str) -> int:
+    digits = "".join(ch for ch in text if ch.isdigit()).lstrip("0")
+    return len(digits)
+
+
+def _mentions_own(text: str, own: frozenset[Name], index: Index, kind: str) -> bool:
+    lowered = text.lower()
+    return any(piece.lower() in lowered for name in own if name[0] == kind
+               for variant in index.variants[name] for piece in {variant, *_pieces(variant)})
+
+
 def check_attribution(answer: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
     """核对答案里每个数的归属。flags 里每一条是一个可能安错了对象（或可能被读错含义）的数。"""
     index = build_index(messages)
     sentences = _sentences(answer)
+    prose = CODE_SPAN.sub(lambda m: " " * len(m.group()), answer)  # 找名字时不看反引号里的文字；位置不变
+    mentions = extract_numbers(answer)[0]
     flags, checked = [], 0
-    for mention in extract_numbers(answer)[0]:
+    for at, mention in enumerate(mentions):
         occurrences = [o for o in index.occurrences if abs(o.value - mention.value) < mention.tolerance - 1e-12]
         if not occurrences or not all(o.names for o in occurrences):
             continue  # 找不到出处的数由数字核查负责；有一处出处没有名字的不查
@@ -264,19 +287,25 @@ def check_attribution(answer: str, messages: list[dict[str, Any]]) -> dict[str, 
         sources = sorted({(o.call, o.tool, o.field) for o in occurrences})
         base = {"text": mention.text, "start": mention.start, "end": mention.end, "sentence": sentence.strip(),
                 "belongs_to": sorted(name for _, name in own), "sources": [{"call": c, "tool": t, "field": f} for c, t, f in sources]}
-        before = CLAUSE_BREAK.split(answer[max(s, mention.start - WINDOW):mention.start])[-1]
+        share = all(o.field in SHARE_FIELDS for o in occurrences)
+        previous = mentions[at - 1].end if at and mentions[at - 1].end > s else s  # 往前只找到上一个数字为止
+        following = mentions[at + 1].start if at + 1 < len(mentions) and mentions[at + 1].start < e else e
+        before = CLAUSE_BREAK.split(prose[max(previous, mention.start - WINDOW):mention.start])[-1]
+        after = prose[mention.end:min(following, mention.end + AFTER)]
         wrong = []
         # 只核对每一处出处都有名字的那几类：31 既是新客数、又碰巧是某个商品的订单数时，它不一定是“某个商品的”
         kinds = set.intersection(*({k for k, _ in o.names} for o in occurrences))
-        for kind in ([] if in_table else sorted(kinds)):
+        maybe_share = any(o.field in SHARE_FIELDS for o in occurrences)  # 有一处出处是占比，就可能是在说占比
+        skip = in_table or maybe_share or _significant_digits(mention.text) < MIN_DIGITS
+        for kind in ([] if skip else sorted(kinds)):
             found = nearest_name(before, own, index, kind)
-            if found and not found[1]:
+            if found and not found[1] and not _mentions_own(after, own, index, kind):
                 wrong.append(found[0])
         if wrong:
             flags.append(base | {"kind": "对象", "sentence_says": "、".join(wrong)})
             continue
         context = f"{_table_header(answer, mention.start)} {sentence}" if in_table else _line(answer, s, e)
-        if all(o.field in SHARE_FIELDS for o in occurrences) and not any(w in context for w in SHARE_WORDS):
+        if share and not any(w in context for w in SHARE_WORDS):
             flags.append(base | {"kind": "含义", "sentence_says": "",
                                  "meaning": "这是占总变化的比重，不是这一项自己的变化率；这一行没有说明"})
     return {"checked": checked, "flags": flags}

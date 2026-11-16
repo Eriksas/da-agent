@@ -186,7 +186,7 @@ def evaluate_attribution(split: str, name: str | None) -> int:
     judgements = json.loads(judged.read_text(encoding="utf-8"))["judgements"] if judged.exists() else None
     summary = summarize(rows, judgements)
     meta = {"name": name, "split": split, "started_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "split_label": "开发集（调规则用，成绩不算数）" if split == "dev" else "留出集（规则定下来之后只跑一次）"}
+            "split_label": "开发材料（调规则用，成绩不算数）" if split.startswith("dev") else "留出集（规则定下来之后只跑一次）"}
     files = {"results.json": rows, "flags.json": clean_flags(rows), "summary.json": summary, "meta.json": meta}
     for file, content in files.items():
         (out_dir / file).write_text(json.dumps(content, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
@@ -622,7 +622,8 @@ def main(argv: list[str] | None = None) -> int:
     review_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 调用真实模型（默认）；fake 按剧本回放")
     review_parser.add_argument("--script", type=Path, help="--llm fake 时使用的剧本文件")
     attr_parser = commands.add_parser("eval-attribution", help="数字归属核对的评测：植入错误看能否指出、原样答案上有多少标记，不调用模型")
-    attr_parser.add_argument("--split", choices=["dev", "test"], default="dev", help="dev 开发集；test 留出集（规则定下来之后只跑一次）")
+    attr_parser.add_argument("--split", choices=["dev", "test", "dev2", "test2"], default="dev",
+                             help="dev / test：第一轮的开发集和留出集；dev2 / test2：第二轮的（留出集在规则定下来之后只跑一次）")
     attr_parser.add_argument("--name", help="结果目录名（eval/results/<name>），默认 attribution-<split>")
     commands.add_parser("eval-models", help="多模型对比：把 eval/model_comparison.yaml 里各模型的评测结果并排汇总，不调用模型")
     eval_review_parser = commands.add_parser("eval-review", help="复核 Agent 的评测：植入程序查不出的错误，看它能不能指出来")

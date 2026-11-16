@@ -38,7 +38,9 @@ def repo(tmp_path: Path) -> tuple[Path, dict]:
     write_run(tmp_path / "eval" / "results" / "p-flash-cases" / "runs" / "w49" / "agent_skill-1", status="llm_error")
     write_run(tmp_path / "eval" / "results" / "p-m3-cases" / "runs" / "w49" / "agent_skill-1", answer="")
     plan = {"dev": [{"id": "d1", "run": "old/a1"}], "test_a": "review.yaml",
-            "test_b": {"prefix": "p", "models": ["flash", "m3"], "suites": ["cases"], "run": "agent_skill-1", "seeded_models": ["flash"]}}
+            "test_b": {"prefix": "p", "models": ["flash", "m3"], "suites": ["cases"], "runs": ["agent_skill-1"], "seeded_models": ["flash"]},
+            "test_c": {"prefix": "p", "models": ["flash", "m3"], "suites": ["cases"], "runs": ["agent-1", "agent-2"],
+                       "seeded_models": ["flash"]}}
     return tmp_path, plan
 
 
@@ -48,6 +50,9 @@ def test_held_out_answers_are_picked_by_rule(repo: tuple[Path, dict]) -> None:
     picked = bases(plan, "test", root)
     assert [(b["id"], b["set"], b["seed"]) for b in picked] == [
         ("a1", "A", True), ("flash-cases-w48", "B", True), ("m3-cases-w48", "B", False)]  # 没正常结束、没有答案的不取
+    assert [b["id"] for b in bases(plan, "dev2", root)] == ["d1", "a1", "flash-cases-w48", "m3-cases-w48"]  # 第二轮的开发材料
+    assert [(b["id"], b["set"]) for b in bases(plan, "test2", root)] == [
+        ("flash-cases-w48-agent-1", "C"), ("m3-cases-w48-agent-1", "C")]  # 其余对比组的运行；不存在的（agent-2）跳过
     kinds = [(m["base"], m["kind"]) for m in build_materials(plan, "test", root)]
     assert kinds.count(("m3-cases-w48", "clean")) == 1 and ("m3-cases-w48", "entity") not in kinds  # 只给 Flash 的答案植入
 
@@ -101,6 +106,8 @@ def test_the_committed_plan_is_usable() -> None:
     test_ids = {b["run"] for b in bases(plan, "test")}
     assert not test_ids & {b["run"] for b in dev}  # 开发集和留出集不重叠
     assert sum(b["set"] == "A" for b in bases(plan, "test")) == 16
+    held_out = {b["run"] for b in bases(plan, "test2")}
+    assert len(held_out) > 100 and not held_out & {b["run"] for b in bases(plan, "dev2")}  # 第二轮的留出集和两轮的开发材料都不重叠
 
 
 def test_cli_writes_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -111,4 +118,4 @@ def test_cli_writes_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cap
     assert main(["eval-attribution", "--split", "dev", "--name", "attr-test"]) == 0
     assert "植入的对象替换：指到" in capsys.readouterr().out
     assert json.loads((tmp_path / "attr-test" / "meta.json").read_text(encoding="utf-8"))["split"] == "dev"
-    assert (tmp_path / "attr-test" / "flags.json").exists() and "开发集" in (tmp_path / "attr-test" / "summary.md").read_text(encoding="utf-8")
+    assert (tmp_path / "attr-test" / "flags.json").exists() and "开发材料" in (tmp_path / "attr-test" / "summary.md").read_text(encoding="utf-8")
