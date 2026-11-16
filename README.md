@@ -29,7 +29,7 @@ flowchart LR
 
 ## 关键结果
 
-全部来自仓库里的结果文件，每次运行的完整记录都已提交。模型 MiniMax-M3.1-Flash-Preview。
+全部来自仓库里的结果文件，每次运行的完整记录都已提交。模型 MiniMax-M3.1-Flash-Preview（2026-11-16 起默认改用它的正式版 MiniMax-M3.1-Flash；下表的结果都是在 Preview 上跑的，没有重跑）。
 
 | 问题 | 结果 | 出处 |
 |---|---|---|
@@ -481,7 +481,7 @@ uv run --group ui da-agent ui    # 打开 http://localhost:8501；--no-browser �
 **启用步骤：**
 
 1. 仓库 Settings → Secrets and variables → Actions → New repository secret，名称 `LLM_API_KEY`，值为自己的模型 API Key。密钥只保存在 GitHub Secrets 中，不进入代码和日志。
-2. 可选：在同一页的 Variables 中设置 `LLM_MODEL`、`LLM_BASE_URL`；不设置则使用默认值（MiniMax 国内站、`MiniMax-M3`）。
+2. 可选：在同一页的 Variables 中设置 `LLM_MODEL`、`LLM_BASE_URL`；不设置则使用默认值（MiniMax 国内站、`MiniMax-M3.1-Flash`）。
 3. Actions → Weekly report → Run workflow：先选 `fake` 检查流程（不提交），再选 `real` 生成第一份周报。
 4. 查看结果：[reports/weekly/README.md](reports/weekly/README.md) 是索引，每周一份报告，完整运行记录在 `reports/weekly/runs/<周>/`。
 

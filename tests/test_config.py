@@ -14,7 +14,7 @@ def test_defaults_point_to_minimax(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     settings = make_settings()
     assert settings.llm_base_url == "https://api.minimax.cn/v1"
-    assert settings.llm_model == "MiniMax-M3"
+    assert settings.llm_model == "MiniMax-M3.1-Flash"
     assert settings.has_api_key() is False
 
 
@@ -54,5 +54,5 @@ def test_empty_environment_values_keep_defaults(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv("LLM_MODEL", "")
     monkeypatch.setenv("LLM_BASE_URL", "")
     settings = make_settings()
-    assert settings.llm_model == "MiniMax-M3"
+    assert settings.llm_model == "MiniMax-M3.1-Flash"
     assert settings.llm_base_url == "https://api.minimax.cn/v1"
