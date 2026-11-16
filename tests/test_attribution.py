@@ -157,3 +157,15 @@ def test_short_numbers_are_not_checked_for_the_object() -> None:
 def test_text_in_backticks_is_not_a_name() -> None:
     assert flags("`decompose_gmv` 算出 -13,310.62。", SUMMARY, DECOMPOSE) == []  # 工具名里的 gmv 不是在说 GMV
     assert [f["sentence_says"] for f in flags("decompose_gmv 算出 -13,310.62。", SUMMARY, DECOMPOSE)] == ["GMV"]
+
+
+def test_names_do_not_reach_across_a_neighbouring_number() -> None:
+    """名字属于紧挨着它的那个数：往前不越过上一个数字，往后不越过下一个数字。"""
+    assert flags("订单数 288 单而另一项是 416.89。", SUMMARY) == []  # “订单数”说的是 288，不是后面客单价的 416.89
+    found = flags("GMV 高于 118,850.04 和 288 单的净销售额。", SUMMARY)  # “净销售额”在 288 后面，不能替 118,850.04 作证
+    assert [(f["text"], f["sentence_says"]) for f in found] == [("118,850.04", "GMV")]
+
+
+def test_more_ways_of_saying_it_is_a_share() -> None:
+    for wording in ("抵消了 53.52%", "抵掉 53.52%", "总变化的 53.52%", "share 53.52%"):
+        assert flags(f"- 活跃客户数 -13,310.62（{wording}）", DECOMPOSE) == [], wording
