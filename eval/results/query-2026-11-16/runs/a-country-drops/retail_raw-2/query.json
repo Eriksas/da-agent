@@ -1,0 +1,91 @@
+{
+  "status": "answered",
+  "request": "2011-W31 相比 2011-W30，GMV 下降金额最大的 3 个国家是哪些？给出各自两周的 GMV 和变化额（W31 减 W30，下降为负数）。",
+  "data": "retail_raw",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH wk AS (\n  SELECT country, week,\n         SUM(amount) AS gmv,\n         COUNT(DISTINCT invoice) AS orders,\n         COUNT(*) AS rows\n  FROM order_lines\n  WHERE line_type = '销售'\n    AND week IN ('2011-W30','2011-W31')\n  GROUP BY country, week\n), p AS (\n  SELECT country,\n         SUM(CASE WHEN week='2011-W30' THEN gmv    ELSE 0 END) AS gmv_w30,\n         SUM(CASE WHEN week='2011-W31' THEN gmv    ELSE 0 END) AS gmv_w31,\n         SUM(CASE WHEN week='2011-W30' THEN orders ELSE 0 END) AS orders_w30,\n         SUM(CASE WHEN week='2011-W31' THEN orders ELSE 0 END) AS orders_w31,\n         SUM(CASE WHEN week='2011-W30' THEN rows   ELSE 0 END) AS rows_w30,\n         SUM(CASE WHEN week='2011-W31' THEN rows   ELSE 0 END) AS rows_w31\n  FROM wk\n  GROUP BY country\n)\nSELECT country,\n       ROUND(gmv_w30, 2) AS gmv_2011_w30,\n       ROUND(gmv_w31, 2) AS gmv_2011_w31,\n       ROUND(gmv_w31 - gmv_w30, 2) AS gmv_change_w31_minus_w30,\n       orders_w30,\n       orders_w31,\n       rows_w30,\n       rows_w31\nFROM p\nORDER BY gmv_change_w31_minus_w30 ASC\nLIMIT 3",
+  "columns": [
+    {
+      "name": "country",
+      "meaning": "国家（含\"国家不明确\"合并桶）"
+    },
+    {
+      "name": "gmv_2011_w30",
+      "meaning": "2011-W30 的 GMV（商品销售额，英镑）"
+    },
+    {
+      "name": "gmv_2011_w31",
+      "meaning": "2011-W31 的 GMV（商品销售额，英镑）"
+    },
+    {
+      "name": "gmv_change_w31_minus_w30",
+      "meaning": "GMV 变化额 = W31 − W30（英镑，负数为下降）"
+    },
+    {
+      "name": "orders_w30",
+      "meaning": "2011-W30 销售订单数（不同发票号）"
+    },
+    {
+      "name": "orders_w31",
+      "meaning": "2011-W31 销售订单数（不同发票号）"
+    },
+    {
+      "name": "rows_w30",
+      "meaning": "2011-W30 商品明细行数"
+    },
+    {
+      "name": "rows_w31",
+      "meaning": "2011-W31 商品明细行数"
+    }
+  ],
+  "rows": [
+    {
+      "country": "EIRE",
+      "gmv_2011_w30": 21615.74,
+      "gmv_2011_w31": 5908.28,
+      "gmv_change_w31_minus_w30": -15707.46,
+      "orders_w30": 9,
+      "orders_w31": 2,
+      "rows_w30": 231,
+      "rows_w31": 175
+    },
+    {
+      "country": "Japan",
+      "gmv_2011_w30": 3680.4,
+      "gmv_2011_w31": 0.0,
+      "gmv_change_w31_minus_w30": -3680.4,
+      "orders_w30": 1,
+      "orders_w31": 0,
+      "rows_w30": 37,
+      "rows_w31": 0
+    },
+    {
+      "country": "Sweden",
+      "gmv_2011_w30": 3866.99,
+      "gmv_2011_w31": 612.0,
+      "gmv_change_w31_minus_w30": -3254.99,
+      "orders_w30": 2,
+      "orders_w31": 1,
+      "rows_w30": 32,
+      "rows_w31": 2
+    }
+  ],
+  "row_count": 3,
+  "definition": "GMV = 商品销售额（下单口径），即 order_lines 中 line_type='销售' 的 amount 之和（含之后被取消的订单，按下单周入账，不扣取消单）。时间范围：ISO 周 2011-W30 与 2011-W31。按 country 汇总两周 GMV，某周该国无销售行则计 0；变化额 = GMV(W31) − GMV(W30)，升序取前 3 名（即降幅最大的 3 国）。订单数 = 各周内不同发票号个数（仅销售订单）；行数 = 各周销售明细行数。",
+  "caveats": [
+    "样本极小：EIRE 两周仅 9 单 / 2 单，Japan 为 1 单 / 0 单，Sweden 为 2 单 / 1 单，单笔大单即可决定排名；Japan 在 W31 无任何销售。",
+    "降幅主要由个别大单造成：EIRE W30 的发票 561901 单笔 13,464.26 英镑（占该国 W30 GMV 的 62%）、Japan W30 全部 3,680.40 英镑来自单笔 561388、Sweden W30 发票 561902 占 3,603.58 英镑（占 93%）。",
+    "该结果为下单口径 GMV，未扣除取消单金额（这两周取消额分别为 W30 1,620.34、W31 6,153.22 英镑，按取消发生周入账）；如需净销售额口径需另算。",
+    "两周均为完整自然周，无缺失周数据（停业期 2010-12 至 2011-01，不影响这两周）。"
+  ],
+  "metrics_used": [],
+  "message": "已提交：2011-W31 相对 2011-W30 GMV 降幅最大的 3 个国家为 EIRE（21,615.74 → 5,908.28，变化 −15,707.46 英镑）、Japan（3,680.40 → 0.00，变化 −3,680.40 英镑）和 Sweden（3,866.99 → 612.00，变化 −3,254.99 英镑），并附各周订单数与明细行数供样本量判断。",
+  "sql_runs": 5,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 39370,
+    "completion_tokens": 3682,
+    "llm_calls": 7
+  },
+  "seconds": 21.18
+}

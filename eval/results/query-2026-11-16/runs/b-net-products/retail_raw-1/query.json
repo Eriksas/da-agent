@@ -1,0 +1,120 @@
+{
+  "status": "answered",
+  "request": "2011 年净销售额最高的 5 个商品（按商品编码），以及各自的 GMV、取消金额和净销售额。",
+  "data": "retail_raw",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH y AS (\n  SELECT stock_code, line_type,\n         sum(amount) AS amt,\n         count(*) AS rows,\n         count(DISTINCT CASE WHEN line_type='销售' THEN invoice END) AS inv,\n         count(DISTINCT CASE WHEN line_type='取消' THEN invoice END) AS c_inv\n  FROM order_lines\n  WHERE order_date >= DATE '2011-01-01' AND order_date <= DATE '2011-12-09'\n  GROUP BY stock_code, line_type\n), agg AS (\n  SELECT stock_code,\n         sum(CASE WHEN line_type='销售' THEN amt ELSE 0 END) AS gmv,\n         sum(CASE WHEN line_type='取消' THEN amt ELSE 0 END) AS cancel_amt,\n         sum(CASE WHEN line_type='销售' THEN amt ELSE -amt END) AS net,\n         sum(rows) AS rows_all,\n         sum(inv) AS inv_sales,\n         sum(c_inv) AS inv_cancel\n  FROM y GROUP BY stock_code\n), desc_map AS (\n  SELECT stock_code, arg_max(description, cnt) AS description\n  FROM (SELECT stock_code, description, count(*) AS cnt\n        FROM order_lines\n        WHERE order_date >= DATE '2011-01-01' AND order_date <= DATE '2011-12-09'\n        GROUP BY stock_code, description) t\n  GROUP BY stock_code\n)\nSELECT a.stock_code AS stock_code,\n       d.description AS description,\n       round(a.gmv, 2) AS gmv_gbp,\n       round(a.cancel_amt, 2) AS cancel_amount_gbp,\n       round(a.net, 2) AS net_sales_gbp,\n       round(a.cancel_amt / a.gmv, 4) AS cancel_rate,\n       a.inv_sales AS sales_orders,\n       a.inv_cancel AS cancel_orders,\n       a.rows_all AS line_rows\nFROM agg a LEFT JOIN desc_map d USING (stock_code)\nORDER BY a.net DESC\nLIMIT 5",
+  "columns": [
+    {
+      "name": "stock_code",
+      "meaning": "商品编码"
+    },
+    {
+      "name": "description",
+      "meaning": "商品名称（该编码下出现行数最多的名称）"
+    },
+    {
+      "name": "gmv_gbp",
+      "meaning": "2011 年 GMV（商品销售额，下单口径，含之后被取消的订单），英镑"
+    },
+    {
+      "name": "cancel_amount_gbp",
+      "meaning": "2011 年取消金额（取消单商品金额，正数），英镑"
+    },
+    {
+      "name": "net_sales_gbp",
+      "meaning": "2011 年净销售额 = GMV − 取消金额，英镑"
+    },
+    {
+      "name": "cancel_rate",
+      "meaning": "取消率 = 取消金额 ÷ GMV，小数（0.0596 = 5.96%）"
+    },
+    {
+      "name": "sales_orders",
+      "meaning": "2011 年该商品的销售订单数（不同销售发票号个数）"
+    },
+    {
+      "name": "cancel_orders",
+      "meaning": "2011 年涉及该商品的取消订单数（不同取消发票号个数）"
+    },
+    {
+      "name": "line_rows",
+      "meaning": "2011 年该商品的销售+取消明细行数（记录数）"
+    }
+  ],
+  "rows": [
+    {
+      "stock_code": "22423",
+      "description": "REGENCY CAKESTAND 3 TIER",
+      "gmv_gbp": 146461.78,
+      "cancel_amount_gbp": 8724.45,
+      "net_sales_gbp": 137737.33,
+      "cancel_rate": 0.0596,
+      "sales_orders": 1816,
+      "cancel_orders": 167,
+      "line_rows": 1998
+    },
+    {
+      "stock_code": "47566",
+      "description": "PARTY BUNTING",
+      "gmv_gbp": 98237.49,
+      "cancel_amount_gbp": 1201.35,
+      "net_sales_gbp": 97036.14,
+      "cancel_rate": 0.0122,
+      "sales_orders": 1637,
+      "cancel_orders": 20,
+      "line_rows": 1671
+    },
+    {
+      "stock_code": "85123A",
+      "description": "WHITE HANGING HEART T-LIGHT HOLDER",
+      "gmv_gbp": 94027.39,
+      "cancel_amount_gbp": 5267.9,
+      "net_sales_gbp": 88759.49,
+      "cancel_rate": 0.056,
+      "sales_orders": 1975,
+      "cancel_orders": 36,
+      "line_rows": 2060
+    },
+    {
+      "stock_code": "85099B",
+      "description": "JUMBO BAG RED RETROSPOT",
+      "gmv_gbp": 90140.66,
+      "cancel_amount_gbp": 1937.22,
+      "net_sales_gbp": 88203.44,
+      "cancel_rate": 0.0215,
+      "sales_orders": 1970,
+      "cancel_orders": 39,
+      "line_rows": 2029
+    },
+    {
+      "stock_code": "23084",
+      "description": "RABBIT NIGHT LIGHT",
+      "gmv_gbp": 66870.03,
+      "cancel_amount_gbp": 208.4,
+      "net_sales_gbp": 66661.63,
+      "cancel_rate": 0.0031,
+      "sales_orders": 994,
+      "cancel_orders": 15,
+      "line_rows": 1032
+    }
+  ],
+  "row_count": 5,
+  "definition": "时间范围：2011-01-01 至 2011-12-09（数据末日），按 order_date 过滤，包含 2010-12-23 至 2011-01-03 的停业空档。GMV = line_type='销售' 行的 amount 之和（含之后被取消的订单）；取消金额 = line_type='取消' 行的 amount 之和（正数）；净销售额 = GMV − 取消金额。取消单按取消发生时间入账，不回溯原订单周。分组粒度为 stock_code（商品编码），不跨编码合并；同一编码内的多行商品明细按金额累加。商品名称取该编码下出现行数最多的 description。排序按净销售额降序取前 5。",
+  "caveats": [
+    "2011 年数据截止到 12-09（周五），12 月最后一周不完整，因此这些商品的全年金额略低于完整年份。",
+    "取消单按取消发生时间计入 2011，可能对应 2010 年下单的商品；因此部分编码的取消金额与当年销售不完全对应，净销售额已按该口径计算。",
+    "金额为正数口径，未扣除运费等非商品行；取消率为该编码自身取消金额 ÷ GMV。",
+    "第 1 名（22423）与第 5 名（23084）之间差距明显，第 5、6 名（84879，净销售额 54,820.07 英镑）差距也较大，前 5 名排序稳定、无并列。"
+  ],
+  "metrics_used": [],
+  "message": "已提交：2011 年（2011-01-01 至 2011-12-09）按商品编码聚合的净销售额前 5 名，含各自的 GMV、取消金额、净销售额、取消率及订单数/明细行数样本量，排序为 22423（REGENCY CAKESTAND 3 TIER，净 137,737.33 英镑）领先，其后依次是 47566、85123A、85099B、23084。",
+  "sql_runs": 3,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 18559,
+    "completion_tokens": 2482,
+    "llm_calls": 4
+  },
+  "seconds": 21.59
+}

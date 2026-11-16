@@ -1,0 +1,73 @@
+{
+  "status": "answered",
+  "request": "2011-W48 按客户类型（新客、老客、未知）分，GMV 各是多少？",
+  "data": "retail",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "SELECT customer_type,\n       round(sum(gmv_amount), 2) AS gmv,\n       round(sum(gmv_amount) / sum(sum(gmv_amount)) OVER (), 4) AS gmv_share,\n       count(DISTINCT order_id) AS orders,\n       count(*) AS line_count\nFROM order_lines\nWHERE week = '2011-W48'\nGROUP BY customer_type\nORDER BY gmv DESC",
+  "columns": [
+    {
+      "name": "customer_type",
+      "meaning": "客户类型（新客/老客/未知）"
+    },
+    {
+      "name": "gmv",
+      "meaning": "该客户类型在 2011-W48 的 GMV（英镑），= sum(gmv_amount)，销售行金额之和，含之后被取消的订单"
+    },
+    {
+      "name": "gmv_share",
+      "meaning": "该客户类型 GMV 占 2011-W48 全站 GMV 的比例（小数，0.7653 = 76.53%）"
+    },
+    {
+      "name": "orders",
+      "meaning": "该客户类型在 2011-W48 的销售订单数（去重发票号），样本量参考"
+    },
+    {
+      "name": "line_count",
+      "meaning": "该客户类型在 2011-W48 的明细行数（销售行 + 取消行），样本量参考"
+    }
+  ],
+  "rows": [
+    {
+      "customer_type": "老客",
+      "gmv": 236766.93,
+      "gmv_share": 0.7653,
+      "orders": 595,
+      "line_count": 12377
+    },
+    {
+      "customer_type": "未知",
+      "gmv": 62564.34,
+      "gmv_share": 0.2022,
+      "orders": 32,
+      "line_count": 4949
+    },
+    {
+      "customer_type": "新客",
+      "gmv": 10050.46,
+      "gmv_share": 0.0325,
+      "orders": 36,
+      "line_count": 1209
+    }
+  ],
+  "row_count": 3,
+  "definition": "数据源 order_lines；筛选 week = '2011-W48'（ISO 周，2011-11-28 至 2011-12-04，完整一周）。GMV 用口径表表达式 sum(gmv_amount)（销售行等于 amount，取消行为 0）。按 customer_type 分组，占比 = 组内 GMV ÷ 该周全部 GMV。订单数 = count(DISTINCT order_id)（只数销售订单，因取消行 order_id 为空）；line_count = count(*) 含销售与取消行，用于样本量判断。",
+  "caveats": [
+    "GMV 为下单口径，含本周下单但之后被取消的订单；本周取消单（老客 235 行、未知 2 行）GMV 计 0，若需净销售额请另看 sum(net_amount)。",
+    "“未知”指缺客户 ID（约占全表四分之一行），其金额计入 GMV 但不计入任何客户数指标。",
+    "“新客”按首次购买周判定，靠近数据起点（2009-12）会把老客误判为新客；2011-W48 距起点较远，该影响可忽略。",
+    "新客组样本较小（36 单、1,2xx 行），其 GMV 易受个别大额订单影响。"
+  ],
+  "metrics_used": [
+    "gmv",
+    "orders"
+  ],
+  "message": "已提交：2011-W48（完整一周）按客户类型的 GMV 为 老客 £236,766.93（占 76.53%，595 单）、未知 £62,564.34（20.22%，32 单）、新客 £10,050.46（3.25%，36 单），同时给出各组占比与样本量（订单数、明细行数）。",
+  "sql_runs": 3,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 15473,
+    "completion_tokens": 1336,
+    "llm_calls": 4
+  },
+  "seconds": 10.92
+}

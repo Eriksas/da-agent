@@ -1,0 +1,69 @@
+{
+  "status": "answered",
+  "request": "2011-W22 和 2011-W21 各有几个交易日？两周的日均 GMV（GMV ÷ 交易天数）各是多少？",
+  "data": "retail_raw",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH sales AS (\n    SELECT week, order_date, invoice, amount\n    FROM order_lines\n    WHERE line_type = '销售'\n      AND week IN ('2011-W21', '2011-W22')\n)\nSELECT\n    week                                      AS week,\n    COUNT(DISTINCT order_date)                AS trading_days,\n    COUNT(DISTINCT invoice)                   AS order_count,\n    COUNT(*)                                  AS line_count,\n    ROUND(SUM(amount), 2)                     AS gmv_gbp,\n    ROUND(SUM(amount) / COUNT(DISTINCT order_date), 2) AS daily_avg_gmv_gbp\nFROM sales\nGROUP BY week\nORDER BY week",
+  "columns": [
+    {
+      "name": "week",
+      "meaning": "ISO 周（2011-W21 = 2011-05-23~2011-05-29；2011-W22 = 2011-05-30~2011-06-05）"
+    },
+    {
+      "name": "trading_days",
+      "meaning": "交易日数：有销售记录的日期个数（天）"
+    },
+    {
+      "name": "order_count",
+      "meaning": "销售订单数：不同销售发票号个数"
+    },
+    {
+      "name": "line_count",
+      "meaning": "销售明细行数（条）"
+    },
+    {
+      "name": "gmv_gbp",
+      "meaning": "GMV = 该周销售行金额之和（英镑，下单口径，含之后被取消的订单）"
+    },
+    {
+      "name": "daily_avg_gmv_gbp",
+      "meaning": "日均 GMV = GMV ÷ 交易日数（英镑/天）"
+    }
+  ],
+  "rows": [
+    {
+      "week": "2011-W21",
+      "trading_days": 6,
+      "order_count": 350,
+      "line_count": 7177,
+      "gmv_gbp": 159463.82,
+      "daily_avg_gmv_gbp": 26577.3
+    },
+    {
+      "week": "2011-W22",
+      "trading_days": 5,
+      "order_count": 259,
+      "line_count": 6513,
+      "gmv_gbp": 115065.0,
+      "daily_avg_gmv_gbp": 23013.0
+    }
+  ],
+  "row_count": 2,
+  "definition": "范围：week ∈ {2011-W21, 2011-W22}，直接使用表内 ISO 周字段。GMV = line_type='销售' 行的 amount 之和（下单口径，不扣取消）。交易天数 = 该周有销售记录的 order_date 去重个数（COUNT DISTINCT）。日均 GMV = GMV ÷ 交易天数。订单数为该周销售发票号去重个数（样本量参考）。",
+  "caveats": [
+    "2011-W21 有 6 个交易日：2011-05-23~05-27 与 05-29，2011-05-28（周六）无销售；2011-W22 有 5 个交易日：05-31、06-01、06-02、06-03、06-05，2011-05-30（周一）与 06-04（周六）无销售。因此日均 GMV 的分母比自然周 7 天少。",
+    "GMV 为下单口径，含随后被取消的订单；取消金额未从 GMV 中扣除（W21 取消 1,804.10 英镑、W22 取消 1,708.46 英镑，如需净销售额请另算）。",
+    "该数据集含有少数金额极大的订单（数万英镑级别，下单后很快全额取消），会抬高这两周的 GMV 与日均 GMV，波动可能被放大。",
+    "两周样本量较小（W21 350 单 / W22 259 单），日均 GMV 差异不宜直接解读为趋势。"
+  ],
+  "metrics_used": [],
+  "message": "已提交：2011-W21 有 6 个交易日、GMV 159,463.82 英镑、日均 GMV 26,577.30 英镑/天；2011-W22 有 5 个交易日、GMV 115,065.00 英镑、日均 GMV 23,013.00 英镑/天（结果含各周订单数与明细行数作样本量参考，并在 caveats 中标注了无销售日期及大额订单的影响）。",
+  "sql_runs": 3,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 18645,
+    "completion_tokens": 3244,
+    "llm_calls": 4
+  },
+  "seconds": 29.73
+}

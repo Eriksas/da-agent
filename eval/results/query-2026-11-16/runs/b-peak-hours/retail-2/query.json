@@ -1,0 +1,72 @@
+{
+  "status": "answered",
+  "request": "2011 年 11 月，按下单的小时（0–23 点）统计订单数，订单最多的 3 个小时是哪几个，各有多少订单？",
+  "data": "retail",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH h AS (\n  SELECT EXTRACT(hour FROM order_time) AS hour_of_day,\n         count(DISTINCT order_id) AS orders,\n         count(*) AS line_rows,\n         sum(gmv_amount) AS gmv\n  FROM order_lines\n  WHERE month = '2011-11'\n  GROUP BY 1\n)\nSELECT hour_of_day,\n       orders,\n       round(orders * 1.0 / sum(orders) OVER (), 4) AS share_of_month_orders,\n       line_rows,\n       round(gmv, 2) AS gmv\nFROM h\nORDER BY orders DESC\nLIMIT 3",
+  "columns": [
+    {
+      "name": "hour_of_day",
+      "meaning": "下单小时（0–23 点，取自 order_time 的小时部分）"
+    },
+    {
+      "name": "orders",
+      "meaning": "该小时内的订单数（count(DISTINCT order_id)，只计销售订单）"
+    },
+    {
+      "name": "share_of_month_orders",
+      "meaning": "该小时订单数占 2011-11 全月订单数 2751 的比例（小数）"
+    },
+    {
+      "name": "line_rows",
+      "meaning": "该小时内的商品明细行数（销售行 + 取消行，样本量参考）"
+    },
+    {
+      "name": "gmv",
+      "meaning": "该小时的 GMV（英镑），sum(gmv_amount)"
+    }
+  ],
+  "rows": [
+    {
+      "hour_of_day": 12,
+      "orders": 436,
+      "share_of_month_orders": 0.1585,
+      "line_rows": 12207,
+      "gmv": 156621.23
+    },
+    {
+      "hour_of_day": 13,
+      "orders": 396,
+      "share_of_month_orders": 0.1439,
+      "line_rows": 10544,
+      "gmv": 153428.23
+    },
+    {
+      "hour_of_day": 14,
+      "orders": 337,
+      "share_of_month_orders": 0.1225,
+      "line_rows": 9940,
+      "gmv": 148641.02
+    }
+  ],
+  "row_count": 3,
+  "definition": "时间范围：month = '2011-11'（2011-11-01 08:16 至 2011-11-30 17:42）。按 EXTRACT(hour FROM order_time) 分组；订单数用口径表表达式 count(DISTINCT order_id)（取消行 order_id 为空，天然只计销售订单）；GMV 用 sum(gmv_amount)。占比 = 该小时订单数 ÷ 当月全部小时订单数合计（2751）。结果按订单数降序取前 3 行。",
+  "caveats": [
+    "第 3 名（14 点，337 单）与第 4 名（11 点，331 单）仅差 6 单，若改用 GMV 排名，15 点（302 单、219,872 英镑）会进入前 3",
+    "11 月内营业时段集中在 8–17 点，夜间及 20 点后几乎无单，因此不存在 0–23 全部小时都有数据的情况",
+    "订单按发票号去重，取消单按取消发生时间入账，不回溯原订单小时"
+  ],
+  "metrics_used": [
+    "gmv",
+    "orders"
+  ],
+  "message": "2011 年 11 月订单最多的 3 个下单小时是 **12 点（436 单）、13 点（396 单）、14 点（337 单）**，合计占当月 2751 单的约 42.5%。",
+  "sql_runs": 3,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 16547,
+    "completion_tokens": 1430,
+    "llm_calls": 4
+  },
+  "seconds": 17.06
+}

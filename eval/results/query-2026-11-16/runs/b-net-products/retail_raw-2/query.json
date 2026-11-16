@@ -1,0 +1,102 @@
+{
+  "status": "answered",
+  "request": "2011 年净销售额最高的 5 个商品（按商品编码），以及各自的 GMV、取消金额和净销售额。",
+  "data": "retail_raw",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH base AS (\n  SELECT stock_code, description, line_type, amount, invoice\n  FROM order_lines\n  WHERE order_date >= DATE '2011-01-01' AND order_date < DATE '2012-01-01'\n),\nagg AS (\n  SELECT stock_code,\n         SUM(CASE WHEN line_type = '销售' THEN amount ELSE 0 END) AS gmv,\n         SUM(CASE WHEN line_type = '取消' THEN amount ELSE 0 END) AS cancel_amount,\n         COUNT(DISTINCT CASE WHEN line_type = '销售' THEN invoice END) AS order_count,\n         COUNT(*) AS line_count\n  FROM base\n  GROUP BY stock_code\n),\ndesc_pick AS (\n  SELECT stock_code, arg_max(description, cnt) AS description\n  FROM (SELECT stock_code, description, COUNT(*) AS cnt FROM base GROUP BY stock_code, description)\n  GROUP BY stock_code\n)\nSELECT a.stock_code,\n       d.description,\n       round(a.gmv, 2) AS gmv,\n       round(a.cancel_amount, 2) AS cancel_amount,\n       round(a.gmv - a.cancel_amount, 2) AS net_sales,\n       a.order_count,\n       a.line_count\nFROM agg a\nJOIN desc_pick d USING (stock_code)\nORDER BY net_sales DESC\nLIMIT 5",
+  "columns": [
+    {
+      "name": "stock_code",
+      "meaning": "商品编码"
+    },
+    {
+      "name": "description",
+      "meaning": "商品名称（2011 年该编码下行数最多的描述）"
+    },
+    {
+      "name": "gmv",
+      "meaning": "2011 年 GMV：销售行金额之和（英镑）"
+    },
+    {
+      "name": "cancel_amount",
+      "meaning": "2011 年取消金额：取消行金额之和（英镑，正数）"
+    },
+    {
+      "name": "net_sales",
+      "meaning": "2011 年净销售额 = GMV − 取消金额（英镑）"
+    },
+    {
+      "name": "order_count",
+      "meaning": "2011 年销售订单数（不同销售发票号个数）"
+    },
+    {
+      "name": "line_count",
+      "meaning": "2011 年该商品的销售+取消明细行数"
+    }
+  ],
+  "rows": [
+    {
+      "stock_code": "22423",
+      "description": "REGENCY CAKESTAND 3 TIER",
+      "gmv": 146461.78,
+      "cancel_amount": 8724.45,
+      "net_sales": 137737.33,
+      "order_count": 1816,
+      "line_count": 1998
+    },
+    {
+      "stock_code": "47566",
+      "description": "PARTY BUNTING",
+      "gmv": 98237.49,
+      "cancel_amount": 1201.35,
+      "net_sales": 97036.14,
+      "order_count": 1637,
+      "line_count": 1671
+    },
+    {
+      "stock_code": "85123A",
+      "description": "WHITE HANGING HEART T-LIGHT HOLDER",
+      "gmv": 94027.39,
+      "cancel_amount": 5267.9,
+      "net_sales": 88759.49,
+      "order_count": 1975,
+      "line_count": 2060
+    },
+    {
+      "stock_code": "85099B",
+      "description": "JUMBO BAG RED RETROSPOT",
+      "gmv": 90140.66,
+      "cancel_amount": 1937.22,
+      "net_sales": 88203.44,
+      "order_count": 1970,
+      "line_count": 2029
+    },
+    {
+      "stock_code": "23084",
+      "description": "RABBIT NIGHT LIGHT",
+      "gmv": 66870.03,
+      "cancel_amount": 208.4,
+      "net_sales": 66661.63,
+      "order_count": 994,
+      "line_count": 1032
+    }
+  ],
+  "row_count": 5,
+  "definition": "时间范围：order_date 在 2011-01-01 至 2011-12-09（数据止于此日，等价于 <2012-01-01），包含该期间内的销售行与取消行。分组：按 stock_code 汇总。GMV = 销售行 amount 之和（数量×单价，下单口径，含之后被取消的订单）；取消金额 = 取消行 amount 之和（正数，取消按取消发生时间入账，2011 年下单的订单若在 2012 年取消则不计入本表，因数据止于 2011-12-09）；净销售额 = GMV − 取消金额。结果按净销售额降序取前 5；商品名称取该编码 2011 年行数最多的描述（85123A 有 9 行描述为 CREAM 版，其余 2051 行为 WHITE 版）。",
+  "caveats": [
+    "2011 年数据只到 12 月 9 日（周五），最后一周不完整，年度总量与完整自然年不可比。",
+    "取消行按取消发生时间归入当年；2011 年下单但在 2012 年才取消的订单（数据止于 2011-12-09，几乎没有）不会体现，因此个别商品 GMV 略偏高、净销售额略偏低。",
+    "商品 22423 的取消金额占其 GMV 约 6%，是前 5 名中取消占比最高的，其余 4 个均低于 6%（85123A 约 5.6%，47566 约 1.2%，85099B 约 2.1%，23084 约 0.3%）。",
+    "金额单位为英镑；top5 之间净销售额差距较大（第一名约为第二名的 1.4 倍），第 4、5 名与后续商品（第 6 名 84879 净销售额 54,820.07）差距较小，排名边界较敏感。"
+  ],
+  "metrics_used": [],
+  "message": "已提交：2011 年（数据止于 2011-12-09）按商品编码汇总的净销售额前 5 名，分别为 22423（净 137,737.33 英镑）、47566（97,036.14）、85123A（88,759.49）、85099B（88,203.44）、23084（66,661.63），并附各自 GMV、取消金额、销售订单数与明细行数。",
+  "sql_runs": 4,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 24179,
+    "completion_tokens": 2817,
+    "llm_calls": 5
+  },
+  "seconds": 30.33
+}

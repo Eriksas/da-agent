@@ -1,0 +1,106 @@
+{
+  "status": "answered",
+  "request": "2011 年英国（United Kingdom）以外 GMV 最高的 5 个国家，各自的 GMV，以及各占海外（英国以外）GMV 的比例。",
+  "data": "retail",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH overseas AS (\n  SELECT country,\n         sum(gmv_amount) AS gmv,\n         count(DISTINCT order_id) AS orders,\n         count(*) AS line_rows\n  FROM order_lines\n  WHERE order_date >= DATE '2011-01-01' AND order_date < DATE '2012-01-01'\n    AND country <> 'United Kingdom'\n  GROUP BY country\n), totals AS (\n  SELECT sum(gmv) AS overseas_gmv, sum(orders) AS overseas_orders FROM overseas\n), top5 AS (\n  SELECT country, gmv, orders, line_rows FROM overseas ORDER BY gmv DESC LIMIT 5\n)\nSELECT t.country,\n       round(t.gmv, 2) AS gmv,\n       round(t.gmv / tot.overseas_gmv, 4) AS share_of_overseas_gmv,\n       t.orders,\n       t.line_rows,\n       round(tot.overseas_gmv, 2) AS overseas_gmv_total,\n       round(tot.overseas_orders, 0) AS overseas_orders_total\nFROM top5 t CROSS JOIN totals tot\nORDER BY t.gmv DESC",
+  "columns": [
+    {
+      "name": "country",
+      "meaning": "国家（按 GMV 降序，2011 年英国以外前 5 名）"
+    },
+    {
+      "name": "gmv",
+      "meaning": "该国 2011 年 GMV（英镑，下单口径，含之后被取消的订单）"
+    },
+    {
+      "name": "share_of_overseas_gmv",
+      "meaning": "该国 GMV ÷ 2011 年英国以外（海外）GMV 合计，小数表示，0.1894 即 18.94%"
+    },
+    {
+      "name": "orders",
+      "meaning": "该国 2011 年销售订单数（count(distinct order_id)），样本量参考"
+    },
+    {
+      "name": "line_rows",
+      "meaning": "该国 2011 年商品明细行数，样本量参考"
+    },
+    {
+      "name": "overseas_gmv_total",
+      "meaning": "2011 年英国以外（海外）GMV 合计（英镑），即比例的分母"
+    },
+    {
+      "name": "overseas_orders_total",
+      "meaning": "2011 年英国以外销售订单数合计（各国内订单数之和），样本量参考"
+    }
+  ],
+  "rows": [
+    {
+      "country": "Netherlands",
+      "gmv": 275134.86,
+      "share_of_overseas_gmv": 0.1894,
+      "orders": 90,
+      "line_rows": 2256,
+      "overseas_gmv_total": 1452370.14,
+      "overseas_orders_total": 1762
+    },
+    {
+      "country": "EIRE",
+      "gmv": 261167.6,
+      "share_of_overseas_gmv": 0.1798,
+      "orders": 265,
+      "line_rows": 7664,
+      "overseas_gmv_total": 1452370.14,
+      "overseas_orders_total": 1762
+    },
+    {
+      "country": "Germany",
+      "gmv": 192137.41,
+      "share_of_overseas_gmv": 0.1323,
+      "orders": 414,
+      "line_rows": 8544,
+      "overseas_gmv_total": 1452370.14,
+      "overseas_orders_total": 1762
+    },
+    {
+      "country": "France",
+      "gmv": 175962.69,
+      "share_of_overseas_gmv": 0.1212,
+      "orders": 362,
+      "line_rows": 7797,
+      "overseas_gmv_total": 1452370.14,
+      "overseas_orders_total": 1762
+    },
+    {
+      "country": "Australia",
+      "gmv": 137138.46,
+      "share_of_overseas_gmv": 0.0944,
+      "orders": 53,
+      "line_rows": 1219,
+      "overseas_gmv_total": 1452370.14,
+      "overseas_orders_total": 1762
+    }
+  ],
+  "row_count": 5,
+  "definition": "时间范围：order_date 在 2011-01-01 至 2011-12-09（数据止于 2011-12-09）；过滤 country <> 'United Kingdom'。GMV 口径照抄指标表：sum(gmv_amount)（下单口径，含之后被取消的订单，取消单不计 GMV）。先按国家分组求和，再取 GMV 前 5 名；比例 = 该国 GMV ÷ 2011 年所有英国以外国家 GMV 合计（含 country = '国家不明确'，即 Unspecified/European Community 归类，2011 年其 GMV 为 5,900.19 英镑，排第 23，未进入前 5）。订单数为 count(DISTINCT order_id)（只数销售订单），明细行数为 count(*)。",
+  "caveats": [
+    "数据截止 2011-12-09（周五），2011 年最后约 3 周的交易缺失，各国 GMV 与海外合计均略偏低，但不影响相对排名。",
+    "GMV 为下单口径，包含之后被取消的订单（取消单按取消时间入账、不回溯），且有少数超大额订单会抬高某些国家的 GMV（如荷兰的 90 笔订单贡献 27.5 万英镑）。",
+    "澳大利亚样本偏小（仅 53 笔订单），其 GMV 集中度高，比例波动可能大。",
+    "约四分之一明细行缺客户 ID，但金额仍计入 GMV；国家维度不受此影响（按订单客户国家归属）。",
+    "比例分母含 '国家不明确'（Unspecified、European Community 合并值）；若剔除该类，海外 GMV 合计为 1,446,469.95 英镑，各国比例会略高 0.2%–0.3% 个百分点。"
+  ],
+  "metrics_used": [
+    "gmv",
+    "orders"
+  ],
+  "message": "已提交：2011 年英国以外 GMV 前 5 国为荷兰（275,134.86 英镑，占海外 GMV 18.94%）、EIRE（261,167.60 英镑，17.98%）、德国（192,137.41 英镑，13.23%）、法国（175,962.69 英镑，12.12%）、澳大利亚（137,138.46 英镑，9.44%），海外 GMV 合计 1,452,370.14 英镑，查询同时给出各国订单数与明细行数作样本量参考。",
+  "sql_runs": 4,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 28031,
+    "completion_tokens": 3055,
+    "llm_calls": 5
+  },
+  "seconds": 23.62
+}

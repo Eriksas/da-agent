@@ -1,0 +1,101 @@
+{
+  "status": "answered",
+  "request": "成功率（y 为 yes 的比例）最高的 3 个 education 是哪些？只看记录数不少于 1000 的，给出各自的成功率。",
+  "data": "csv:bank-additional-full.csv",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH base AS (\n  SELECT education,\n         COUNT(*) AS records,\n         SUM(CASE WHEN y = 'yes' THEN 1 ELSE 0 END) AS successes,\n         AVG(CASE WHEN y = 'yes' THEN 1.0 ELSE 0.0 END) AS rate\n  FROM data\n  GROUP BY education\n  HAVING COUNT(*) >= 1000\n),\ntop_all AS (\n  SELECT 'A_含 unknown 占位' AS ranking_basis, education, records, successes, rate,\n         ROW_NUMBER() OVER (ORDER BY rate DESC, education) AS rnk\n  FROM base\n),\ntop_excl AS (\n  SELECT 'B_排除 unknown 占位' AS ranking_basis, education, records, successes, rate,\n         ROW_NUMBER() OVER (ORDER BY rate DESC, education) AS rnk\n  FROM base WHERE education <> 'unknown'\n)\nSELECT ranking_basis, rnk, education, records, successes, ROUND(rate, 4) AS success_rate\nFROM (SELECT * FROM top_all UNION ALL SELECT * FROM top_excl)\nWHERE rnk <= 3\nORDER BY ranking_basis, rnk",
+  "columns": [
+    {
+      "name": "ranking_basis",
+      "meaning": "排名口径：A=按数据中全部 education 取值排名（含 unknown 占位值）；B=排除 unknown 占位值后排名"
+    },
+    {
+      "name": "rnk",
+      "meaning": "该口径下的成功率排名（1=最高）"
+    },
+    {
+      "name": "education",
+      "meaning": "教育程度取值"
+    },
+    {
+      "name": "records",
+      "meaning": "该 education 下的记录数（样本量）"
+    },
+    {
+      "name": "successes",
+      "meaning": "该 education 下 y='yes' 的记录数"
+    },
+    {
+      "name": "success_rate",
+      "meaning": "成功率 = y='yes' 的记录数 / 该组记录数，小数表示（0.1372 即 13.72%）"
+    }
+  ],
+  "rows": [
+    {
+      "ranking_basis": "A_含 unknown 占位",
+      "rnk": 1,
+      "education": "unknown",
+      "records": 1731,
+      "successes": 251,
+      "success_rate": 0.145
+    },
+    {
+      "ranking_basis": "A_含 unknown 占位",
+      "rnk": 2,
+      "education": "university.degree",
+      "records": 12168,
+      "successes": 1670,
+      "success_rate": 0.1372
+    },
+    {
+      "ranking_basis": "A_含 unknown 占位",
+      "rnk": 3,
+      "education": "professional.course",
+      "records": 5243,
+      "successes": 595,
+      "success_rate": 0.1135
+    },
+    {
+      "ranking_basis": "B_排除 unknown 占位",
+      "rnk": 1,
+      "education": "university.degree",
+      "records": 12168,
+      "successes": 1670,
+      "success_rate": 0.1372
+    },
+    {
+      "ranking_basis": "B_排除 unknown 占位",
+      "rnk": 2,
+      "education": "professional.course",
+      "records": 5243,
+      "successes": 595,
+      "success_rate": 0.1135
+    },
+    {
+      "ranking_basis": "B_排除 unknown 占位",
+      "rnk": 3,
+      "education": "high.school",
+      "records": 9515,
+      "successes": 1031,
+      "success_rate": 0.1084
+    }
+  ],
+  "row_count": 6,
+  "definition": "数据表 data（41,188 行）全量，无时间/其他筛选。按 education 分组聚合：records=COUNT(*)；successes=SUM(CASE WHEN y='yes' THEN 1 ELSE 0 END)；成功率=AVG(CASE WHEN y='yes' THEN 1.0 ELSE 0.0 END)（即 y='yes' 占比，四舍五入 4 位小数）。仅保留 COUNT(*)>=1000 的分组（illiterate 仅 418 条被剔除）。排序：成功率降序，education 升序作为并列时的稳定 tie-break，取前 3。education='unknown' 是“教育程度未记录”的占位值而非真实学历，因此同时给出含/排除 unknown 两种口径的前 3 名。",
+  "caveats": [
+    "education='unknown'（1,731 条，14.50%）是缺失值占位而非真实学历，若按原样参与排名它排第 1；排除后第 1 名为 university.degree（13.72%）。两种口径都已列出，请按需取用。",
+    "illiterate 组记录数仅 418 条（成功率 0.0279），低于 1,000 的门槛被排除。",
+    "第 3 与第 4 名（high.school 10.84% 与 basic.4y 10.25%）差距不大，结论对样本构成敏感。",
+    "数据未说明 y 的含义与是否为最终订阅结果，此处仅按字面把 y='yes' 视为成功。"
+  ],
+  "metrics_used": [],
+  "message": "已提交：按 education 聚合全量 41,188 条记录、仅保留记录数 ≥1000 的分组并给出各自 y='yes' 成功率，同时列出含与排除 `unknown`（缺失占位）两种排名口径的前 3 名——排除 unknown 后前三为 university.degree 13.72%、professional.course 11.35%、high.school 10.84%。",
+  "sql_runs": 3,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 15218,
+    "completion_tokens": 2774,
+    "llm_calls": 4
+  },
+  "seconds": 37.68
+}

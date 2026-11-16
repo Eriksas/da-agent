@@ -1,0 +1,48 @@
+{
+  "status": "answered",
+  "request": "2011 年单笔订单金额（一张发票的 GMV）超过 1,000 英镑的订单有多少张？占 2011 年全部订单的比例是多少？",
+  "data": "retail",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH inv AS (\n  SELECT invoice,\n         SUM(gmv_amount) AS inv_gmv\n  FROM order_lines\n  WHERE line_type = '销售'\n    AND order_time >= TIMESTAMP '2011-01-01'\n    AND order_time < TIMESTAMP '2012-01-01'\n  GROUP BY invoice\n)\nSELECT\n  COUNT(*) AS orders_2011,\n  SUM(CASE WHEN inv_gmv > 1000 THEN 1 ELSE 0 END) AS orders_over_1000,\n  ROUND(SUM(CASE WHEN inv_gmv > 1000 THEN 1 ELSE 0 END)::DOUBLE / COUNT(*), 4) AS share_of_orders\nFROM inv",
+  "columns": [
+    {
+      "name": "orders_2011",
+      "meaning": "2011 年订单数（张发票，按订单号去重）"
+    },
+    {
+      "name": "orders_over_1000",
+      "meaning": "2011 年单笔订单 GMV 超过 1000 英镑的订单数（张）"
+    },
+    {
+      "name": "share_of_orders",
+      "meaning": "大额订单占 2011 年全部订单的比例（小数，0.0882 = 8.82%）"
+    }
+  ],
+  "rows": [
+    {
+      "orders_2011": 18223,
+      "orders_over_1000": 1607,
+      "share_of_orders": 0.0882
+    }
+  ],
+  "row_count": 1,
+  "definition": "时间范围：2011-01-01 至 2011-12-09（按 order_time，order_lines 全量数据止于 2011-12-09）。订单口径：一张发票 = 一个订单号，只统计销售行（取消行 order_id 为空，不计为订单），即 2011 年订单数 = count(DISTINCT order_id) = 18,223。单笔订单金额 = 该发票所有销售行的 sum(gmv_amount)（GMV 口径，下单金额，含之后被取消的订单）。条件：单笔 GMV > 1000 英镑。占比 = 大额订单数 ÷ 2011 年订单总数，保留 4 位小数。",
+  "caveats": [
+    "口径为“下单 GMV”，即该发票下单当日的商品金额；若订单后来被全额取消，仍计入大额订单数（取消按取消时间单独入账，不回溯到原订单周）。",
+    "有少数超大额订单（如发票 541431、581483，单笔 16.8 万英镑量级）会显著抬高 GMV 分布，但不影响订单个数的占比。",
+    "2011 年数据截止 2011-12-09（周五），12 月最后一周不完整，订单总数略低于完整自然年。",
+    "阈值边界：恰好等于 1,000.00 英镑的 1 张订单未计入“超过 1,000 英镑”；900–1,000 英镑区间另有 261 张订单，阈值微调会小幅改变结果。"
+  ],
+  "metrics_used": [
+    "gmv"
+  ],
+  "message": "提交结果：2011 年（截至 2011-12-09）共 18,223 张订单，其中单笔 GMV 超过 1,000 英镑的订单 1,607 张，占比 0.0882（8.82%）。",
+  "sql_runs": 3,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 16450,
+    "completion_tokens": 2117,
+    "llm_calls": 4
+  },
+  "seconds": 23.41
+}

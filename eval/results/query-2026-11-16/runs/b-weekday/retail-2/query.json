@@ -1,0 +1,102 @@
+{
+  "status": "answered",
+  "request": "2011 年 11 月，按星期几（周一到周日）分别合计，每一天的 GMV 和订单数各是多少？",
+  "data": "retail",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH weekday_map AS (\n  SELECT * FROM (VALUES (1,'周一'),(2,'周二'),(3,'周三'),(4,'周四'),(5,'周五'),(6,'周六'),(7,'周日')) AS t(dow, weekday_name)\n), agg AS (\n  SELECT EXTRACT(isodow FROM order_date) AS dow,\n         sum(gmv_amount) AS gmv,\n         count(DISTINCT order_id) AS orders,\n         count(DISTINCT order_date) FILTER (WHERE line_type = '销售') AS trading_days\n  FROM order_lines\n  WHERE month = '2011-11'\n  GROUP BY 1\n)\nSELECT w.weekday_name AS weekday_name,\n       round(coalesce(a.gmv, 0), 2) AS gmv,\n       coalesce(a.orders, 0) AS orders,\n       coalesce(a.trading_days, 0) AS trading_days,\n       round(coalesce(a.gmv, 0) / nullif(a.trading_days, 0), 2) AS gmv_per_trading_day\nFROM weekday_map w\nLEFT JOIN agg a ON w.dow = a.dow\nORDER BY w.dow",
+  "columns": [
+    {
+      "name": "weekday_name",
+      "meaning": "星期几（中文，周一至周日）"
+    },
+    {
+      "name": "gmv",
+      "meaning": "该星期几所有日期的 GMV 合计（英镑，下单口径，含之后被取消的订单）"
+    },
+    {
+      "name": "orders",
+      "meaning": "该星期几的销售订单数（不同发票号个数）"
+    },
+    {
+      "name": "trading_days",
+      "meaning": "该星期几有销售记录的自然日期数（样本量）"
+    },
+    {
+      "name": "gmv_per_trading_day",
+      "meaning": "该星期几每个有销售日的平均 GMV（英镑），用于消除各星期几天数不同的影响"
+    }
+  ],
+  "rows": [
+    {
+      "weekday_name": "周一",
+      "gmv": 298466.81,
+      "orders": 412,
+      "trading_days": 4,
+      "gmv_per_trading_day": 74616.7
+    },
+    {
+      "weekday_name": "周二",
+      "gmv": 271653.2,
+      "orders": 559,
+      "trading_days": 5,
+      "gmv_per_trading_day": 54330.64
+    },
+    {
+      "weekday_name": "周三",
+      "gmv": 304064.38,
+      "orders": 571,
+      "trading_days": 5,
+      "gmv_per_trading_day": 60812.88
+    },
+    {
+      "weekday_name": "周四",
+      "gmv": 238643.74,
+      "orders": 477,
+      "trading_days": 4,
+      "gmv_per_trading_day": 59660.93
+    },
+    {
+      "weekday_name": "周五",
+      "gmv": 211135.76,
+      "orders": 386,
+      "trading_days": 4,
+      "gmv_per_trading_day": 52783.94
+    },
+    {
+      "weekday_name": "周六",
+      "gmv": 0.0,
+      "orders": 0,
+      "trading_days": 0,
+      "gmv_per_trading_day": null
+    },
+    {
+      "weekday_name": "周日",
+      "gmv": 128152.09,
+      "orders": 346,
+      "trading_days": 4,
+      "gmv_per_trading_day": 32038.02
+    }
+  ],
+  "row_count": 7,
+  "definition": "时间范围：month = '2011-11'（2011-11-01 至 2011-11-30）。按 ISO 星期几（EXTRACT(isodow FROM order_date)，1=周一 … 7=周日）分组。GMV = sum(gmv_amount)，订单数 = count(DISTINCT order_id)（只统计销售行，取消行 order_id 为空），交易天数 = count(DISTINCT order_date) FILTER (WHERE line_type='销售')。用 VALUES 构造周一至周日的完整日历并 LEFT JOIN 汇总表，保证 7 天都出现（无数据的星期几补 0）。各组 GMV 合计 1,452,115.98 英镑、订单合计 2,751，与该月总量一致。",
+  "caveats": [
+    "数据中 2011 年 11 月所有周六（11-05、12、19、26）完全没有销售记录，因此周六 GMV 与订单数均为 0，是营业日缺失而非真实的“零销售日”。",
+    "各星期几包含的日期数不同（周一 4 天、周二 5 天、周三 5 天、周四 4 天、周五 4 天、周日 4 天），因此 GMV 合计不可直接横向比较，需看 gmv_per_trading_day 列。",
+    "GMV 为下单口径，包含之后被取消的订单；取消金额未从 GMV 中扣除。",
+    "2011-11-30 所在的 ISO 周（2011-W48）不完整，但不影响按自然日口径的统计。"
+  ],
+  "metrics_used": [
+    "gmv",
+    "orders",
+    "trading_days"
+  ],
+  "message": "已提交：2011 年 11 月按星期几汇总的 GMV（英镑）、销售订单数、含销售日期数与单日均 GMV 共 7 行（周三 GMV 最高 304,064.38、周日最低 128,152.09，周六因当月无任何销售记录而记为 0）。",
+  "sql_runs": 3,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 21453,
+    "completion_tokens": 2875,
+    "llm_calls": 4
+  },
+  "seconds": 30.23
+}

@@ -1,0 +1,84 @@
+{
+  "status": "answered",
+  "request": "各访客类型成交订单的平均订单金额是多少？",
+  "data": "csv:online_shoppers_intention.csv",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "SELECT VisitorType,\n       COUNT(*) AS session_count,\n       SUM(CASE WHEN Revenue = 'TRUE' THEN 1 ELSE 0 END) AS order_count,\n       ROUND(SUM(CASE WHEN Revenue = 'TRUE' THEN 1 ELSE 0 END)::DOUBLE / COUNT(*), 4) AS conversion_rate,\n       ROUND(AVG(CASE WHEN Revenue = 'TRUE' THEN PageValues END), 2) AS avg_order_value_pagevalues,\n       SUM(CASE WHEN Revenue = 'TRUE' AND PageValues > 0 THEN 1 ELSE 0 END) AS orders_with_page_value,\n       ROUND(AVG(CASE WHEN Revenue = 'TRUE' AND PageValues > 0 THEN PageValues END), 2) AS avg_order_value_pagevalues_nonzero\nFROM data\nGROUP BY VisitorType\nORDER BY avg_order_value_pagevalues DESC",
+  "columns": [
+    {
+      "name": "VisitorType",
+      "meaning": "访客类型（Returning_Visitor / New_Visitor / Other）"
+    },
+    {
+      "name": "session_count",
+      "meaning": "该访客类型的会话（记录）数"
+    },
+    {
+      "name": "order_count",
+      "meaning": "该访客类型中成交的会话数（Revenue='TRUE'）"
+    },
+    {
+      "name": "conversion_rate",
+      "meaning": "成交率 = 成交会话数 / 总会话数（小数，0.1882 = 18.82%）"
+    },
+    {
+      "name": "avg_order_value_pagevalues",
+      "meaning": "平均订单金额（以成交会话的 PageValues 均值代理，单位同 PageValues，无货币单位），四舍五入 2 位"
+    },
+    {
+      "name": "orders_with_page_value",
+      "meaning": "成交会话中 PageValues>0 的会话数（有效价值样本量）"
+    },
+    {
+      "name": "avg_order_value_pagevalues_nonzero",
+      "meaning": "平均订单金额（仅成交且 PageValues>0 的会话均值，剔除未记录页面价值的 0 值）"
+    }
+  ],
+  "rows": [
+    {
+      "VisitorType": "Other",
+      "session_count": 85,
+      "order_count": 16,
+      "conversion_rate": 0.1882,
+      "avg_order_value_pagevalues": 90.33,
+      "orders_with_page_value": 14,
+      "avg_order_value_pagevalues_nonzero": 103.23
+    },
+    {
+      "VisitorType": "New_Visitor",
+      "session_count": 1694,
+      "order_count": 422,
+      "conversion_rate": 0.2491,
+      "avg_order_value_pagevalues": 39.12,
+      "orders_with_page_value": 329,
+      "avg_order_value_pagevalues_nonzero": 50.18
+    },
+    {
+      "VisitorType": "Returning_Visitor",
+      "session_count": 10551,
+      "order_count": 1470,
+      "conversion_rate": 0.1393,
+      "avg_order_value_pagevalues": 23.17,
+      "orders_with_page_value": 1195,
+      "avg_order_value_pagevalues_nonzero": 28.51
+    }
+  ],
+  "row_count": 3,
+  "definition": "数据中没有任何价格/订单金额字段（Revenue 仅为 TRUE/FALSE 标记，无金额列），因此以唯一可用的会话级价值指标 PageValues 作为“订单金额”的代理口径：平均订单金额 = 该访客类型下成交会话（Revenue='TRUE'）的 PageValues 平均值（round 2 位）。同时给出两个辅助口径：conversion_rate = 成交会话数/该类型总会话数（小数，round 4 位）；avg_order_value_pagevalues_nonzero = 仅在 Revenue='TRUE' 且 PageValues>0 的会话上求 PageValues 均值（剔除未记录页面价值的 0 值）。一行 CSV 记录 = 一个访问会话，表中无订单 ID，无法按订单去重，故“订单数”按成交会话数计。全表 12,330 行，不做时间筛选。",
+  "caveats": [
+    "最关键：数据里没有真实订单金额（无价格/金额列，Revenue 只是布尔标记）。返回的“平均订单金额”是用会话级特征 PageValues（用户在产生询盘前访问页面的价值均值）代理的结果，量纲不是货币金额，不能直接当作客单价使用。",
+    "1,908 个成交会话中有 370 个 PageValues=0（未记录到页面价值），已计入主口径均值，会明显拉低数值；因此同时给出仅正值口径以作对照。",
+    "Other 组样本很小（85 个会话、16 个成交），其均值波动大，结论不稳定；Returning_Visitor 组样本充足（10,551 会话 / 1,470 成交）。",
+    "数据按 Month 而非具体日期覆盖，各访客类型的会话量本身差异巨大，占比比较时需同时看 session_count 与 order_count。"
+  ],
+  "metrics_used": [],
+  "message": "已提交各访客类型的成交会话平均价值（PageValues 代理口径）：Other 90.33（16 笔成交/85 会话）、New_Visitor 39.12（422/1,694）、Returning_Visitor 23.17（1,470/10,551），并附成交率与剔除 PageValues=0 后的对照值——需注意数据本身没有真实订单金额字段。",
+  "sql_runs": 4,
+  "rejected": 1,
+  "usage": {
+    "prompt_tokens": 18961,
+    "completion_tokens": 3040,
+    "llm_calls": 5
+  },
+  "seconds": 54.05
+}

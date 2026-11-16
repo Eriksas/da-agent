@@ -1,0 +1,56 @@
+{
+  "status": "answered",
+  "request": "2011 年单笔订单金额（一张发票的 GMV）超过 1,000 英镑的订单有多少张？占 2011 年全部订单的比例是多少？",
+  "data": "retail_raw",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH invoice_gmv AS (\n  SELECT invoice,\n         SUM(amount) AS order_gmv\n  FROM order_lines\n  WHERE line_type = '销售'\n    AND order_date >= DATE '2011-01-01'\n    AND order_date < DATE '2012-01-01'\n  GROUP BY invoice\n)\nSELECT COUNT(*) AS total_orders_2011,\n       COUNT(*) FILTER (WHERE order_gmv > 1000) AS orders_over_1000,\n       ROUND(COUNT(*) FILTER (WHERE order_gmv > 1000)::DOUBLE / COUNT(*), 4) AS share_over_1000,\n       ROUND(SUM(order_gmv), 2) AS gmv_2011,\n       ROUND(SUM(order_gmv) FILTER (WHERE order_gmv > 1000), 2) AS gmv_from_orders_over_1000\nFROM invoice_gmv",
+  "columns": [
+    {
+      "name": "total_orders_2011",
+      "meaning": "2011 年全部订单数（销售发票数，张）"
+    },
+    {
+      "name": "orders_over_1000",
+      "meaning": "2011 年单笔发票 GMV 超过 1000 英镑的订单数（张）"
+    },
+    {
+      "name": "share_over_1000",
+      "meaning": "大额订单占 2011 年全部订单的比例（小数，0.0882 = 8.82%）"
+    },
+    {
+      "name": "gmv_2011",
+      "meaning": "2011 年 GMV 合计（英镑，下单口径，含之后被取消的订单）"
+    },
+    {
+      "name": "gmv_from_orders_over_1000",
+      "meaning": "其中大额订单贡献的 GMV（英镑）"
+    }
+  ],
+  "rows": [
+    {
+      "total_orders_2011": 18223,
+      "orders_over_1000": 1607,
+      "share_over_1000": 0.0882,
+      "gmv_2011": 9471580.96,
+      "gmv_from_orders_over_1000": 4375109.46
+    }
+  ],
+  "row_count": 1,
+  "definition": "时间范围：order_date 在 2011-01-01 至 2011-12-09（数据截止日）。GMV = 该发票下所有 line_type='销售' 行的 amount 之和（下单口径，含之后被取消的订单），按 invoice 去重成一张订单；订单数 = 2011 年销售发票的个数（只数销售订单，取消单不计）。门槛为该发票 GMV 严格 > 1000 英镑；占比 = 大额订单数 ÷ 2011 年全部订单数，保留 4 位小数。",
+  "caveats": [
+    "2011 年数据只到 2011-12-09（周五），12 月不是完整月份，因此订单总数与占比会比完整年度略偏低。",
+    "GMV 为下单口径，含之后被取消的订单；数据中取消单的发票号（去掉 C 前缀后）与任何销售发票号都不匹配，无法回溯到原订单，因此无法计算单张发票的净金额，大额订单数可能高估（按 2011 年内取消额冲减后数量不变，因为这些发票在 2011 年没有对应的取消记录）。",
+    "少数金额极大的订单（如发票 541431、581483，下单后很快全部取消）会显著抬高单笔金额，影响 1000 英镑门槛附近的计数。",
+    "约四分之一的行缺客户 ID（游客/未登记客户），这些订单同样计入订单数与 GMV。"
+  ],
+  "metrics_used": [],
+  "message": "提交完成：2011 年共 18,223 张订单（销售发票），其中单笔发票 GMV 超过 1,000 英镑的有 1,607 张，占全部订单的 8.82%，这些大额订单贡献了 4,375,109.46 英镑 GMV（2011 年 GMV 合计 9,471,580.96 英镑）；需注意数据只到 2011-12-09（12 月不完整），且取消单发票号无法回溯原订单，故按下单口径计数可能偏高估。",
+  "sql_runs": 7,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 33970,
+    "completion_tokens": 4678,
+    "llm_calls": 7
+  },
+  "seconds": 38.28
+}

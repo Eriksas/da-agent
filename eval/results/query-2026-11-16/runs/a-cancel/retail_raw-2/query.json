@@ -1,0 +1,81 @@
+{
+  "status": "answered",
+  "request": "2010-W50 的取消金额和取消率各是多少？",
+  "data": "retail_raw",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH w AS (\n  SELECT\n    MIN(order_date) AS week_start_date,\n    MAX(order_date) AS week_end_date,\n    SUM(CASE WHEN line_type = '销售' THEN amount ELSE 0 END) AS gmv,\n    SUM(CASE WHEN line_type = '取消' THEN amount ELSE 0 END) AS cancel_amount,\n    COUNT(DISTINCT CASE WHEN line_type = '销售' THEN invoice END) AS sales_order_count,\n    COUNT(DISTINCT CASE WHEN line_type = '取消' THEN invoice END) AS cancel_order_count,\n    SUM(CASE WHEN line_type = '销售' THEN 1 ELSE 0 END) AS sales_line_count,\n    SUM(CASE WHEN line_type = '取消' THEN 1 ELSE 0 END) AS cancel_line_count\n  FROM order_lines\n  WHERE week = '2010-W50'\n)\nSELECT\n  '2010-W50' AS week,\n  week_start_date,\n  week_end_date,\n  round(gmv, 2) AS gmv,\n  round(cancel_amount, 2) AS cancel_amount,\n  round(cancel_amount / gmv, 4) AS cancel_rate,\n  sales_order_count,\n  cancel_order_count,\n  sales_line_count,\n  cancel_line_count\nFROM w",
+  "columns": [
+    {
+      "name": "week",
+      "meaning": "周标识（数据中 week 字段取值）"
+    },
+    {
+      "name": "week_start_date",
+      "meaning": "该周有数据的最早下单日期"
+    },
+    {
+      "name": "week_end_date",
+      "meaning": "该周有数据的最晚下单日期"
+    },
+    {
+      "name": "gmv",
+      "meaning": "该周 GMV（商品销售额，下单口径，line_type='销售' 的 amount 之和，英镑）"
+    },
+    {
+      "name": "cancel_amount",
+      "meaning": "该周取消金额（line_type='取消' 的 amount 之和，正数，英镑）"
+    },
+    {
+      "name": "cancel_rate",
+      "meaning": "该周取消率 = 取消金额 ÷ GMV（小数，0.0308 表示 3.08%）"
+    },
+    {
+      "name": "sales_order_count",
+      "meaning": "该周销售订单数（不同发票号个数）"
+    },
+    {
+      "name": "cancel_order_count",
+      "meaning": "该周取消单数（不同发票号个数）"
+    },
+    {
+      "name": "sales_line_count",
+      "meaning": "该周销售商品行数"
+    },
+    {
+      "name": "cancel_line_count",
+      "meaning": "该周取消商品行数"
+    }
+  ],
+  "rows": [
+    {
+      "week": "2010-W50",
+      "week_start_date": "2010-12-13",
+      "week_end_date": "2010-12-19",
+      "gmv": 208616.61,
+      "cancel_amount": 6432.63,
+      "cancel_rate": 0.0308,
+      "sales_order_count": 442,
+      "cancel_order_count": 116,
+      "sales_line_count": 10824,
+      "cancel_line_count": 179
+    }
+  ],
+  "row_count": 1,
+  "definition": "时间范围：week = '2010-W50'（按数据 week 字段筛选，该周实际下单日期为 2010-12-13 至 2010-12-19）。GMV = 该周 line_type='销售' 行 amount 之和；取消金额 = 该周 line_type='取消' 行 amount 之和（取消行金额为正数）；取消率 = 取消金额 ÷ GMV（同周口径，小数）。订单数按不同发票号去重，取消单数同样按发票号去重；金额保留 2 位小数，比率保留 4 位小数。",
+  "caveats": [
+    "取消率按“取消单发生当周 ÷ 同周 GMV”计算，不是累计口径；若要看历史累计取消率需另行计算。",
+    "取消单按取消发生时间入账，不回溯到原销售订单所在周，因此该周取消金额包含更早订单在本周被取消的部分。",
+    "该周样本量不大（销售订单 442 笔、销售行 10,824 行），比率对小额波动较敏感。",
+    "数据中的周编号与标准 ISO 周对应关系存在偏移（2010-W50 对应日期 2010-12-13 至 2010-12-19），解读时请以返回的日期列为准。"
+  ],
+  "metrics_used": [],
+  "message": "交出的结果：2010-W50（数据中对应下单日期 2010-12-13 至 2010-12-19）取消金额 6,432.63 英镑，同周 GMV 208,616.61 英镑，取消率 0.0308（约 3.08%），并附该周销售订单 442 笔、取消单 116 笔作为样本量参考。",
+  "sql_runs": 3,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 21408,
+    "completion_tokens": 3068,
+    "llm_calls": 5
+  },
+  "seconds": 29.29
+}

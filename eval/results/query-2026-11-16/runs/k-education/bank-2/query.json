@@ -1,0 +1,62 @@
+{
+  "status": "answered",
+  "request": "成功率（y 为 yes 的比例）最高的 3 个 education 是哪些？只看记录数不少于 1000 的，给出各自的成功率。",
+  "data": "csv:bank-additional-full.csv",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "sql": "WITH edu_stats AS (\n    SELECT education,\n           COUNT(*) AS record_cnt,\n           SUM(CASE WHEN y = 'yes' THEN 1 ELSE 0 END) AS success_cnt,\n           ROUND(SUM(CASE WHEN y = 'yes' THEN 1.0 ELSE 0.0 END) / COUNT(*), 4) AS success_rate\n    FROM data\n    GROUP BY education\n    HAVING COUNT(*) >= 1000\n)\nSELECT education,\n       record_cnt,\n       success_cnt,\n       success_rate\nFROM edu_stats\nORDER BY success_rate DESC\nLIMIT 3",
+  "columns": [
+    {
+      "name": "education",
+      "meaning": "教育程度类别（education 原始取值）"
+    },
+    {
+      "name": "record_cnt",
+      "meaning": "该 education 分组的记录数（条）"
+    },
+    {
+      "name": "success_cnt",
+      "meaning": "该分组中 y='yes' 的记录数（条）"
+    },
+    {
+      "name": "success_rate",
+      "meaning": "成功率 = y='yes' 记录数 / 该分组记录数（小数，0.1450 表示 14.50%）"
+    }
+  ],
+  "rows": [
+    {
+      "education": "unknown",
+      "record_cnt": 1731,
+      "success_cnt": 251,
+      "success_rate": 0.145
+    },
+    {
+      "education": "university.degree",
+      "record_cnt": 12168,
+      "success_cnt": 1670,
+      "success_rate": 0.1372
+    },
+    {
+      "education": "professional.course",
+      "record_cnt": 5243,
+      "success_cnt": 595,
+      "success_rate": 0.1135
+    }
+  ],
+  "row_count": 3,
+  "definition": "数据源 bank-additional-full.csv 全量 41,188 行（表 data），不限定时间范围（数据无日期字段）。成功率定义：分组内 y='yes' 的记录数除以该分组总记录数，按 education 分组计算，不做去重（每行一条营销联系记录）。先按 HAVING COUNT(*)>=1000 过滤掉样本不足的分组，再按成功率降序取前 3。比率以小数表示并 round 到 4 位。",
+  "caveats": [
+    "illiterate 组成功率最高（0.2222）但仅 18 条记录，已按记录数>=1000 的要求排除，其成功率不具统计意义。",
+    "第 1 名 unknown（0.1450，n=1731）与第 2 名 university.degree（0.1372，n=12168）差距仅 0.78 个百分点，且 unknown 样本量较小，排名对样本波动较敏感。",
+    "education、y 字段无空值；数据不含时间字段，无法控制营销周期/月份（month）等外部因素对成功率的影响。"
+  ],
+  "metrics_used": [],
+  "message": "已提交：在记录数 ≥ 1000 的 education 分组中，成功率（y='yes' 占比）前 3 名为 unknown（0.1450，n=1,731）、university.degree（0.1372，n=12,168）、professional.course（0.1135，n=5,243），并附各组记录数与成功条数及相应提醒（illiterate 组因样本仅 18 条被排除）。",
+  "sql_runs": 3,
+  "rejected": 0,
+  "usage": {
+    "prompt_tokens": 11432,
+    "completion_tokens": 1154,
+    "llm_calls": 4
+  },
+  "seconds": 14.63
+}
