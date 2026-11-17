@@ -143,3 +143,28 @@ def test_rescore_keeps_reference_values_and_retries(tmp_path: Path) -> None:
     summary = rescore(tmp_path, [case], FixtureConnections())
     assert summary["failures"][0]["missing_values"] == [60.0] and summary["by_condition"]["agent"]["api_retries"] == 1
     assert json.loads((tmp_path / "runs" / "g" / "agent-1" / "score.json").read_text(encoding="utf-8"))["api_retries"] == 1
+
+
+def test_cost_includes_the_query_agent() -> None:
+    run = fake_run("德国 GMV 60.00，占 41.38%。") | {
+        "steps": [{"tool": "query_data", "round": 1}],
+        "sub_runs": [{"usage": {"llm_calls": 2, "prompt_tokens": 100, "completion_tokens": 20}},
+                     {"usage": {"llm_calls": 1, "prompt_tokens": 50, "completion_tokens": 5}}]}
+    result = score(WEEK, run, CHECKS_OK, None, [60.0, 60 / 145])
+    assert result["query_tokens"] == 175 and result["tokens"] == 15 + 175 and result["query_calls"] == 1
+
+
+def test_agent_query_keeps_the_analysis_flow(tmp_path: Path) -> None:
+    """agent_query 是在 agent_skill 的基础上加取数：分析流程还在（load_skill 和流程目录），只多一个工具。"""
+    case = Case(id="g", category="取数", question="2011-W02 德国 GMV 是多少？", expects_skill=False)
+    seen: dict[str, FakeLLM] = {}
+
+    def make_llm(case: Case, condition: str, i: int) -> FakeLLM:
+        seen[condition] = FakeLLM(replies=[LLMReply(content="不取数了。")])
+        return seen[condition]
+
+    run_eval([case], ["agent", "agent_query"], 1, make_llm, QueryConnections(tmp_path / "q"), tmp_path / "out", max_tool_calls=5,
+             progress=lambda _: None)
+    names = {c: [t["function"]["name"] for t in llm.received[0]["tools"]] for c, llm in seen.items()}
+    assert "load_skill" in names["agent_query"] and "query_data" in names["agent_query"]
+    assert "load_skill" not in names["agent"] and "query_data" not in names["agent"]
