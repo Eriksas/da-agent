@@ -156,3 +156,48 @@ def test_ask_saves_the_run_with_checks_and_report(monkeypatch: pytest.MonkeyPatc
     assert "AI 初稿，待人工复核" in (run_dir / "report.md").read_text(encoding="utf-8")
     assert [e["type"] for e in events] == ["model", "tool", "model"]
     assert ui.replay_events(ui.load_run(run_dir).run) == events
+
+
+def test_ask_can_hand_data_pulls_to_the_query_agent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """界面里打开“允许取数”（默认打开）：和命令行 ask 一样，查询 Agent 的完整记录附在 sub_runs 里。"""
+    from test_metrics import ROWS
+
+    from da_agent import semantic
+    from da_agent.cleaning import connect_frame
+    from da_agent.metrics import _ensure
+    from da_agent.semantic import SEMANTIC_DIR, build_database, load_config
+    from helpers import make_frame
+
+    base = connect_frame(make_frame(ROWS))
+    _ensure(base)
+    db = build_database(load_config(SEMANTIC_DIR / "retail.yaml"), base, tmp_path / "q.duckdb")
+    monkeypatch.setattr(semantic, "prepare", lambda name: db)
+    import da_agent.cleaning as cleaning
+
+    monkeypatch.setattr(cleaning, "connect", lambda path: base)
+    submit = {"sql": "SELECT round(sum(gmv_amount), 2) AS gmv FROM order_lines WHERE week = '2011-W02'", "columns": {"gmv": "GMV"},
+              "definition": "2011-W02 的 GMV"}
+    llm = FakeLLM(replies=[tools(call(1, "query_data", request="2011-W02 的 GMV")),
+                           tools(call(2, "submit_query", **submit)), LLMReply(content="完成。"),
+                           LLMReply(content="2011-W02 的 GMV 为 145.00。")])
+    monkeypatch.setattr(ui, "make_llm", lambda settings: llm)
+    monkeypatch.setattr(ui, "RUNS_DIR", tmp_path)
+    run_dir = ui.ask("2011-W02 的 GMV？", "ecommerce", Settings(_env_file=None), with_query=True)
+    saved = ui.load_run(run_dir).run
+    assert saved["steps"][0]["tool"] == "query_data" and saved["steps"][0]["ok"] and len(saved["sub_runs"]) == 1
+    assert saved["status"] == "completed" and "145.00" in saved["answer"]
+
+
+def test_query_results_show_the_sql_and_the_first_rows() -> None:
+    result = {"status": "answered", "sql": "SELECT country, sum(gmv_amount) AS gmv FROM order_lines GROUP BY 1",
+              "columns": [{"name": "country", "meaning": "国家"}, {"name": "gmv", "meaning": "GMV"}],
+              "rows": [{"country": f"C{i}", "gmv": i * 1.5} for i in range(10)] + [{"country": "A|B", "gmv": None}], "row_count": 11}
+    text = ui.query_preview(result)
+    assert "```sql\nSELECT country" in text and "| country | gmv |" in text and "| C0 | 0.0 |" in text
+    assert "| C7 | 10.5 |" in text and "C8" not in text and "共 11 行，这里显示前 8 行。" in text
+    assert "没有给出结果" in ui.query_preview({"status": "declined"})
+    box = Box()
+    ui.show_event(box, {"type": "tool", "step": {"tool": "query_data", "ok": True, "arguments": {"request": "各国 GMV"}, "ms": 5},
+                        "result": result})
+    texts = [args[0] for name, args, _ in box.calls if name == "markdown"]
+    assert "取数（查询 Agent）（query_data）" in texts[0] and "```sql" in texts[1]

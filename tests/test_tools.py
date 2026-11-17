@@ -7,7 +7,7 @@ from test_metrics import ROWS
 
 from da_agent.cleaning import connect_frame
 from da_agent.llm import INVALID_JSON_KEY
-from da_agent.tools import DOMAIN_TOOLS, TOOLS, execute, tool_specs
+from da_agent.tools import DOMAIN_TOOLS, OPTIONAL_TOOLS, TOOLS, execute, tool_specs
 from helpers import make_frame
 
 
@@ -28,7 +28,12 @@ def test_specs_are_valid_function_definitions() -> None:
     assert review == ["calculate", "submit_review"]  # 复核 Agent 不查数据
     analyst = [s["function"]["name"] for s in tool_specs("analyst")]
     assert analyst == ["run_sql", "submit_query"]  # 查询 Agent 只有这两个工具
-    assert set(DOMAIN_TOOLS["ecommerce"]) | set(company) | set(dashboard) | set(review) | set(analyst) == set(TOOLS)  # 每个工具都属于某个领域
+    optional = {name for names in OPTIONAL_TOOLS.values() for name in names}  # 可选工具：调用方给了上下文才出现
+    assert set(DOMAIN_TOOLS["ecommerce"]) | set(company) | set(dashboard) | set(review) | set(analyst) | optional == set(TOOLS)
+    with_query = [s["function"]["name"] for s in tool_specs("ecommerce", optional=["query_data"])]
+    assert with_query == [*DOMAIN_TOOLS["ecommerce"], "query_data"] and "query_data" not in [s["function"]["name"] for s in specs]
+    with pytest.raises(ValueError, match="没有可选工具"):
+        tool_specs("company", optional=["query_data"])
     with pytest.raises(ValueError, match="未知领域"):
         tool_specs("crypto")
     for spec in specs + tool_specs("company") + tool_specs("dashboard") + tool_specs("review") + tool_specs("analyst"):

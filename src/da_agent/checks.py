@@ -87,8 +87,12 @@ def extract_numbers(text: str) -> tuple[list[NumberMention], int]:
     return mentions, skipped
 
 
+# 工具输出里不当出处的部分：查询 Agent 自己写的口径说明和注意事项（M19b）。表里的数是程序执行出来的，说明是模型写的
+UNVERIFIED_KEYS = frozenset({"unverified_notes"})
+
+
 def _numbers_in(value: Any, pool: list[float]) -> None:
-    """收集工具输出里所有的数：数值字段，以及文字里出现的数（例如警告里的“少于 30”）。"""
+    """收集工具输出里所有的数：数值字段，以及文字里出现的数（例如警告里的“少于 30”）。UNVERIFIED_KEYS 下面的不收。"""
     if isinstance(value, bool):
         return
     if isinstance(value, (int, float)):
@@ -100,8 +104,9 @@ def _numbers_in(value: Any, pool: list[float]) -> None:
             if match.group(2):  # 文字里带单位的数（如“超过 50%”），同时存一份换算后的值（0.5），和报告里的写法对得上
                 pool.append(number * SCALES[match.group(2)])
     elif isinstance(value, dict):
-        for item in value.values():
-            _numbers_in(item, pool)
+        for key, item in value.items():
+            if key not in UNVERIFIED_KEYS:
+                _numbers_in(item, pool)
     elif isinstance(value, list):
         for item in value:
             _numbers_in(item, pool)
@@ -111,8 +116,16 @@ def _numbers_in(value: Any, pool: list[float]) -> None:
 CALC_CONSTANTS = (100.0, 1e4, 1e8)
 
 
+def within(difference: float, tolerance: float) -> bool:
+    """两个数差得比显示精度的 1 个单位小（严格小于，留一点浮点余量）。
+
+    余量不能超过容差本身：原样照抄 17 位小数的数时，容差是 1e-17，减去 1e-12 就成了负数，永远对不上（M19b 评测发现）。
+    """
+    return abs(difference) < max(tolerance - 1e-12, tolerance / 2)
+
+
 def _grounded(value: float, tolerance: float, pool: list[float]) -> bool:
-    return any(abs(source - value) < tolerance - 1e-12 for source in pool)
+    return any(within(source - value, tolerance) for source in pool)
 
 
 def _audit_calculation(result: dict[str, Any], pool: list[float]) -> dict[str, Any]:

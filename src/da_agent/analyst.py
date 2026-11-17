@@ -10,7 +10,7 @@
 """
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import duckdb
@@ -99,6 +99,44 @@ def build_prompt(catalog: dict[str, Any], max_tool_calls: int = MAX_TOOL_CALLS) 
 
     return SYSTEM_PROMPTS["analyst"].read_text(encoding="utf-8").format(
         catalog=catalog_text(catalog), max_tool_calls=max_tool_calls, max_rows=MAX_ROWS)
+
+
+class QueryDataArgs(_Model):
+    request: str = Field(min_length=6, max_length=500, description=(
+        "一个明确的取数请求：时间范围、指标、分组、筛选条件、排序和要几行。"
+        "例如“2011 年 11 月按星期几（周一到周日）分别合计 GMV 和订单数”"))
+
+
+@dataclass
+class QueryService:
+    """原来的 Agent 调用查询 Agent 时用的上下文（M19b）。每次运行新建一个：records 是这次运行里每次取数的完整记录。"""
+
+    llm: LLMClient
+    db: QueryDB
+    max_tool_calls: int = MAX_TOOL_CALLS
+    records: list[dict[str, Any]] = field(default_factory=list)
+
+
+UNVERIFIED_NOTE = "查询 Agent 自己写的说明，程序没有核对：其中的数字不能当作出处，原因推测不能当作事实"
+
+
+def query_data(service: QueryService, args: QueryDataArgs) -> dict[str, Any]:
+    """原来的 Agent 的 query_data 工具：把请求交给查询 Agent，返回程序执行得到的结果表。
+
+    交回去的内容分两部分：rows、columns、sql 是程序执行出来的，可以直接引用；
+    查询 Agent 写的口径说明和注意事项放在 unverified_notes 里，数字核查不把它们当出处（checks.UNVERIFIED_KEYS）。
+    """
+    out = run_query(args.request, llm=service.llm, db=service.db, max_tool_calls=service.max_tool_calls)
+    service.records.append(out["run"])
+    result = out["result"]
+    base = {"tool": "query_data", "request": args.request, "status": result["status"], "query_run": len(service.records)}
+    if result["status"] == "answered":
+        return base | {"columns": result["columns"], "rows": result["rows"], "row_count": result["row_count"], "sql": result["sql"],
+                       "unverified_notes": {"note": UNVERIFIED_NOTE, "definition": result["definition"], "caveats": result["caveats"]}}
+    if result["status"] == "declined":
+        return base | {"unverified_notes": {"note": UNVERIFIED_NOTE, "reason": result["message"]},
+                       "message": "查询 Agent 认为数据里没有这个请求需要的信息，没有给出结果。"}
+    raise ValueError(f"取数没有完成：{result['message'][:200]}。可以换一种更明确的写法再试一次，或者在回答中说明")
 
 
 def run_query(request: str, *, llm: LLMClient, db: QueryDB, max_tool_calls: int = MAX_TOOL_CALLS) -> dict[str, Any]:

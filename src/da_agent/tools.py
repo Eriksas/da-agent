@@ -16,7 +16,7 @@ import duckdb
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .abtest import proportion_test, sample_size_proportions, srm_check
-from .analyst import RunSqlArgs, SubmitQueryArgs, run_sql, submit_query
+from .analyst import QueryDataArgs, RunSqlArgs, SubmitQueryArgs, query_data, run_sql, submit_query
 from .autodash.compile import compile_dashboard, preview_chart
 from .autodash.sources import profile_table
 from .autodash.spec import MAX_SUBMIT_CHARTS, Chart, DashboardSpec, Metric
@@ -268,6 +268,11 @@ TOOLS: dict[str, Tool] = {tool.name: tool for tool in (
          '正确写法：{"verdict": "有问题", "findings": [{"quote": "从答案原样照抄的一句", "category": "方向或比较说反", '
          '"severity": "错误", "explanation": "第 2 次工具调用里 GMV 环比是 -6.00%，答案写成了增长", "evidence": [2]}], '
          '"checked": "核对了……"}；没有问题时 findings 留空、verdict 写“通过”'),
+    Tool("query_data",
+         "取数：固定工具答不了的问题（按星期几、按小时、按月或季度、某一群客户、复购、任意时间段和筛选条件……）用它。"
+         "写一个明确的请求（时间范围、指标、分组、筛选、排序），另一位分析师会写只读 SQL 算出一张结果表。"
+         "结果表（rows）里的数可以直接引用；unverified_notes 是对方写的说明，没有核对过。",
+         QueryDataArgs, query_data),
     Tool("run_sql",
          "试一条只读查询（DuckDB 的 SELECT），返回前几行和总行数。用来确认筛选条件、数量级和口径；出错时返回原因。",
          RunSqlArgs, run_sql),
@@ -288,6 +293,8 @@ DOMAIN_TOOLS: dict[str, tuple[str, ...]] = {
     "review": ("calculate", "submit_review"),  # 复核 Agent：不查数据，只验算和提交意见
     "analyst": ("run_sql", "submit_query"),  # 查询 Agent：只写只读 SQL，上下文是 analyst.QueryContext
 }
+# 可选的工具（M19b）：调用方提供了它的上下文才给模型看。query_data 的上下文是 analyst.QueryService，不是数据库连接
+OPTIONAL_TOOLS: dict[str, tuple[str, ...]] = {"ecommerce": ("query_data",)}
 
 
 def _drop_titles(schema: Any, property_names: bool = False) -> Any:
@@ -318,13 +325,17 @@ def _inline_refs(schema: dict[str, Any]) -> dict[str, Any]:
     return walk(schema)
 
 
-def tool_specs(domain: str = "ecommerce") -> list[dict[str, Any]]:
-    """发给模型的工具说明书（OpenAI function calling 格式），只包含这个领域的工具。"""
+def tool_specs(domain: str = "ecommerce", optional: tuple[str, ...] | list[str] = ()) -> list[dict[str, Any]]:
+    """发给模型的工具说明书（OpenAI function calling 格式），只包含这个领域的工具；optional 是要加上的可选工具。"""
     if domain not in DOMAIN_TOOLS:
         raise ValueError(f"未知领域：{domain}；可选：{list(DOMAIN_TOOLS)}")
+    unknown = [name for name in optional if name not in OPTIONAL_TOOLS.get(domain, ())]
+    if unknown:
+        raise ValueError(f"{domain} 领域没有可选工具 {unknown}；可选：{list(OPTIONAL_TOOLS.get(domain, ()))}")
+    names = [*DOMAIN_TOOLS[domain], *(name for name in OPTIONAL_TOOLS.get(domain, ()) if name in optional)]
     return [{"type": "function", "function": {"name": tool.name, "description": tool.description,
                                               "parameters": _drop_titles(_inline_refs(tool.args_model.model_json_schema()))}}
-            for tool in (TOOLS[name] for name in DOMAIN_TOOLS[domain])]
+            for tool in (TOOLS[name] for name in names)]
 
 
 @dataclass(frozen=True)

@@ -32,7 +32,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from .checks import IGNORED, NUMBER, SCALES, extract_numbers
+from .checks import IGNORED, NUMBER, SCALES, extract_numbers, within
 
 Name = tuple[str, str]  # （类别，名字）；类别：metric 指标、segment 分组、company 公司
 METRIC_IDS = ("metric", "factor", "item", "ratio")  # 一行里有这些代号，这一行的 label 就是指标名
@@ -276,7 +276,7 @@ def check_attribution(answer: str, messages: list[dict[str, Any]]) -> dict[str, 
     mentions = extract_numbers(answer)[0]
     flags, checked = [], 0
     for at, mention in enumerate(mentions):
-        occurrences = [o for o in index.occurrences if abs(o.value - mention.value) < mention.tolerance - 1e-12]
+        occurrences = [o for o in index.occurrences if within(o.value - mention.value, mention.tolerance)]
         if not occurrences or not all(o.names for o in occurrences):
             continue  # 找不到出处的数由数字核查负责；有一处出处没有名字的不查
         checked += 1

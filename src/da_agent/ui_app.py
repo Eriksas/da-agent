@@ -79,6 +79,8 @@ def show_result(saved: ui.SavedRun) -> None:
             with st.expander(title):
                 for warning in result.get("warnings", []):
                     st.warning(ui.to_streamlit_markdown(warning))
+                if step["ok"] and step["tool"] == "query_data":  # 取数：先看查询 Agent 写的 SQL 和算出的表
+                    st.markdown(ui.query_preview(result))
                 st.json(result, expanded=1)
         if not run["steps"]:
             st.caption("本次没有调用工具。")
@@ -154,6 +156,9 @@ def live_page() -> None:
     st.pills("示例问题", ui.EXAMPLE_QUESTIONS[domain], key=key, on_change=use_example, args=(key,), disabled=running)
     question = st.text_area("问题", key="question", height=80, disabled=running,
                             placeholder="例如：上周 GMV 为什么变化？")
+    with_query = st.toggle("允许取数：固定工具答不了时，交给查询 Agent 写只读 SQL", key="with_query", value=True,
+                           disabled=running or domain != "ecommerce",
+                           help="多 Agent（M19b）：主 Agent 写取数请求，查询 Agent 写 SQL，程序在只读数据库上执行。更慢、更费 token")
     problem = ui.live_problem(domain, settings)
     if problem:
         st.warning(problem)
@@ -161,7 +166,8 @@ def live_page() -> None:
     if running:
         with st.status("分析中：准备数据", expanded=True) as box:
             try:
-                run_dir = ui.ask(question.strip(), domain, settings, on_step=lambda e: ui.show_event(box, e, "分析中"))
+                run_dir = ui.ask(question.strip(), domain, settings, on_step=lambda e: ui.show_event(box, e, "分析中"),
+                                 with_query=with_query and domain == "ecommerce")
             finally:  # 中途停止（异常中断）也要让输入框恢复可用
                 st.session_state.running = False
         st.session_state.live_dir = str(run_dir)

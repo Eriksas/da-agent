@@ -36,7 +36,9 @@ TOOL_LABELS = {
     "data_quality_overview": "数据质量概览", "load_skill": "加载分析流程", "ab_proportion_test": "AB 实验检验",
     "ab_sample_size": "AB 样本量", "calculate": "计算器", "company_overview": "公司概览",
     "financial_summary": "财务摘要", "dupont": "杜邦分析", "peer_compare": "同行对比",
+    "query_data": "取数（查询 Agent）",
 }
+QUERY_PREVIEW_ROWS = 8  # 取数结果在进度框里只显示前几行：看得出算了什么就够了
 # 代码块原样显示；其余部分里 $ 会被 Streamlit 当成公式、~ 会被当成删除线（“3~5 天”会被划掉），要转义
 CODE = re.compile(r"```.*?```|`[^`\n]+`", re.DOTALL)
 MARKDOWN_ESCAPES = str.maketrans({"$": r"\$", "~": r"\~"})
@@ -72,12 +74,31 @@ def show_event(box: Any, event: dict[str, Any], label_prefix: str | None = None)
         box.markdown(line + ("" if step["ok"] else f"\n\n:red[{to_streamlit_markdown(step['error'])}]"))
         for warning in event["result"].get("warnings", []):
             box.caption(f"⚠️ {to_streamlit_markdown(warning)}")
+        if step["ok"] and step["tool"] == "query_data":
+            box.markdown(query_preview(event["result"]))
     elif kind == "repair":
         numbers = "、".join(m["text"] for m in event["ungrounded"])
         box.warning(f"自动核查：初稿有 {len(event['ungrounded'])} 个数字找不到出处（{to_streamlit_markdown(numbers)}），"
                     "退回模型修正 1 次")
     else:
         box.info(to_streamlit_markdown(event["text"].removeprefix("（系统提示）")))
+
+
+def query_preview(result: dict[str, Any]) -> str:
+    """取数结果的显示：查询 Agent 写的 SQL（程序执行的就是这一条）和结果表的前几行。"""
+    if result.get("status") != "answered":
+        return "查询 Agent：数据里没有这个请求需要的信息，没有给出结果。"
+    names = [column["name"] for column in result["columns"]]
+
+    def cell(value: Any) -> str:
+        return "" if value is None else to_streamlit_markdown(str(value)).replace("|", "\\|")
+
+    rows = result["rows"][:QUERY_PREVIEW_ROWS]
+    table = ["| " + " | ".join(cell(n) for n in names) + " |", "|" + "---|" * len(names)]
+    table += ["| " + " | ".join(cell(row.get(n)) for n in names) + " |" for row in rows]
+    more = f"\n\n共 {result['row_count']} 行，这里显示前 {len(rows)} 行。" if result["row_count"] > len(rows) else ""
+    return (f"查询 Agent 写的 SQL（程序在只读数据库上执行）：\n\n```sql\n{result['sql']}\n```\n\n"
+            + "\n".join(table) + more)
 
 
 def replay_events(run: dict[str, Any]) -> list[dict[str, Any]]:
@@ -202,16 +223,25 @@ def make_llm(settings: Settings) -> LLMClient:
 
 
 def ask(question: str, domain: str, settings: Settings,
-        on_step: Callable[[dict[str, Any]], None] | None = None) -> Path:
-    """回答一个问题，保存运行记录并生成核查结果和报告（和命令行的 ask、company-ask 相同），返回运行目录。"""
+        on_step: Callable[[dict[str, Any]], None] | None = None, with_query: bool = False) -> Path:
+    """回答一个问题，保存运行记录并生成核查结果和报告（和命令行的 ask、company-ask 相同），返回运行目录。
+
+    with_query：给 Agent 加上 query_data 工具（M19b，只支持电商），和命令行的 ask --with-query 相同。
+    """
     from .cleaning import connect
     from .company import connect_financials
     from .dataset import PARQUET_PATH
 
     llm = make_llm(settings)
+    contexts = {}
+    if with_query and domain == "ecommerce":
+        from .analyst import QueryService
+        from .semantic import prepare
+
+        contexts["query_data"] = QueryService(llm=llm, db=prepare("retail"))
     with (connect_financials() if domain == "company" else connect(PARQUET_PATH)) as con:
         run = run_agent(question, llm=llm, con=con, max_tool_calls=settings.llm_max_tool_calls, domain=domain,
-                        on_step=on_step)
+                        on_step=on_step, tool_contexts=contexts)
     run_dir = save_run(run, RUNS_DIR)
     write_review(run_dir)
     return run_dir

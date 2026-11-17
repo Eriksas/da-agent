@@ -237,3 +237,14 @@ def test_unit_conversion_constants_need_no_source() -> None:
                         tool={"a": 106938690000, "b": 18991000000})
     numbers = check_run(run)["numbers"]
     assert numbers["ungrounded"] == [] and numbers["unsupported_calculations"] == []
+
+
+def test_a_number_copied_with_many_decimals_is_grounded() -> None:
+    """原样照抄工具结果里 17 位小数的数，也算有出处（M19b 评测里两次被误判为没有出处）。"""
+    from da_agent.checks import number_check
+
+    messages = [{"role": "tool", "content": json.dumps({"clean_totals": {"gmv_missing_customer_share": 0.13109840352143715}})}]
+    assert number_check("缺客户 ID 的占比是 0.13109840352143715。", messages)["ungrounded"] == []
+    assert [m["text"] for m in number_check("缺客户 ID 的占比是 0.13109840352143716。", messages)["ungrounded"]] == [
+        "0.13109840352143716"]
+    assert number_check("缺客户 ID 的占比约 13.11%。", messages)["ungrounded"] == []
