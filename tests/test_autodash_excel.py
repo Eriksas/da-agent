@@ -49,11 +49,12 @@ def test_a_messy_sheet_becomes_a_clean_table(book: Path) -> None:
     assert sheet == "销售" and list(frame.columns) == ["月份", "国家", "GMV（英镑）", "订单数", "下单日期"]
     assert len(frame) == 4 and frame["GMV（英镑）"].tolist() == [1200.5, 300.0, 1500.0, 450.25]  # 文本转成了数字
     assert str(frame["订单数"].dtype) == "Int64" and frame["下单日期"].dtype.kind == "M"
+    assert frame["月份"].dtype.kind == "M" and frame["月份"].iloc[0] == datetime(2011, 10, 1)  # “2011-10”是年月，不是普通文字
     text = "；".join(notes)
     assert "工作簿有 2 个工作表（说明、销售），读的是“销售”" in text
     assert "表头在第 4 行，上面 3 行是标题或说明：2011 年各国月度销售汇总（单位：英镑，含之后被取消的订单）；制表：运营部" in text
     assert "剔除了 2 行“合计、小计”" in text and "去掉了 1 个空列" in text and "去掉了 1 个空行" in text
-    assert "列“GMV（英镑）”有 2 个数字存成了文本，已转成数字" in text
+    assert "列“GMV（英镑）”有 2 个数字存成了文本，已转成数字" in text and "列“月份”年月写成了文字，已转成日期（取每月 1 号）" in text
 
 
 def test_sheet_names_and_errors(book: Path, tmp_path: Path) -> None:
@@ -81,7 +82,7 @@ def test_the_dashboard_pipeline_reads_excel_like_csv(book: Path) -> None:
     with connect_source(f"{book}#销售") as con:
         source = source_of(con)
         profile = profile_table(con)
-    assert source.name == f"xlsx:{book.resolve().as_posix()}#销售" and source.time_column == "下单日期"
+    assert source.name == f"xlsx:{book.resolve().as_posix()}#销售" and source.time_column == "月份"  # 能按月画折线了
     assert "剔除了 2 行" in profile["description"] and "单位：英镑" in profile["description"]  # 模型看得到做了什么处理
     spec = DashboardSpec.model_validate({
         "title": "月度销售", "goal": "看各国 GMV",
@@ -106,3 +107,26 @@ def test_cli_passes_the_sheet(book: Path, monkeypatch: pytest.MonkeyPatch, tmp_p
         cli.main(["build-dashboard", str(book), "--sheet", "销售", "--llm", "fake", "--script", str(script)])
     assert seen == [f"{book}#销售"]
     assert cli.main(["build-dashboard", "data.csv", "--sheet", "销售", "--llm", "fake", "--script", "x"]) == 2  # 只用于 Excel
+
+
+@pytest.mark.parametrize(("values", "expected"), [
+    (["2011-01", "2011-12"], [datetime(2011, 1, 1), datetime(2011, 12, 1)]),
+    (["2011年1月", "2011 年 12 月"], [datetime(2011, 1, 1), datetime(2011, 12, 1)]),
+    (["2011/01/03", "2011-12-09"], [datetime(2011, 1, 3), datetime(2011, 12, 9)]),
+])
+def test_dates_written_as_text_become_dates(tmp_path: Path, values: list[str], expected: list[datetime]) -> None:
+    book = Workbook()
+    for row in (["时间", "GMV"], [values[0], 1], [values[1], 2]):
+        book.active.append(row)
+    book.save(tmp_path / "d.xlsx")
+    frame, _, _ = read_excel_table(tmp_path / "d.xlsx")
+    assert frame["时间"].tolist() == expected
+
+
+def test_mixed_text_is_left_alone(tmp_path: Path) -> None:
+    book = Workbook()
+    for row in (["时间", "GMV"], ["2011-01", 1], ["上半年", 2]):
+        book.active.append(row)
+    book.save(tmp_path / "m.xlsx")
+    frame, _, _ = read_excel_table(tmp_path / "m.xlsx")
+    assert frame["时间"].tolist() == ["2011-01", "上半年"]  # 整列不都是日期时不转

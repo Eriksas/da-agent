@@ -6,6 +6,8 @@
 - 末尾或中间有“合计 / 总计 / 小计”行：剔除。不剔除的话，任何加总都会把总数再算一遍；
 - 空行、空列：去掉；
 - 数字存成了文本（“1,234.50”“12.5%”“£ 300”）：整列都能转成数字时才转换，转不了的保持原样；
+- 日期、年月写成了文字（“2011-01-03”“2011-01”“2011年1月”）：整列都是这种写法时转成日期（年月取每月 1 号），
+  不然看板认不出时间列，按月的折线图画不了（M20 第一次真实运行就卡在这里，工具次数用完也没交出方案）；
 - 表头为空或重名：改成“列3”“GMV_2”这样不重名的名字。
 
 不处理的（遇到时照原样交给模型，由它在说明里写明）：合并单元格展开、一张工作表里有多张表、透视表、公式重算。
@@ -21,6 +23,8 @@ import pandas as pd
 HEADER_SCAN_ROWS = 20  # 只在前这么多行里找表头
 TOTAL_LABEL = re.compile(r"^(合\s*计|总\s*计|小\s*计|总\s*和|汇\s*总|全\s*部|grand\s*total|sub\s*total|subtotal|total|sum)[:：]?$",
                          re.IGNORECASE)
+DATE_TEXT = re.compile(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$")
+MONTH_TEXT = re.compile(r"^(\d{4})\s*[-/.年]\s*(\d{1,2})\s*月?$")
 NUMBER_TEXT = re.compile(r"^[-+]?[£$¥€￥]?\s*[-+]?(\d{1,3}(,\d{3})+|\d+)(\.\d+)?\s*%?$")
 MAX_NOTE_TEXT = 80
 
@@ -85,6 +89,15 @@ def _convert_column(series: pd.Series) -> tuple[pd.Series, str | None]:
         return series, None
     if all(isinstance(v, (datetime, date, pd.Timestamp)) for v in values):
         return pd.to_datetime(series, errors="coerce"), None
+    if all(isinstance(v, str) and (DATE_TEXT.match(v.strip()) or MONTH_TEXT.match(v.strip())) for v in values):
+        months = all(MONTH_TEXT.match(v.strip()) for v in values)
+
+        def parse(v: Any) -> Any:
+            if _blank(v):
+                return None
+            found = (MONTH_TEXT if months else DATE_TEXT).match(v.strip())
+            return datetime(int(found.group(1)), int(found.group(2)), 1 if months else int(found.group(3)))
+        return pd.to_datetime(series.map(parse)), ("年月写成了文字，已转成日期（取每月 1 号）" if months else "日期写成了文字，已转成日期")
     numeric = [isinstance(v, (int, float)) and not isinstance(v, bool) for v in values]
     texts = [isinstance(v, str) and bool(NUMBER_TEXT.match(v.strip())) for v in values]
     if not all(n or t for n, t in zip(numeric, texts, strict=True)):
@@ -137,5 +150,5 @@ def read_excel_table(path: Path, sheet: str | None = None) -> tuple[pd.DataFrame
     for name in names:
         frame[name], note = _convert_column(frame[name])
         if note:
-            notes.append(f"列“{name}”有 {note}")
+            notes.append(f"列“{name}”{'有 ' if '个数字' in note else ''}{note}")
     return frame, notes, sheet
