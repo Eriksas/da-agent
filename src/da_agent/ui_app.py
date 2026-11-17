@@ -79,6 +79,8 @@ def show_result(saved: ui.SavedRun) -> None:
             with st.expander(title):
                 for warning in result.get("warnings", []):
                     st.warning(ui.to_streamlit_markdown(warning))
+                if step["ok"] and step["tool"] == "query_data":  # 取数：先看查询 Agent 写的 SQL 和算出的表
+                    st.markdown(ui.query_preview(result))
                 st.json(result, expanded=1)
         if not run["steps"]:
             st.caption("本次没有调用工具。")

@@ -186,3 +186,18 @@ def test_ask_can_hand_data_pulls_to_the_query_agent(monkeypatch: pytest.MonkeyPa
     saved = ui.load_run(run_dir).run
     assert saved["steps"][0]["tool"] == "query_data" and saved["steps"][0]["ok"] and len(saved["sub_runs"]) == 1
     assert saved["status"] == "completed" and "145.00" in saved["answer"]
+
+
+def test_query_results_show_the_sql_and_the_first_rows() -> None:
+    result = {"status": "answered", "sql": "SELECT country, sum(gmv_amount) AS gmv FROM order_lines GROUP BY 1",
+              "columns": [{"name": "country", "meaning": "国家"}, {"name": "gmv", "meaning": "GMV"}],
+              "rows": [{"country": f"C{i}", "gmv": i * 1.5} for i in range(10)] + [{"country": "A|B", "gmv": None}], "row_count": 11}
+    text = ui.query_preview(result)
+    assert "```sql\nSELECT country" in text and "| country | gmv |" in text and "| C0 | 0.0 |" in text
+    assert "| C7 | 10.5 |" in text and "C8" not in text and "共 11 行，这里显示前 8 行。" in text
+    assert "没有给出结果" in ui.query_preview({"status": "declined"})
+    box = Box()
+    ui.show_event(box, {"type": "tool", "step": {"tool": "query_data", "ok": True, "arguments": {"request": "各国 GMV"}, "ms": 5},
+                        "result": result})
+    texts = [args[0] for name, args, _ in box.calls if name == "markdown"]
+    assert "取数（查询 Agent）（query_data）" in texts[0] and "```sql" in texts[1]
