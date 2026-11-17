@@ -156,3 +156,33 @@ def test_ask_saves_the_run_with_checks_and_report(monkeypatch: pytest.MonkeyPatc
     assert "AI 初稿，待人工复核" in (run_dir / "report.md").read_text(encoding="utf-8")
     assert [e["type"] for e in events] == ["model", "tool", "model"]
     assert ui.replay_events(ui.load_run(run_dir).run) == events
+
+
+def test_ask_can_hand_data_pulls_to_the_query_agent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """界面里打开“允许取数”：和命令行 ask --with-query 一样，查询 Agent 的完整记录附在 sub_runs 里。"""
+    from test_metrics import ROWS
+
+    from da_agent import semantic
+    from da_agent.cleaning import connect_frame
+    from da_agent.metrics import _ensure
+    from da_agent.semantic import SEMANTIC_DIR, build_database, load_config
+    from helpers import make_frame
+
+    base = connect_frame(make_frame(ROWS))
+    _ensure(base)
+    db = build_database(load_config(SEMANTIC_DIR / "retail.yaml"), base, tmp_path / "q.duckdb")
+    monkeypatch.setattr(semantic, "prepare", lambda name: db)
+    import da_agent.cleaning as cleaning
+
+    monkeypatch.setattr(cleaning, "connect", lambda path: base)
+    submit = {"sql": "SELECT round(sum(gmv_amount), 2) AS gmv FROM order_lines WHERE week = '2011-W02'", "columns": {"gmv": "GMV"},
+              "definition": "2011-W02 的 GMV"}
+    llm = FakeLLM(replies=[tools(call(1, "query_data", request="2011-W02 的 GMV")),
+                           tools(call(2, "submit_query", **submit)), LLMReply(content="完成。"),
+                           LLMReply(content="2011-W02 的 GMV 为 145.00。")])
+    monkeypatch.setattr(ui, "make_llm", lambda settings: llm)
+    monkeypatch.setattr(ui, "RUNS_DIR", tmp_path)
+    run_dir = ui.ask("2011-W02 的 GMV？", "ecommerce", Settings(_env_file=None), with_query=True)
+    saved = ui.load_run(run_dir).run
+    assert saved["steps"][0]["tool"] == "query_data" and saved["steps"][0]["ok"] and len(saved["sub_runs"]) == 1
+    assert saved["status"] == "completed" and "145.00" in saved["answer"]

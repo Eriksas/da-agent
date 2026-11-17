@@ -202,16 +202,25 @@ def make_llm(settings: Settings) -> LLMClient:
 
 
 def ask(question: str, domain: str, settings: Settings,
-        on_step: Callable[[dict[str, Any]], None] | None = None) -> Path:
-    """回答一个问题，保存运行记录并生成核查结果和报告（和命令行的 ask、company-ask 相同），返回运行目录。"""
+        on_step: Callable[[dict[str, Any]], None] | None = None, with_query: bool = False) -> Path:
+    """回答一个问题，保存运行记录并生成核查结果和报告（和命令行的 ask、company-ask 相同），返回运行目录。
+
+    with_query：给 Agent 加上 query_data 工具（M19b，只支持电商），和命令行的 ask --with-query 相同。
+    """
     from .cleaning import connect
     from .company import connect_financials
     from .dataset import PARQUET_PATH
 
     llm = make_llm(settings)
+    contexts = {}
+    if with_query and domain == "ecommerce":
+        from .analyst import QueryService
+        from .semantic import prepare
+
+        contexts["query_data"] = QueryService(llm=llm, db=prepare("retail"))
     with (connect_financials() if domain == "company" else connect(PARQUET_PATH)) as con:
         run = run_agent(question, llm=llm, con=con, max_tool_calls=settings.llm_max_tool_calls, domain=domain,
-                        on_step=on_step)
+                        on_step=on_step, tool_contexts=contexts)
     run_dir = save_run(run, RUNS_DIR)
     write_review(run_dir)
     return run_dir
