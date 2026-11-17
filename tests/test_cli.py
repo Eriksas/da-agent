@@ -76,3 +76,16 @@ def test_ui_listens_on_localhost_only_and_turns_off_telemetry(monkeypatch: pytes
     options = dict(zip(args[5::2], args[6::2], strict=True))
     assert options["--server.address"] == "127.0.0.1" and options["--server.port"] == "8600"
     assert options["--browser.gatherUsageStats"] == "false"
+
+
+def test_ask_turns_on_data_pulls_unless_told_not_to(monkeypatch: pytest.MonkeyPatch) -> None:
+    """电商问答默认开启取数（M19b 留出评测达标后的决定）；--no-query 关掉；财报问答不取数。"""
+    from da_agent import cli
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(cli, "ask", lambda *args, **kwargs: calls.append((args, kwargs)) or 0)
+    assert cli.main(["ask", "上周 GMV 为什么变化？"]) == 0
+    assert cli.main(["ask", "上周 GMV 为什么变化？", "--no-query"]) == 0
+    assert cli.main(["company-ask", "阿里的财年怎么算？"]) == 0
+    assert [kwargs.get("with_query") for _, kwargs in calls] == [True, False, None]
+    assert calls[2][1].get("domain", calls[2][0][3] if len(calls[2][0]) > 3 else None) == "company"

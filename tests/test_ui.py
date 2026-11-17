@@ -159,7 +159,7 @@ def test_ask_saves_the_run_with_checks_and_report(monkeypatch: pytest.MonkeyPatc
 
 
 def test_ask_can_hand_data_pulls_to_the_query_agent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """界面里打开“允许取数”：和命令行 ask --with-query 一样，查询 Agent 的完整记录附在 sub_runs 里。"""
+    """界面里打开“允许取数”（默认打开）：和命令行 ask 一样，查询 Agent 的完整记录附在 sub_runs 里。"""
     from test_metrics import ROWS
 
     from da_agent import semantic
