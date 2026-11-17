@@ -24,7 +24,7 @@ import pandas as pd
 import yaml
 
 from .agent import AgentRun, run_agent
-from .checks import check_run, extract_numbers
+from .checks import check_run, extract_numbers, within
 from .cleaning import connect, connect_frame, fetch_rows
 from .company import connect_financials, financial_summary
 from .dataset import PARQUET_PATH
@@ -221,9 +221,9 @@ def score(case: Case, run: dict[str, Any], checks: dict[str, Any], expected: flo
     value_found = None
     mentioned = extract_numbers(answer)[0]
     if expected is not None:
-        value_found = any(abs(m.value - expected) < m.tolerance - 1e-12 for m in mentioned)
+        value_found = any(within(m.value - expected, m.tolerance) for m in mentioned)
     # 按答案自己的显示精度比：写成 2,440,756.22、244.08 万、45.26% 都算
-    sql_found = [{"value": round(v, 6), "found": any(abs(m.value - abs(v)) < m.tolerance - 1e-12 for m in mentioned)}
+    sql_found = [{"value": round(v, 6), "found": any(within(m.value - abs(v), m.tolerance) for m in mentioned)}
                  for v in sql_values]
     if sql_found:
         value_found = all(item["found"] for item in sql_found) and value_found is not False

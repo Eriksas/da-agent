@@ -116,8 +116,16 @@ def _numbers_in(value: Any, pool: list[float]) -> None:
 CALC_CONSTANTS = (100.0, 1e4, 1e8)
 
 
+def within(difference: float, tolerance: float) -> bool:
+    """两个数差得比显示精度的 1 个单位小（严格小于，留一点浮点余量）。
+
+    余量不能超过容差本身：原样照抄 17 位小数的数时，容差是 1e-17，减去 1e-12 就成了负数，永远对不上（M19b 评测发现）。
+    """
+    return abs(difference) < max(tolerance - 1e-12, tolerance / 2)
+
+
 def _grounded(value: float, tolerance: float, pool: list[float]) -> bool:
-    return any(abs(source - value) < tolerance - 1e-12 for source in pool)
+    return any(within(source - value, tolerance) for source in pool)
 
 
 def _audit_calculation(result: dict[str, Any], pool: list[float]) -> dict[str, Any]:
