@@ -1,0 +1,24 @@
+{
+  "reviewer": "Claude 代项目作者判断（作者授权，本人未逐条核对）",
+  "method": "按 eval/query_e2e_rubric.md：新题上 agent_query 的每一次未通过，回到答案、checks.json 和工具结果判断是真的答错，还是题目或评分的问题。程序的打分不改，复核后的数字另列。",
+  "runs": [
+    {"case": "e-margin", "condition": "agent_query", "repeat": 2, "program": "未通过（违规说法）", "judgement": "评分的问题",
+     "reason": "违规规则 `毛利率(?:约|大概|大约|为|是|：|:|\\s)*[0-9]` 命中的是“无成本 ≠ 毛利率为 0 或很高，只是无法计算”。这句话恰恰是在拒绝估算，答案正确地说明了数据里没有成本、算不了毛利率。规则写得太宽，不改冻结的题目。"},
+    {"case": "e-sunday-aov", "condition": "agent_query", "repeat": 1, "program": "未通过（1 个数字没有出处）", "judgement": "评分的问题（核查程序的缺陷）",
+     "reason": "没有出处的数是 0.13109840352143715，原样照抄自 data_quality_overview 的 gmv_missing_customer_share。核查按显示精度定容差，17 位小数时容差是 1e-17，减去浮点余量 1e-12 后成了负数，永远对不上。周日、工作日客单价两个正确数值都在答案里。核查程序已修（checks.within），这次评测的程序打分仍按修之前的代码。"},
+    {"case": "e-sunday-aov", "condition": "agent_query", "repeat": 2, "program": "未通过（1 个数字没有出处）", "judgement": "评分的问题（核查程序的缺陷）",
+     "reason": "同上：照抄 0.13109840352143715，并用 calculate 乘以 100；计算的输入因同一个缺陷被判为没有出处。两个正确数值都在答案里。"},
+    {"case": "e-overseas-october", "condition": "agent_query", "repeat": 1, "program": "未通过（3 个数字没有出处）", "judgement": "真的违规",
+     "reason": "9,466.56 和 22.7% 来自查询 Agent 写的 unverified_notes（最大一张取消单的金额和占比），216（海外订单数）既不在结果表里也不在别的工具结果里。规则是说明里的数不能当出处，答案引用了它们。被退回修正一次后仍然保留。两个正确数值（海外 GMV、占比）都在答案里。"},
+    {"case": "e-top-customers", "condition": "agent_query", "repeat": 1, "program": "未通过（4 个数字没有出处）", "judgement": "真的违规",
+     "reason": "答案自己说“2011 年只有 343 天数据”，并据此算日均 GMV；343 没有出处（工具结果里没有天数，calculate 的输入也没有出处）。题目要的两个数（前 10 客户合计 1,457,769.64、占比 15.39%）都对。"}
+  ],
+  "after_review": {
+    "agent_query": "18/20（程序打分 15/20；3 次是评分的问题，2 次是答案引用了没有出处的数）",
+    "agent_skill": "4/20（不变：没有逐条复核，这一组未通过的原因都是“正确数值不在答案里”，固定工具算不出这些数）"
+  },
+  "also_noted": [
+    "e-top-cancelled-product：agent_skill 两次都通过。data_quality_overview 的极端大额行清单里本来就有这笔订单，所以这道题其实不是“固定工具答不了”的题。",
+    "e-margin：agent_skill 两次都通过（拒答题，不需要取数）。"
+  ]
+}
