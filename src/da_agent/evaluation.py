@@ -569,7 +569,11 @@ def rescore(out_dir: Path, cases: list[Case], connections: Connections) -> dict[
         run = json.loads(run_path.read_text(encoding="utf-8"))
         checks = check_run(run)
         expected = expected_value(connections.get(case), case) if case.expect_value else None
-        result = score_run(case, run, checks, expected)
+        sql_values = expected_sql_values(connections.get(case), case) if case.expect_sql else []
+        result = score_run(case, run, checks, expected, sql_values)
+        old_score = run_path.parent / "score.json"  # 重跑次数不是评分，原样保留
+        if old_score.exists():
+            result["api_retries"] = json.loads(old_score.read_text(encoding="utf-8")).get("api_retries", 0)
         _save(run_path.parent, run, checks, result)
         results.append({"case": case.id, "category": case.category, "condition": condition, "repeat": int(repeat),
                         **result})

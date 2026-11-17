@@ -127,3 +127,19 @@ def test_query_data_uses_the_injected_data(tmp_path: Path) -> None:
     rows = run_select(con, "SELECT count(*) AS n FROM order_lines WHERE country = 'Germany'")["rows"]
     con.close()
     assert rows == [{"n": 0}] and connections.query_db(case) is db  # 同一份数据只建一次
+
+
+def test_rescore_keeps_reference_values_and_retries(tmp_path: Path) -> None:
+    """中断后补跑、合并结果时用 rescore 重新汇总：参考 SQL 的期望值和重跑次数都要保留。"""
+    import json
+
+    from da_agent.evaluation import rescore
+
+    case = Case(id="g", category="取数", question="2011-W02 德国 GMV 是多少？", expects_skill=False,
+                expect_sql=("SELECT sum(amount) AS gmv FROM sales_enriched WHERE week = '2011-W02' AND country = 'Germany'",))
+    flaky = FlakyLLM([LLMReply(content="2011-W02 德国 GMV 为 61.00。")], failures=1)
+    run_eval([case], ["agent"], 1, lambda *_: flaky, FixtureConnections(), tmp_path, max_tool_calls=5,
+             progress=lambda _: None, wait=lambda _: None)
+    summary = rescore(tmp_path, [case], FixtureConnections())
+    assert summary["failures"][0]["missing_values"] == [60.0] and summary["by_condition"]["agent"]["api_retries"] == 1
+    assert json.loads((tmp_path / "runs" / "g" / "agent-1" / "score.json").read_text(encoding="utf-8"))["api_retries"] == 1
