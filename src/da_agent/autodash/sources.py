@@ -127,6 +127,48 @@ def csv_source(path: Path | str, label: str | None = None) -> Source:
     return Source(name, label, CSV_TABLE, description, {}, connect, time_column=None)
 
 
+EXCEL_SUFFIXES = (".xlsx", ".xlsm")
+
+
+def split_excel_name(name: str) -> tuple[Path, str | None] | None:
+    """“xlsx:路径#工作表”或“文件.xlsx#工作表”“文件.xlsx” → (路径, 工作表)；不是 Excel 时返回 None。"""
+    text = name.removeprefix("xlsx:")
+    for suffix in EXCEL_SUFFIXES:
+        at = text.lower().find(suffix + "#")
+        if at >= 0:
+            return Path(text[:at + len(suffix)]), text[at + len(suffix) + 1:] or None
+        if text.lower().endswith(suffix):
+            return Path(text), None
+    return None
+
+
+def excel_source(path: Path | str, sheet: str | None = None, label: str | None = None) -> Source:
+    """用户给的 Excel（M20）：读一张工作表，整理成规整的表（excel.read_excel_table），之后和 CSV 走同一条路。
+
+    整理时做了什么（找表头、剔除合计行、文本转数字……）连同表头上方的说明文字，写进数据说明交给模型。
+    """
+    from .excel import read_excel_table
+
+    path = Path(path).resolve()
+    if not path.exists():
+        raise ValueError(f"找不到 Excel 文件：{path}")
+    frame, notes, sheet = read_excel_table(path, sheet)
+    name = f"xlsx:{path.as_posix()}#{sheet}"
+    label = label or f"{path.name}（{sheet}）"
+    description = (f"用户提供的 Excel（{path.name}，工作表“{sheet}”），没有数据说明：列的含义只能从列名、取值和下面的说明判断。"
+                   + (f"读取时程序做了这些处理：{'；'.join(notes)}。" if notes else ""))
+
+    def connect() -> duckdb.DuckDBPyConnection:
+        con = duckdb.connect()
+        con.register("excel_frame", frame)
+        con.execute(f"CREATE TABLE {CSV_TABLE} AS SELECT * FROM excel_frame")
+        con.unregister("excel_frame")
+        con.execute("CREATE TABLE dash_source AS SELECT ? AS name, ? AS label", [name, label])
+        return con
+
+    return Source(name, label, CSV_TABLE, description, {}, connect, time_column=None)
+
+
 def _with_time_column(con: duckdb.DuckDBPyConnection, source: Source) -> Source:
     """CSV 的时间列：第一个时间戳或日期列（没有就是 None，不能按年筛选）。"""
     for column, kind in column_types(con, source).items():
@@ -141,7 +183,9 @@ def source_of(con: duckdb.DuckDBPyConnection) -> Source:
                                                  "SELECT table_name FROM duckdb_tables()")}
     if "dash_source" in tables:
         meta = fetch_one(con, "SELECT name, label FROM dash_source")
-        return _with_time_column(con, csv_source(meta["name"].removeprefix("csv:"), meta["label"]))
+        excel = split_excel_name(meta["name"]) if meta["name"].startswith("xlsx:") else None
+        source = excel_source(*excel, meta["label"]) if excel else csv_source(meta["name"].removeprefix("csv:"), meta["label"])
+        return _with_time_column(con, source)
     for source in SOURCES.values():
         if source.table in tables:
             return source
@@ -149,11 +193,15 @@ def source_of(con: duckdb.DuckDBPyConnection) -> Source:
 
 
 def connect_source(name: str) -> duckdb.DuckDBPyConnection:
-    """内置数据用名字（retail、financials）；CSV 用 csv:路径，或者直接给一个 .csv 文件的路径。"""
+    """内置数据用名字（retail、financials）；CSV 用 csv:路径，或者直接给一个 .csv 文件的路径；
+    Excel 给 .xlsx 文件的路径，要读别的工作表时写成“文件.xlsx#工作表名”（不写读第一个工作表）。"""
     if name.startswith("csv:") or name.lower().endswith(".csv"):
         return csv_source(name.removeprefix("csv:")).connect()
+    excel = split_excel_name(name)
+    if excel:
+        return excel_source(*excel).connect()
     if name not in SOURCES:
-        raise ValueError(f"没有名为 {name} 的数据；可选：{list(SOURCES)}，或者一个 .csv 文件的路径")
+        raise ValueError(f"没有名为 {name} 的数据；可选：{list(SOURCES)}，或者一个 .csv / .xlsx 文件的路径")
     return SOURCES[name].connect()
 
 
