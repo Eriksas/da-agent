@@ -10,6 +10,7 @@
 """
 
 import json
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -115,6 +116,8 @@ class QueryService:
     db: QueryDB
     max_tool_calls: int = MAX_TOOL_CALLS
     records: list[dict[str, Any]] = field(default_factory=list)
+    # 查询 Agent 用哪种循环实现；不填就是 agent.run_agent。LangGraph 对照版（examples/langgraph_version.py）换成它自己的
+    agent: Callable[..., Any] | None = None
 
 
 UNVERIFIED_NOTE = "查询 Agent 自己写的说明，程序没有核对：其中的数字不能当作出处，原因推测不能当作事实"
@@ -126,7 +129,7 @@ def query_data(service: QueryService, args: QueryDataArgs) -> dict[str, Any]:
     交回去的内容分两部分：rows、columns、sql 是程序执行出来的，可以直接引用；
     查询 Agent 写的口径说明和注意事项放在 unverified_notes 里，数字核查不把它们当出处（checks.UNVERIFIED_KEYS）。
     """
-    out = run_query(args.request, llm=service.llm, db=service.db, max_tool_calls=service.max_tool_calls)
+    out = run_query(args.request, llm=service.llm, db=service.db, max_tool_calls=service.max_tool_calls, agent=service.agent)
     service.records.append(out["run"])
     result = out["result"]
     base = {"tool": "query_data", "request": args.request, "status": result["status"], "query_run": len(service.records)}
@@ -139,17 +142,18 @@ def query_data(service: QueryService, args: QueryDataArgs) -> dict[str, Any]:
     raise ValueError(f"取数没有完成：{result['message'][:200]}。可以换一种更明确的写法再试一次，或者在回答中说明")
 
 
-def run_query(request: str, *, llm: LLMClient, db: QueryDB, max_tool_calls: int = MAX_TOOL_CALLS) -> dict[str, Any]:
+def run_query(request: str, *, llm: LLMClient, db: QueryDB, max_tool_calls: int = MAX_TOOL_CALLS,
+              agent: Callable[..., Any] | None = None) -> dict[str, Any]:
     """让查询 Agent 回答一个分析请求。返回 {"result": 结果, "run": 查询 Agent 自己的完整运行记录}。
 
     result.status：answered（交出了通过检查的结果表）、declined（没有提交，用文字说明了为什么答不了）、
-    failed（模型报错、次数用完等，没有结果）。
+    failed（模型报错、次数用完等，没有结果）。agent：循环的实现，不填就是 agent.run_agent。
     """
     from .agent import run_agent
 
     con = db.connect()
     try:
-        record = asdict(run_agent(request, llm=llm, con=QueryContext(con, db.catalog), max_tool_calls=max_tool_calls,
+        record = asdict((agent or run_agent)(request, llm=llm, con=QueryContext(con, db.catalog), max_tool_calls=max_tool_calls,
                                   system_prompt=build_prompt(db.catalog, max_tool_calls), repair=False, domain="analyst"))
     finally:
         con.close()

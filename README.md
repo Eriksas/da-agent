@@ -48,7 +48,7 @@ flowchart LR
 | 多 Agent：把取数交给查询 Agent，原来答不了的问题能答了吗？（10 道新题 + 原来 15 道题） | 新题 4/20 → 15/20，原来的题 28/30 → 29/30，达到运行前定的标准，问答默认开启取数；代价是原来那类问题的成本约 2.7 倍 | [接入后的评测](eval/results/query-tool.md) |
 | 让模型写 SQL 靠谱吗？（36 道留出题，每道一条人写的参考 SQL） | 电商 48/48 算对，没有口径配置的 CSV 23/24；达到运行前定的标准。题目偏容易，口径配置没有测出差别 | [查询 Agent 评测](eval/results/query-agent.md) |
 | 不用模型，用规则查“数字有没有安对对象” | 两轮、244 份答案：标出的 12 条没有一条成立，植入的错误指到约六成；没有达到运行前定的标准，没有接入报告 | [数字归属核对评测](eval/results/attribution.md) |
-| 测试 | 524 个，行覆盖率约 90%；每次 push 由 CI 运行 lint 和测试，覆盖率低于 80% 不通过 | [ci.yml](.github/workflows/ci.yml) |
+| 测试 | 533 个，行覆盖率约 90%；每次 push 由 CI 运行 lint 和测试，覆盖率低于 80% 不通过 | [ci.yml](.github/workflows/ci.yml) |
 
 提升主要来自“核查后退回修正”，它和评分用的是同一个核查器，所以“数字有出处”这一项的提升有一部分是构造出来的；局限和解读见 [M7b 对比](eval/results/m7b-comparison.md)。复核由 Claude 代项目作者完成（作者授权，本人未逐条核对）。
 
@@ -79,6 +79,7 @@ flowchart LR
 | M19 | 查询 Agent：把分析请求写成只读 SQL，程序执行后交出结果表；口径写在配置里；留出题评测达到自定标准 | ✅ |
 | M19b | 多 Agent：查询 Agent 作为 query_data 工具接进原来的 Agent；端到端评测达到自定标准，问答默认开启取数；默认模型换成 MiniMax-M3.1-Flash | ✅ |
 | M20 | 看板直接读 Excel：找表头、剔除合计 / 小计行、文本数字和年月转换，处理过程交给模型 | ✅ |
+| M21 | LangGraph 多 Agent 版本：查询 Agent 作为子图，同一轮的多个取数用 Send 并行；17 个剧本下和手写版逐步一致 | ✅ |
 
 ## 本地运行
 
@@ -238,39 +239,68 @@ M6 中 Agent 没通过的运行，大多是因为数字找不到出处（模型�
 - **代价**：每次运行的 token 约为原来的 1.9 倍（原题：16,165 → 30,286、20,884 → 38,729）。
 - **剩下的问题**：W49 仍有 1 次用不完整周的总量下结论；留出题“带流程”组的 2 次失败，是模型把工具调用写成了一段文字、程序把它当成了答案。评测后已加防护，但没有重跑。
 
-## LangGraph 对照（M3b 产出）
+## LangGraph 对照（M3b、M21 产出）
 
-主流程的 Agent 循环是手写的（[agent.py](src/da_agent/agent.py)），没有用框架。为了回答“为什么不用 LangGraph”，用 LangGraph 把同一个循环重写了一遍（[langgraph_version.py](examples/langgraph_version.py)）：工具、数字核查、模型客户端都直接复用，换掉的只有控制流程——`while` 循环变成一张有 4 个节点的图。
+主流程的 Agent 循环是手写的（[agent.py](src/da_agent/agent.py)），没有用框架。为了回答“为什么不用 LangGraph”，用 LangGraph 把同一个循环重写了一遍（[langgraph_version.py](examples/langgraph_version.py)）：工具、数字核查、模型客户端都直接复用，换掉的只有控制流程——`while` 循环变成一张图。
 
-**怎么证明两个版本一样**（[对照测试](tests/test_langgraph_version.py)）：12 个假模型剧本，覆盖正常回答、工具次数用完、核查后退回修正（成功、失败、修正时的工具次数）、格式错误的工具调用（重发一次、连续两次）、轮数上限、未知工具、模型报错、空回答和财报领域。每个剧本下，两个版本每一轮发给模型的内容、工具调用、完整对话、最终答案和状态都完全一致。另外故意把 LangGraph 版改坏 5 处，每一处都有对应的剧本报警。
+**多 Agent（M21）**：主 Agent 和查询 Agent 是同一张图，换了工具和提示词。主 Agent 请求取数时，`query_agent` 节点在里面再跑一张查询 Agent 的图（子图）。模型一轮里发出几个取数请求时，`plan` 节点用 `Send` 把每个请求扇出成一个并行任务；固定工具放在一个任务里按顺序执行（同一个 DuckDB 连接不能多线程同时用）；`collect` 节点按调用顺序汇合，所以对话、取数编号、嵌套记录和按顺序执行时完全一样，只有耗时不同。
+
+```bash
+uv sync --group langgraph
+uv run --group langgraph python examples/langgraph_version.py "2011 年 10 月和 11 月相比：一周里哪天卖得最好有没有变化？"   # 真实模型
+```
+
+**怎么证明两个版本一样**（[对照测试](tests/test_langgraph_version.py)）：
+
+- 单 Agent 13 个假模型剧本：正常回答、工具次数用完、核查后退回修正（成功、失败、修正时的工具次数）、格式错误的工具调用、轮数上限、未知工具（含“未知工具也占次数”）、模型报错、空回答和财报领域。
+- 多 Agent 4 个剧本：一次取数；同一轮两个取数加一个固定工具（并行）；参数不合法、查询 Agent 失败、正常、次数用完混在同一轮；跨两轮取数。查询 Agent 用按请求分发的假模型，并行时互不干扰。
+- 每个剧本下，主 Agent 和每个查询 Agent 每一轮收到的内容、工具调用、完整对话、嵌套记录、最终答案和状态都和手写版完全一致；并行和按顺序执行的结果也一致，并行确实更快（有计时测试）。
+- 故意把多 Agent 部分改坏 10 处（汇合不按顺序、取数编号不重排、未知工具不占次数等），补了一个剧本后 10 处都有测试报警。
+- 对照测试顺带发现：并列值的 `ORDER BY` 顺序不确定，同一条 SQL 两次结果的行序可能不同。
 
 **对比**（由 [compare_langgraph.py](examples/compare_langgraph.py) 现算，耗时和机器有关）：
 
 | 对比项 | 手写循环 | LangGraph 版 |
 |---|---:|---:|
-| 控制流程的代码行数（不含空行、注释、文档字符串） | 67 | 113 |
+| 控制流程的代码行数（不含空行、注释、文档字符串） | 77 | 173 |
 | 额外依赖的包（按 uv.lock 计） | 0 | 25 |
-| 额外导入时间（新进程导入 langgraph.graph，中位数） | — | 1.75 秒 |
-| 跑一次演示剧本（假模型，中位数） | 87.9 毫秒 | 97.8 毫秒 |
+| 额外导入时间（新进程导入 langgraph.graph，中位数） | — | 1.85 秒 |
+| 跑一次演示剧本（假模型，中位数） | 58.0 毫秒 | 64.5 毫秒 |
+
+LangGraph 版的代码多，一部分是因为它多做了一件事：并行取数。手写版是按顺序取数的。
+
+**并行能省多少时间**：用 M19b 评测里已经保存的 42 次用到取数的运行估算（不调模型）：76 个取数的轮次里只有 21 个一轮里有多个取数，**并行最多能省总用时的 8.9%**；每次运行省下的中位数是 0 秒，最多一次 55 秒。真实模型跑了一次（[记录](examples/langgraph_runs/20261118T203139-1d7c78/report.md)）：第 1 轮两个取数并行（查询 Agent 分别用了 17.8 秒和 13.1 秒），整次回答 272 秒，大部分时间花在 15 次计算上。
 
 LangGraph 根据代码自动画出的流程图：
 
 ```mermaid
+---
+config:
+  flowchart:
+    curve: linear
+---
 graph TD;
 	__start__([<p>__start__</p>]):::first
 	model(model)
-	tools(tools)
+	plan(plan)
+	fixed_tools(fixed_tools)
+	query_agent(query_agent)
+	collect(collect)
 	review(review)
 	finish(finish)
 	__end__([<p>__end__</p>]):::last
 	__start__ --> model;
+	collect -.-> finish;
+	collect -.-> model;
+	fixed_tools --> collect;
 	model -.-> finish;
+	model -.-> plan;
 	model -.-> review;
-	model -.-> tools;
+	plan -.-> fixed_tools;
+	plan -.-> query_agent;
+	query_agent --> collect;
 	review -.-> finish;
 	review -.-> model;
-	tools -.-> finish;
-	tools -.-> model;
 	finish --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
@@ -278,9 +308,10 @@ graph TD;
 ```
 
 **结论**：
-- 在这个规模下手写更合适：代码更短，不多出 25 个依赖和 1.75 秒的导入时间，出错时调用栈里也只有自己的代码。
-- LangGraph 的好处是把流程画成了图，每个节点只管一件事，状态的合并方式（追加还是覆盖）写在类型里。它还自带这个项目没用到的能力：断点续跑、人工审批时暂停、并行分支、流式输出。
-- 如果以后要加“人工确认后再发布周报”或者多个 Agent 协作，再迁移的成本不高：工具、核查和流程手册都能原样复用，这次的对照已经证明了这一点。
+- 主流程仍然用手写循环：代码更短，不多出 25 个依赖和近 2 秒的导入时间，出错时调用栈里只有自己的代码。多 Agent 在手写版里只多了几十行（把查询 Agent 当成一个工具）。
+- LangGraph 的好处在这次看得更清楚：子图、扇出和汇合是图的一部分，状态怎么合并（追加、覆盖、并行结果先攒着再汇合）写在类型里，流程图自动画出来。并行在手写版里也能用线程池做，但要自己处理顺序和编号，正是对照测试抓出来的那些细节。
+- 并行取数的收益有限（最多 8.9%）。这个项目的用时主要在模型调用次数上，不在取数是否并行；要省时间，先要减少不必要的取数和计算（M19b 记录的成本问题）。
+- LangGraph 还有这次没用到的能力：断点续跑、人工审批时暂停、流式输出。需要“人工确认后再发布周报”时再用。
 
 LangGraph 是可选依赖组（`uv sync --group langgraph`），只有 CI 的对照测试安装它，主流程和每周周报都不依赖它。
 
