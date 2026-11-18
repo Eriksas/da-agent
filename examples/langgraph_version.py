@@ -260,3 +260,48 @@ def run_agent_langgraph(question: str, *, llm: LLMClient, con: Any, max_tool_cal
 def graph_mermaid() -> str:
     """这张图的 Mermaid 写法（README 里的图由它生成），不需要模型和数据。"""
     return build_graph(llm=None, con=None, specs=[], repair_enabled=True).get_graph().draw_mermaid()  # type: ignore[arg-type]
+
+
+def main(argv: list[str] | None = None) -> int:
+    """用真实模型跑一次 LangGraph 版的多 Agent（电商问答，开启取数），记录存到 runs/，和 da-agent ask 一样生成核查和报告。
+
+    uv run --group langgraph python examples/langgraph_version.py "2011 年 10 月和 11 月，各自哪天卖得最好？"
+    """
+    import argparse
+
+    from da_agent.agent import save_run
+    from da_agent.cleaning import connect
+    from da_agent.config import Settings
+    from da_agent.dataset import PARQUET_PATH
+    from da_agent.llm import OpenAICompatibleLLM
+    from da_agent.paths import RUNS_DIR
+    from da_agent.report import write_review
+    from da_agent.semantic import prepare
+
+    parser = argparse.ArgumentParser(description="LangGraph 版多 Agent：真实模型回答一个电商问题")
+    parser.add_argument("question")
+    parser.add_argument("--sequential", action="store_true", help="取数按顺序执行（默认并行），用来对比耗时")
+    args = parser.parse_args(argv)
+    settings = Settings()
+    llm = OpenAICompatibleLLM(settings)
+    service = QueryService(llm=llm, db=prepare("retail"), agent=run_agent_langgraph)
+    with connect(PARQUET_PATH) as con:
+        run = run_agent_langgraph(args.question, llm=llm, con=con, max_tool_calls=settings.llm_max_tool_calls,
+                                  tool_contexts={"query_data": service}, parallel=not args.sequential)
+    run_dir = save_run(run, RUNS_DIR)
+    checks = write_review(run_dir)
+    rounds: dict[int, int] = {}
+    for step in run.steps:
+        if step["tool"] == "query_data":
+            rounds[step["round"]] = rounds.get(step["round"], 0) + 1
+    parallel_rounds = {r: n for r, n in rounds.items() if n > 1}
+    print(run.answer)
+    print(f"\n状态：{run.status}；用时 {run.seconds} 秒；取数 {sum(rounds.values())} 次，其中一轮里同时取数的轮次：{parallel_rounds or '没有'}；"
+          f"查询 Agent 的耗时：{[sub['seconds'] for sub in run.sub_runs]}")
+    print(checks["summary"])
+    print(f"运行记录：{run_dir}")
+    return 0 if run.status == "completed" else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

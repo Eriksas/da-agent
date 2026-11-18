@@ -83,7 +83,7 @@ def run_ms(runner, repeats: int = 30) -> float:
 
 def main() -> None:
     hand_lines = code_lines(ROOT / "src" / "da_agent" / "agent.py", {"run_agent"})
-    graph_lines = code_lines(ROOT / "examples" / "langgraph_version.py", {"State", "build_graph", "run_agent_langgraph"})
+    graph_lines = code_lines(ROOT / "examples" / "langgraph_version.py", {"_pending", "State", "build_graph", "run_agent_langgraph"})
     extra = extra_packages()
     lg_import = import_seconds("langgraph.graph")
     hand_ms, graph_ms = run_ms(run_agent), run_ms(langgraph_version.run_agent_langgraph)
