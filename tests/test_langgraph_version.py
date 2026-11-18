@@ -59,6 +59,9 @@ SCENARIOS: dict[str, tuple[Callable[[], list[LLMReply]], int]] = {
     "malformed-twice": (lambda: [answer(GARBLED), answer(GARBLED)], 5),
     "never-stops": (lambda: [tools(call(n, "metric_summary", week="2011-W02")) for n in range(1, 10)], 1),
     "unknown-tool": (lambda: [tools(call(1, "delete_everything")), answer("没有这个工具。")], 5),
+    # 不存在的工具也占一次次数：只有 1 次时，同一轮后面的正常工具收到“次数已用完”（M21 变异测试补的）
+    "unknown-tool-uses-budget": (lambda: [tools(call(1, "delete_everything"), call(2, "metric_summary", week="2011-W02")),
+                                          answer("根据已有结果作答。")], 1),
     "llm-error": (lambda: [], 5),
     "empty-answer": (lambda: [answer("")], 5),
 }
