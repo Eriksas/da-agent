@@ -76,8 +76,8 @@ def test_prompt_sections_follow_the_enabled_tools(con: duckdb.DuckDBPyConnection
 def test_cli_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict] = []
     monkeypatch.setattr(cli, "ask", lambda *args, **kwargs: calls.append(kwargs) or 0)
-    assert cli.main(["ask", "搭个看板", "--with-dashboard"]) == 0 and cli.main(["ask", "上周 GMV 为什么变化？"]) == 0
-    assert [c["with_dashboard"] for c in calls] == [True, False]
+    assert cli.main(["ask", "搭个看板"]) == 0 and cli.main(["ask", "上周 GMV 为什么变化？", "--no-dashboard"]) == 0
+    assert [c["with_dashboard"] for c in calls] == [True, False]  # 默认开启（M22 留出评测达标后）
 
 
 def test_the_record_is_serialisable(con: duckdb.DuckDBPyConnection, tmp_path: Path) -> None:

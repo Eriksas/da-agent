@@ -163,7 +163,7 @@ def live_page() -> None:
     with_query = st.toggle("允许取数：固定工具答不了时，交给查询 Agent 写只读 SQL", key="with_query", value=True,
                            disabled=running or domain != "ecommerce",
                            help="多 Agent（M19b）：主 Agent 写取数请求，查询 Agent 写 SQL，程序在只读数据库上执行。更慢、更费 token")
-    with_dashboard = st.toggle("允许搭看板：要看板时，交给看板 Agent 搭", key="with_dashboard", value=False,
+    with_dashboard = st.toggle("允许搭看板：要看板时，交给看板 Agent 搭", key="with_dashboard", value=True,
                                disabled=running or domain != "ecommerce",
                                help="多 Agent（M22）：主 Agent 写出给谁看、判断什么，看板 Agent 设计看板，程序校验、算数、画图。一次要几分钟")
     problem = ui.live_problem(domain, settings)
