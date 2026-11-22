@@ -137,3 +137,17 @@ def test_at_most_two_builds_per_answer(con: duckdb.DuckDBPyConnection, tmp_path:
     errors = [step["error"] for step in run.steps]
     assert errors[0].startswith("看板 Agent 没有交出") and errors[1].startswith("看板 Agent 没有交出")
     assert errors[2].startswith("这次回答已经试过 2 次搭看板") and len(run.sub_runs) == 2
+
+
+def test_data_problems_come_from_the_accepted_submission() -> None:
+    from da_agent.dashboard_tool import data_problems
+
+    def tool(content: dict) -> dict:
+        return {"role": "tool", "content": json.dumps(content, ensure_ascii=False)}
+
+    record = {"steps": [{"tool": "submit_dashboard", "ok": False}, {"tool": "submit_dashboard", "ok": True}],
+              "messages": [tool({"error": "退回"}),
+                           tool({"charts": [{"id": "a", "notes": ["2011-12 只覆盖了部分时间", "英国占 85.5%"]},
+                                            {"id": "b", "notes": ["英国占 85.5%"]}, {"id": "c", "notes": []}]})]}
+    assert data_problems(record) == ["2011-12 只覆盖了部分时间", "英国占 85.5%"]  # 去重，按出现顺序
+    assert data_problems({"steps": [{"tool": "submit_dashboard", "ok": False}], "messages": [tool({"error": "退回"})]}) == []

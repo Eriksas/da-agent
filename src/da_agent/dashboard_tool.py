@@ -50,6 +50,11 @@ def _accepted_charts(record: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
+def data_problems(record: dict[str, Any]) -> list[str]:
+    """程序对看板每张图自动发现的数据问题（不完整的周期、一家独大、截掉的分组……），去重，按出现顺序。"""
+    return list(dict.fromkeys(note for chart in _accepted_charts(record) for note in chart["notes"]))
+
+
 def build_dashboard_tool(service: DashboardService, args: BuildDashboardArgs) -> dict[str, Any]:
     from .autodash.build import MAX_TOOL_CALLS, build_dashboard, final_spec
 
@@ -60,11 +65,10 @@ def build_dashboard_tool(service: DashboardService, args: BuildDashboardArgs) ->
     record = asdict(run)
     service.records.append(record)
     spec = final_spec(record)
-    if page is None or spec is None:
+    if page is None or spec is None:  # 页面只在方案通过时生成：两者同时有或同时没有
         reason = run.error or ("工具次数用完" if run.budget_exhausted else f"状态 {run.status}")
         raise ValueError(f"看板 Agent 没有交出通过检查的方案（{reason}）。可以把读者和要判断的事写得更具体再试一次，或者在回答中说明")
-    notes = {c["id"]: c["notes"] for c in _accepted_charts(record)}
-    problems = list(dict.fromkeys(note for chart_notes in notes.values() for note in chart_notes))
+    problems = data_problems(record)
     return {"tool": "build_dashboard", "status": "built", "goal": args.goal, "page": str(page), "run_id": run.run_id,
             "dashboard_run": len(service.records), "title": spec.title,
             "charts": [{"title": c.title, "type": c.type, **({"insight": c.insight} if c.insight else {})} for c in spec.charts],

@@ -231,3 +231,5 @@ def test_dashboard_steps_show_the_charts_and_the_page(monkeypatch: pytest.Monkey
     text = ui.dashboard_preview(result)
     assert "看板 Agent 搭好了「电商平台盈利能力看板」，3 张图" in text and "（kpi）" in text
     assert ui.tool_label("build_dashboard") == "搭看板（看板 Agent）（build_dashboard）"
+    pages[0].unlink()  # 看板页面被删掉之后（例如清理了 runs/），回放时不再列出
+    assert ui.dashboard_pages(saved) == []
