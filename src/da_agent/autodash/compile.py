@@ -31,6 +31,7 @@ from .spec import (
     base_metrics,
     chart_problems,
     check_spec,
+    definition_problems,
     is_additive,
     metric_problems,
     period_problems,
@@ -468,12 +469,20 @@ class Compiler:
         商品 Top 10 的第 3 名全部被取消、第 8 名 94.8% 被取消）。在这些分组的行上记下被抵消的金额和占比。"""
         m = metrics[c.metrics[0]]
         offset = self.source.offsets.get(m.column or "")
-        if c.type not in ("bar", "column", "table") or c.x is None or c.x.grain is not None or offset is None:
+        elsewhere = self.source.offset_columns.get(m.column or "")  # M23：抵消的金额在另一列（gmv_amount → cancelled_amount）
+        if (c.type not in ("bar", "column", "table") or c.x is None or c.x.grain is not None
+                or (offset is None and elsewhere is None) or m.agg != "sum"):
             return []
-        by, orig, against = offset
-        if m.agg != "sum" or m.where.get(by) != [orig]:
-            return []
-        probe = Metric(id="zz_offset", label="抵消", agg="sum", column=m.column, where={**m.where, by: [against]})
+        if offset is not None:
+            by, orig, against = offset
+            if m.where.get(by) != [orig]:
+                return []
+            probe = Metric(id="zz_offset", label="抵消", agg="sum", column=m.column, where={**m.where, by: [against]})
+            advice = f"difference（{orig} − {against}）"
+        else:
+            column, against = elsewhere
+            probe = Metric(id="zz_offset", label="抵消", agg="sum", column=column, where=m.where)
+            advice = f"difference（{m.column} 的合计 − {column} 的合计）"
         offsets = {self.label(c.x, r["x"]): r["m0"] or 0 for r in self.query(
             c.model_copy(update={"metrics": ["zz_offset"], "series": None}), {"zz_offset": probe}, slice_filters)}
         notes = []
@@ -485,7 +494,7 @@ class Compiler:
             if r["offset_share"] >= OFFSET_ALERT:
                 unit = self.source.units.get(m.column or "", "")
                 notes.append(f"{r['x']} 的{m.label}有 {r['offset_share']:.1%} 后来被{against}（{unit}{off:,.2f}），"
-                             f"按下单口径排名会高估它；看真实成交改用 difference（{orig} − {against}）")
+                             f"按下单口径排名会高估它；看真实成交改用 {advice}")
         return notes[:3]
 
     @staticmethod
@@ -760,8 +769,8 @@ def preview_chart(con: duckdb.DuckDBPyConnection, metrics: list[Metric], chart: 
     """先看一张图的数据长什么样（不加筛选；给了 period 就只看那段时间）。返回的数字可以写进 insight。"""
     compiler = Compiler(con, period)
     by_id = {m.id: m for m in metrics}
-    problems = metric_problems(metrics, compiler.types) + chart_problems(chart, by_id, compiler.types,
-                                                                          compiler.source)
+    problems = (metric_problems(metrics, compiler.types) + definition_problems(metrics, compiler.source)
+                + chart_problems(chart, by_id, compiler.types, compiler.source))
     if problems:
         raise DashboardProblems(problems)
     problems = compiler.data_problems(metrics, [chart])

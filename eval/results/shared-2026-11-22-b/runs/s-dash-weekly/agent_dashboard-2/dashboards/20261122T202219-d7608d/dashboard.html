@@ -1,0 +1,863 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>运营周会看板：每周 GMV 与异常周 · Agent 生成的看板</title>
+<style>
+:root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--text:#0b0b0b;--text-2:#52514e;--muted:#898781;
+--grid:#e1e0d9;--axis:#c3c2b7;--border:rgba(11,11,11,.10);--series-1:#2a78d6;--series-2:#eb6834;
+--up:#2a78d6;--down:#e34948;--link:#256abf;--code:#f0efec}
+@media (prefers-color-scheme:dark){:root:where(:not([data-theme="light"])){color-scheme:dark;--page:#0d0d0d;
+--surface:#1a1a19;--text:#fff;--text-2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--axis:#383835;
+--border:rgba(255,255,255,.10);--series-1:#3987e5;--series-2:#d95926;--up:#3987e5;--down:#e66767;
+--link:#86b6ef;--code:#262624}}
+:root[data-theme="dark"]{color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--text:#fff;--text-2:#c3c2b7;
+--muted:#898781;--grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,.10);--series-1:#3987e5;
+--series-2:#d95926;--up:#3987e5;--down:#e66767;--link:#86b6ef;--code:#262624}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--text);
+font:16px/1.65 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif}
+a{color:var(--link)}
+header{border-bottom:1px solid var(--border);background:var(--surface)}
+.bar{max-width:1000px;margin:0 auto;padding:12px 16px;display:flex;flex-wrap:wrap;gap:6px 20px;align-items:baseline}
+.brand{font-weight:600;color:var(--text);text-decoration:none;margin-right:8px}
+nav{display:flex;flex-wrap:wrap;gap:4px 18px}
+nav a{color:var(--text-2);text-decoration:none;white-space:nowrap}
+nav a[aria-current=page]{color:var(--text);font-weight:600}
+main{max-width:1000px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:28px;line-height:1.3;margin:0 0 8px}
+h2{font-size:20px;margin:36px 0 12px}
+h3{font-size:17px;margin:24px 0 8px}
+.lead{color:var(--text-2);margin:0 0 20px;max-width:720px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin:16px 0}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:20px 0}
+.tile{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px}
+.tile .label{color:var(--text-2);font-size:14px}
+.tile .value{font-size:28px;font-weight:600;line-height:1.3;margin-top:2px}
+.tile .note{color:var(--muted);font-size:13px}
+.table-wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:14px;margin:8px 0}
+th,td{border-bottom:1px solid var(--grid);padding:6px 10px;text-align:left;vertical-align:top}
+th{color:var(--text-2);font-weight:600}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;color:var(--text-2);font-size:13px;margin:4px 0 0}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+svg.chart{width:100%;height:auto;display:block;overflow:visible}
+svg.chart.wide{max-width:520px}
+.chart.wide .tick,.chart.wide .val{font-size:14px}
+.chart.wide .cat{font-size:15px}
+svg.chart text{font-family:inherit}
+.chart .tick{fill:var(--muted);font-size:12px}
+.chart .cat{fill:var(--text-2);font-size:13px}
+.chart .val{fill:var(--text-2);font-size:12px}
+.chart .grid{stroke:var(--grid);stroke-width:1}
+.chart .base{stroke:var(--axis);stroke-width:1}
+.chart .hit{fill:transparent}
+.chart g.mark:hover path,.chart g.mark:focus path,.chart g.mark:hover circle,.chart g.mark:focus circle{opacity:.8}
+.chart g.mark:focus{outline:none}
+.multiples{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.tip{position:fixed;z-index:10;pointer-events:none;background:var(--surface);color:var(--text);
+border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:13px;white-space:pre-line;
+box-shadow:0 2px 8px rgba(0,0,0,.12)}
+.prose{max-width:820px}
+.prose table{display:block;overflow-x:auto}
+.prose blockquote{margin:12px 0;padding:4px 14px;border-left:3px solid var(--axis);color:var(--text-2)}
+.prose code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:.92em}
+.prose pre{background:var(--code);padding:12px;border-radius:6px;overflow-x:auto}
+.prose pre code{padding:0;background:none}
+.steps td:nth-child(3){font-family:ui-monospace,Consolas,monospace;font-size:12px;word-break:break-all}
+.steps td:nth-child(4),.steps th:nth-child(4){min-width:5em}
+.badge{display:inline-block;font-size:12px;padding:1px 8px;border-radius:10px;border:1px solid var(--border);
+color:var(--text-2);margin-right:6px}
+footer{border-top:1px solid var(--border);color:var(--muted);font-size:13px}
+footer .bar{display:block}
+/* 数据看板（M12）的样式。颜色只用角色变量：分类色前 3 个（经 dataviz 校验器检查，深浅两种模式都通过）、
+   蓝色顺序色阶（浅色模式由浅到深；深色模式反过来，数值小的接近背景）、涨跌文字色。 */
+:root{--series-3:#1baf7a;--good:#006300;--bad:#d03b3b;--hover:rgba(11,11,11,.04);
+--seq-0:#cde2fb;--seq-1:#9ec5f4;--seq-2:#6da7ec;--seq-3:#3987e5;--seq-4:#256abf;--seq-5:#184f95;--seq-6:#0d366b}
+@media (prefers-color-scheme:dark){:root:where(:not([data-theme="light"])){--series-3:#199e70;--good:#0ca30c;
+--bad:#e66767;--hover:rgba(255,255,255,.06);--seq-0:#0d366b;--seq-1:#184f95;--seq-2:#256abf;--seq-3:#3987e5;
+--seq-4:#6da7ec;--seq-5:#9ec5f4;--seq-6:#cde2fb}}
+:root[data-theme="dark"]{--series-3:#199e70;--good:#0ca30c;--bad:#e66767;--hover:rgba(255,255,255,.06);
+--seq-0:#0d366b;--seq-1:#184f95;--seq-2:#256abf;--seq-3:#3987e5;--seq-4:#6da7ec;--seq-5:#9ec5f4;--seq-6:#cde2fb}
+
+main.wide,.bar.wide{max-width:1200px}
+.filters{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:10px 20px;
+margin:16px -16px 8px;padding:10px 16px;background:var(--page);border-bottom:1px solid var(--border)}
+.filters fieldset{border:0;margin:0;padding:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.filters legend{float:left;color:var(--text-2);font-size:14px;margin-right:4px;padding:0}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface)}
+.seg label{position:relative;cursor:pointer}
+.seg input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
+.seg span{display:block;padding:4px 12px;font-size:14px;color:var(--text-2);white-space:nowrap}
+.seg label+label span{border-left:1px solid var(--border)}
+.seg label:hover span{background:var(--hover)}
+.seg input:checked+span{color:var(--text);font-weight:600;background:var(--hover);box-shadow:inset 0 -2px 0 var(--series-1)}
+.seg input:focus-visible+span{outline:2px solid var(--series-1);outline-offset:-2px}
+.filter-note{color:var(--muted);font-size:13px}
+
+/* 指标卡：左边一张大的 GMV（占两行），右边 3 × 2 张小卡；窄屏时 GMV 占满一行 */
+.kpis{display:grid;grid-template-columns:minmax(0,1.5fr) repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;min-width:0}
+.kpi.hero{grid-row:span 2;display:flex;flex-direction:column}
+.kpi.hero .spark-host{margin-top:auto;padding-top:10px}
+@media (max-width:900px){.kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.kpi.hero{grid-column:1/-1;grid-row:auto}}
+@media (max-width:560px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.kpi .label{color:var(--text-2);font-size:14px}
+.kpi .value{font-size:28px;font-weight:600;line-height:1.25;margin-top:4px}
+.kpi.hero .value{font-size:52px;line-height:1.1}
+.kpi .delta{font-size:13px;margin-top:4px;color:var(--text-2)}
+.kpi .delta b{font-weight:600}
+.kpi .delta .up-good,.kpi .delta .down-good{color:var(--good)}
+.kpi .delta .up-bad,.kpi .delta .down-bad{color:var(--bad)}
+.kpi .note{color:var(--muted);font-size:13px;margin-top:2px}
+.spark{display:block}
+@media (max-width:520px){.kpi.hero .value{font-size:40px}}
+
+.dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}
+.dash-grid>.card{margin:16px 0 0}
+@media (max-width:820px){.dash-grid{grid-template-columns:1fr}}
+.dash-card{padding:16px 20px 14px;min-width:0}
+.card-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.card-head h2{font-size:17px;margin:0}
+.view-toggle{font:inherit;font-size:13px;color:var(--text-2);background:none;border:1px solid var(--border);
+border-radius:6px;padding:2px 10px;cursor:pointer;white-space:nowrap}
+.view-toggle:hover{background:var(--hover)}
+.view-toggle[aria-pressed="true"]{color:var(--text);font-weight:600}
+.insight{margin:4px 0 10px;color:var(--text-2);font-size:14px}
+.dash-card .note{color:var(--muted);font-size:13px;margin:8px 0 0}
+.chart-host{min-height:40px}
+.scroll-x{overflow-x:auto}
+.table-host{max-height:420px;overflow:auto}
+.table-host table{margin:0}
+.table-host th{position:sticky;top:0;background:var(--surface)}
+.empty{color:var(--muted);font-size:14px;padding:24px 0;text-align:center}
+
+.chart .cell:hover,.chart .cell:focus{stroke:var(--text);stroke-width:1.5;outline:none}
+.chart g.mark.partial path{opacity:.45}
+.chart g.mark:hover path{filter:brightness(1.08)}
+.chart .hit:focus{outline:none}
+.chart g.mark:has(.hit:focus) path{filter:brightness(1.08)}
+.chart .cross{stroke:var(--axis);stroke-width:1}
+.chart .ref{stroke:var(--axis);stroke-width:1}
+.chart .ann{fill:var(--text);font-size:12px;font-weight:600}
+/* 参考线（整体值）、散点图的名字和轴标题：文字描一圈背景色，压在图形上也看得清 */
+.chart .refline{stroke:var(--text-2);stroke-width:1;stroke-dasharray:4 3}
+.chart .reflabel,.chart .dot-label{fill:var(--text-2);font-size:12px;paint-order:stroke;stroke:var(--surface);
+stroke-width:3px;stroke-linejoin:round}
+.chart .dot-label.accent{fill:var(--text);font-weight:600}
+.chart .axis-title{fill:var(--muted);font-size:12px}
+.chart .dot-hit{fill:transparent}
+.chart .dot-hit:focus{outline:none;stroke:var(--text);stroke-width:1.5}
+.legend .ref-key{display:inline-block;width:16px;height:0;border-top:1px dashed var(--text-2);margin-right:6px;vertical-align:4px}
+
+.legend .line-key{display:inline-block;width:14px;height:2px;margin-right:6px;vertical-align:4px;border-radius:1px}
+.scale{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;margin-top:6px}
+.scale .ramp{width:140px;height:8px;border-radius:2px}
+
+.hbars{display:grid;gap:2px}
+.hbar{display:grid;grid-template-columns:minmax(0,16em) 1fr auto;align-items:center;gap:10px;padding:3px 4px;
+border-radius:4px;cursor:default}
+.hbar:hover,.hbar:focus{background:var(--hover);outline:none}
+.hbar-label{font-size:13px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hbar-track{height:14px;position:relative}
+.hbar-fill{display:block;height:100%;border-radius:0 4px 4px 0;background:var(--series-1);min-width:2px}
+.hbar.muted .hbar-fill{background:var(--muted)}
+.hbar.dim .hbar-fill{background:var(--muted)}
+.hbar.accent .hbar-label,.hbar.accent .hbar-value{color:var(--text);font-weight:600}
+.hbar-ref{position:absolute;top:-3px;bottom:-3px;width:0;border-left:1px dashed var(--text-2);pointer-events:none}
+.hbar-value{font-size:13px;color:var(--text-2);font-variant-numeric:tabular-nums;text-align:right;min-width:5.5em}
+@media (max-width:520px){.hbar{grid-template-columns:minmax(0,7.5em) 1fr auto}}
+
+.dash-tip{white-space:normal;max-width:320px;line-height:1.45}
+.dash-tip .tip-title{color:var(--text-2);font-size:12px;margin-bottom:2px}
+.dash-tip .tip-row{display:flex;align-items:baseline;gap:6px}
+.dash-tip .tip-row strong{font-weight:600;color:var(--text)}
+.dash-tip .tip-row span{color:var(--text-2)}
+.dash-tip .key{display:inline-block;width:12px;height:3px;border-radius:2px;flex:none;align-self:center}
+
+/* 分类色第 4、5 个（折线最多 5 条、堆叠最多 4 段时用到），取自同一套经过校验的配色 */
+:root{--series-4:#eda100;--series-5:#e87ba4}
+@media (prefers-color-scheme:dark){:root:where(:not([data-theme="light"])){--series-4:#c98500;--series-5:#d55181}}
+:root[data-theme="dark"]{--series-4:#c98500;--series-5:#d55181}
+.draft{border-left:3px solid var(--series-2);background:var(--surface);padding:10px 14px;border-radius:6px;
+font-size:14px;color:var(--text-2);margin:12px 0}
+.auto-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}
+.auto-grid>.card{margin:16px 0 0}
+.auto-grid>.span-2{grid-column:1/-1}
+@media (max-width:820px){.auto-grid{grid-template-columns:1fr}}
+.dash-card .why{color:var(--muted);font-size:13px;margin:8px 0 0}
+.dash-card .note div{color:var(--text-2);font-size:13px;margin-top:4px}
+.kpis.auto{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+.kpi .sub{color:var(--text-2);font-size:13px;margin-top:4px;font-variant-numeric:tabular-nums}
+.section-title{font-size:18px;margin:32px 0 0;padding-top:14px;border-top:1px solid var(--border)}
+</style>
+</head>
+<body>
+<header><div class="bar wide"><span class="brand">da-agent</span><span class="muted">Agent 生成的看板</span></div></header>
+<main class="wide">
+<div class="draft"><b>AI 生成的看板草稿，待人工复核。</b>每个数字都由程序从数据算出；放哪些图、结论怎么写是模型提出的。
+每张图下面写了为什么放它，以及程序自动发现的数据问题。</div>
+<h1>运营周会看板：每周 GMV 与异常周</h1>
+<p class="lead">给电商运营周会负责人：以 2009-W49 至 2011-W49 的周度数据判断最近完整周（2011-W48）表现是否异常、指标变化主要来自客流量、客单价还是取消，并圈出需人工复核的异常周。</p>
+<p class="small muted">数据：电商交易（UCI Online Retail II，已清洗）（2009-12-01 至 2011-12-09）。生成于 2026-11-22 20:25
+· 模型 MiniMax-M3.1-Flash · 运行 20261122T202219-d7608d</p>
+<div class="filters" id="filters" role="group" aria-label="筛选（对整页生效）"></div>
+<noscript><p class="card">看板的图表需要 JavaScript。</p></noscript>
+<div class="kpis auto" id="kpis"></div>
+<div id="charts"></div>
+<section class="card"><h2>数据说明</h2><ul><li>口径：GMV 为下单口径（gmv_amount 求和），含之后被取消的订单；净销售额 = GMV − 取消金额；取消单按取消发生的那一周入账，不回溯原订单周。</li><li>2011-W49 只覆盖到 2011-12-09（周五），2009-W49 只覆盖数据起始日 2009-12-01 起的部分日期，这两周不能与完整周直接比较；最近完整周是 2011-W48。</li><li>2010-12-23 至 2011-01-03 停业：2010-W52、2011-W01 只有部分天有数据，周度总量天然偏低，属需人工复核的异常周。</li><li>少数大额订单（数据说明提到发票 541431、581483）下单后很快全额取消，会抬高当周 GMV 与排名，不影响净销售额；看真实成交请以净销售额为准。</li><li>订单数与客单价按销售订单口径统计；约四分之一的行缺客户 ID，按客户口径统计时会漏掉，但这些行的金额仍计入 GMV。</li><li>GMV 排名图只显示前 12 周，其余 92 周合并为“其他”，仅用于定位需要人工复核的峰值周。</li></ul>
+<p class="small muted">一家英国线上礼品批发零售商 2009-12 至 2011-12 的商品交易明细。清洗规则已经应用： 删除了重复、坏账调整、单价为 0 等记录，运费等非商品行不在表里。金额单位是英镑。表 order_lines：每行是订单里的一个商品（销售）或取消单里的一个商品（取消）。金额和数量都是正数，用 line_type 区分。这张表和查询数据的同事用的是同一份口径配置。
+注意：
+- 周是 ISO 周；数据截止到 2011-12-09（周五），所以 2011-W49 不是完整的一周，和完整的周比总量会偏低。
+- 2010-12-23 到 2011-01-03 停业，这期间没有数据。
+- 约四分之一的行缺客户 ID：按客户统计（活跃客户、新老客）时这些行不计入，但它们的金额计入 GMV。
+- 取消单按取消发生的时间入账，不回溯到原订单所在的周。
+- 有少数金额极大、下单后很快又全部取消的订单（例如发票 541431、581483），会抬高当周的 GMV 和商品排名；净销售额不受影响。</p></section>
+<script id="dashboard-data" type="application/json">{"title":"运营周会看板：每周 GMV 与异常周","goal":"给电商运营周会负责人：以 2009-W49 至 2011-W49 的周度数据判断最近完整周（2011-W48）表现是否异常、指标变化主要来自客流量、客单价还是取消，并圈出需人工复核的异常周。","notes":["口径：GMV 为下单口径（gmv_amount 求和），含之后被取消的订单；净销售额 = GMV − 取消金额；取消单按取消发生的那一周入账，不回溯原订单周。","2011-W49 只覆盖到 2011-12-09（周五），2009-W49 只覆盖数据起始日 2009-12-01 起的部分日期，这两周不能与完整周直接比较；最近完整周是 2011-W48。","2010-12-23 至 2011-01-03 停业：2010-W52、2011-W01 只有部分天有数据，周度总量天然偏低，属需人工复核的异常周。","少数大额订单（数据说明提到发票 541431、581483）下单后很快全额取消，会抬高当周 GMV 与排名，不影响净销售额；看真实成交请以净销售额为准。","订单数与客单价按销售订单口径统计；约四分之一的行缺客户 ID，按客户口径统计时会漏掉，但这些行的金额仍计入 GMV。","GMV 排名图只显示前 12 周，其余 92 周合并为“其他”，仅用于定位需要人工复核的峰值周。"],"source":{"name":"semantic:retail","label":"电商交易（UCI Online Retail II，已清洗）","description":"一家英国线上礼品批发零售商 2009-12 至 2011-12 的商品交易明细。清洗规则已经应用： 删除了重复、坏账调整、单价为 0 等记录，运费等非商品行不在表里。金额单位是英镑。表 order_lines：每行是订单里的一个商品（销售）或取消单里的一个商品（取消）。金额和数量都是正数，用 line_type 区分。这张表和查询数据的同事用的是同一份口径配置。\n注意：\n- 周是 ISO 周；数据截止到 2011-12-09（周五），所以 2011-W49 不是完整的一周，和完整的周比总量会偏低。\n- 2010-12-23 到 2011-01-03 停业，这期间没有数据。\n- 约四分之一的行缺客户 ID：按客户统计（活跃客户、新老客）时这些行不计入，但它们的金额计入 GMV。\n- 取消单按取消发生的时间入账，不回溯到原订单所在的周。\n- 有少数金额极大、下单后很快又全部取消的订单（例如发票 541431、581483），会抬高当周的 GMV 和商品排名；净销售额不受影响。","range":"2009-12-01 至 2011-12-09"},"metrics":{"gmv":{"label":"GMV","format":"money"},"net_sales":{"label":"净销售额","format":"money"},"cancelled_amount":{"label":"取消金额","format":"money"},"cancel_rate":{"label":"取消率","format":"percent"},"orders":{"label":"订单数","format":"number"},"aov":{"label":"客单价","format":"money"}},"charts":[{"id":"kpi_gmv","title":"GMV（2009-W49 起累计）","type":"kpi","metrics":["gmv"],"why":"给出全期 GMV 体量，作为周度波动的参照基准","ratio_parts":null,"reference":null,"highlight":[],"width":"auto","section":"","metric_units":{"gmv":"£"},"insight":"2009-W49 至 2011-W49 累计 GMV £19,643,861.64。","unit":"£","x_label":null,"series_label":null},{"id":"kpi_net","title":"净销售额（2009-W49 起累计）","type":"kpi","metrics":["net_sales"],"why":"给出全期真实成交金额，对照 GMV 看取消掉了多少","ratio_parts":null,"reference":null,"highlight":[],"width":"auto","section":"","metric_units":{"net_sales":"£"},"insight":"全期累计净销售额 £18,927,399.07。","unit":"£","x_label":null,"series_label":null},{"id":"kpi_aov","title":"客单价（全期基准）","type":"kpi","metrics":["aov"],"why":"给出全期客单价基准，用于判断每周客单价是否偏离常态","ratio_parts":["gmv","orders"],"reference":null,"highlight":[],"width":"auto","section":"","metric_units":{"aov":"£"},"insight":"全期客单价 £497.11（GMV £19,643,861.64 ÷ 39,516 单）。","unit":"£","x_label":null,"series_label":null},{"id":"gmv_by_week","title":"每周 GMV（ISO 周）","type":"line","metrics":["gmv"],"why":"看每周 GMV 的走势与最近一周环比，判断最近一周是否偏离常态","ratio_parts":null,"reference":null,"highlight":[],"width":"full","section":"每周走势","metric_units":{"gmv":"£"},"insight":"最近完整周 2011-W48 GMV £309,381.73，较 2011-W47 的 £302,392.22 升 2.31%；单周最高是 2011-W49 的 £483,725.13，但该周只到周五，不能与完整周直接比。","unit":"£","x_label":"order_time","series_label":null},{"id":"net_by_week","title":"每周净销售额（ISO 周）","type":"line","metrics":["net_sales"],"why":"看真实成交金额的周度走势，判断 GMV 变化里有多少被取消抵消","ratio_parts":null,"reference":null,"highlight":[],"width":"full","section":"每周走势","metric_units":{"net_sales":"£"},"insight":"最近完整周 2011-W48 净销售额 £306,115.06，较 2011-W47 的 £295,233.31 升 3.69%；净销售额最高的一周是 2011-W46 £369,129.47。","unit":"£","x_label":"order_time","series_label":null},{"id":"orders_by_week","title":"每周订单数（ISO 周）","type":"line","metrics":["orders"],"why":"看客流量（订单数）的周度走势，判断 GMV 变化是否来自单量","ratio_parts":null,"reference":null,"highlight":[],"width":"half","section":"每周走势","metric_units":{"orders":null},"insight":"最近完整周 2011-W48 订单数 663，较 2011-W47 的 616 升 7.63%；最低是 2009-W52 的 107 单。","unit":null,"x_label":"order_time","series_label":null},{"id":"aov_by_week","title":"每周客单价（ISO 周）","type":"line","metrics":["aov"],"why":"看客单价的周度走势，判断 GMV 变化是否来自单笔金额","ratio_parts":["gmv","orders"],"reference":"overall","highlight":[],"width":"half","section":"每周走势","metric_units":{"aov":"£"},"insight":"最近完整周 2011-W48 客单价 £466.64，较 2011-W47 的 £490.90 降 4.94%，低于全期基准 £497.11；最高是 2011-W49 的 £950.34。","unit":"£","x_label":"order_time","series_label":null},{"id":"cancel_rate_by_week","title":"每周取消率","type":"line","metrics":["cancel_rate"],"why":"看取消情况的周度变化，判断 GMV 与净销售额的差额来自哪一周","ratio_parts":["cancelled_amount","gmv"],"reference":"overall","highlight":[],"width":"full","section":"每周走势","metric_units":{"cancel_rate":null},"insight":"最近完整周 2011-W48 取消率 1.06%，较 2011-W47 的 2.37% 下降 55.27%，低于全期 3.65%；最高的一周是 2011-W03 的 37.66%，需人工复核。","unit":null,"x_label":"order_time","series_label":null},{"id":"top_weeks_gmv","title":"GMV 最高的 12 周","type":"bar","metrics":["gmv"],"why":"找出被极端大额订单抬高 GMV 的周，并看清最近完整周在历史高峰中的位置","ratio_parts":null,"reference":null,"highlight":["2011-W49","2011-W48"],"width":"full","section":"异常复核","metric_units":{"gmv":"£"},"insight":"GMV 最高的一周是 2011-W49 £483,725.13，其中 £172,781.77 被取消（占 35.72%），且该周只到周五；最近完整周 2011-W48 £309,381.73 排第 9，其余 92 周合并为“其他”合计 £15,531,000.46（79.06%）。","unit":"£","x_label":"week","series_label":null}],"filters":[{"id":"year","label":"年份","options":[{"id":"all","label":"全部"},{"id":"2009","label":"2009 年"},{"id":"2010","label":"2010 年"},{"id":"2011","label":"2011 年"}]}],"default_slice":"all","slices":{"all":{"kpi_gmv":{"rows":[{"x":null,"s":null,"values":[19643861.637]}],"facts":{"value":19643861.637},"notes":[]},"kpi_net":{"rows":[{"x":null,"s":null,"values":[18927399.067]}],"facts":{"value":18927399.067},"notes":[]},"kpi_aov":{"rows":[{"x":null,"s":null,"values":[497.1116]}],"facts":{"value":497.1116,"numerator":19643861.637,"denominator":39516},"notes":[]},"gmv_by_week":{"rows":[{"x":"2009-W49","s":null,"values":[260808.77],"partial":true},{"x":"2009-W50","s":null,"values":[234033.21]},{"x":"2009-W51","s":null,"values":[251387.16]},{"x":"2009-W52","s":null,"values":[51672.02]},{"x":"2010-W01","s":null,"values":[166010.79]},{"x":"2010-W02","s":null,"values":[155443.79]},{"x":"2010-W03","s":null,"values":[145909.871]},{"x":"2010-W04","s":null,"values":[144932.971]},{"x":"2010-W05","s":null,"values":[120064.772]},{"x":"2010-W06","s":null,"values":[86891.84]},{"x":"2010-W07","s":null,"values":[170595.692]},{"x":"2010-W08","s":null,"values":[160357.372]},{"x":"2010-W09","s":null,"values":[161821.09]},{"x":"2010-W10","s":null,"values":[138143.14]},{"x":"2010-W11","s":null,"values":[164425.121]},{"x":"2010-W12","s":null,"values":[171646.37]},{"x":"2010-W13","s":null,"values":[155754.56]},{"x":"2010-W14","s":null,"values":[137102.96]},{"x":"2010-W15","s":null,"values":[141839.231]},{"x":"2010-W16","s":null,"values":[164763.74]},{"x":"2010-W17","s":null,"values":[184841.871]},{"x":"2010-W18","s":null,"values":[160019.28]},{"x":"2010-W19","s":null,"values":[168283.34]},{"x":"2010-W20","s":null,"values":[148059.4]},{"x":"2010-W21","s":null,"values":[154838.84]},{"x":"2010-W22","s":null,"values":[106601.91]},{"x":"2010-W23","s":null,"values":[210288.29]},{"x":"2010-W24","s":null,"values":[135961.33]},{"x":"2010-W25","s":null,"values":[122297.2]},{"x":"2010-W26","s":null,"values":[178135.07]},{"x":"2010-W27","s":null,"values":[150573.0]},{"x":"2010-W28","s":null,"values":[156577.73]},{"x":"2010-W29","s":null,"values":[144497.91]},{"x":"2010-W30","s":null,"values":[155077.77]},{"x":"2010-W31","s":null,"values":[125594.26]},{"x":"2010-W32","s":null,"values":[173504.11]},{"x":"2010-W33","s":null,"values":[166810.5]},{"x":"2010-W34","s":null,"values":[144390.79]},{"x":"2010-W35","s":null,"values":[139799.88]},{"x":"2010-W36","s":null,"values":[129772.47]},{"x":"2010-W37","s":null,"values":[162675.401]},{"x":"2010-W38","s":null,"values":[239315.26]},{"x":"2010-W39","s":null,"values":[306341.43]},{"x":"2010-W40","s":null,"values":[257586.24]},{"x":"2010-W41","s":null,"values":[308215.36]},{"x":"2010-W42","s":null,"values":[240912.45]},{"x":"2010-W43","s":null,"values":[212365.97]},{"x":"2010-W44","s":null,"values":[282088.03]},{"x":"2010-W45","s":null,"values":[368797.561]},{"x":"2010-W46","s":null,"values":[346265.661]},{"x":"2010-W47","s":null,"values":[296090.42]},{"x":"2010-W48","s":null,"values":[317195.43]},{"x":"2010-W49","s":null,"values":[301082.39]},{"x":"2010-W50","s":null,"values":[208616.61]},{"x":"2010-W51","s":null,"values":[85203.04]},{"x":"2011-W01","s":null,"values":[130274.65]},{"x":"2011-W02","s":null,"values":[187291.3]},{"x":"2011-W03","s":null,"values":[209331.26]},{"x":"2011-W04","s":null,"values":[121001.73]},{"x":"2011-W05","s":null,"values":[121351.11]},{"x":"2011-W06","s":null,"values":[103570.49]},{"x":"2011-W07","s":null,"values":[140305.11]},{"x":"2011-W08","s":null,"values":[145237.07]},{"x":"2011-W09","s":null,"values":[127588.35]},{"x":"2011-W10","s":null,"values":[129034.74]},{"x":"2011-W11","s":null,"values":[153340.36]},{"x":"2011-W12","s":null,"values":[144841.46]},{"x":"2011-W13","s":null,"values":[186550.75]},{"x":"2011-W14","s":null,"values":[122784.05]},{"x":"2011-W15","s":null,"values":[146013.111]},{"x":"2011-W16","s":null,"values":[138298.14]},{"x":"2011-W17","s":null,"values":[83392.04]},{"x":"2011-W18","s":null,"values":[136790.86]},{"x":"2011-W19","s":null,"values":[204717.07]},{"x":"2011-W20","s":null,"values":[210335.39]},{"x":"2011-W21","s":null,"values":[159463.82]},{"x":"2011-W22","s":null,"values":[115065.0]},{"x":"2011-W23","s":null,"values":[214478.31]},{"x":"2011-W24","s":null,"values":[186572.2]},{"x":"2011-W25","s":null,"values":[127368.72]},{"x":"2011-W26","s":null,"values":[134870.16]},{"x":"2011-W27","s":null,"values":[170124.54]},{"x":"2011-W28","s":null,"values":[132628.72]},{"x":"2011-W29","s":null,"values":[187781.16]},{"x":"2011-W30","s":null,"values":[178721.261]},{"x":"2011-W31","s":null,"values":[167894.34]},{"x":"2011-W32","s":null,"values":[169299.45]},{"x":"2011-W33","s":null,"values":[173145.63]},{"x":"2011-W34","s":null,"values":[160921.68]},{"x":"2011-W35","s":null,"values":[146557.05]},{"x":"2011-W36","s":null,"values":[187162.33]},{"x":"2011-W37","s":null,"values":[223863.7]},{"x":"2011-W38","s":null,"values":[328713.431]},{"x":"2011-W39","s":null,"values":[206510.83]},{"x":"2011-W40","s":null,"values":[310948.14]},{"x":"2011-W41","s":null,"values":[221268.1]},{"x":"2011-W42","s":null,"values":[264358.21]},{"x":"2011-W43","s":null,"values":[242683.19]},{"x":"2011-W44","s":null,"values":[292747.79]},{"x":"2011-W45","s":null,"values":[357706.72]},{"x":"2011-W46","s":null,"values":[373178.36]},{"x":"2011-W47","s":null,"values":[302392.22]},{"x":"2011-W48","s":null,"values":[309381.73]},{"x":"2011-W49","s":null,"values":[483725.13],"partial":true}],"facts":{"max":{"x":"2011-W49","s":null,"value":483725.13},"min":{"x":"2009-W52","s":null,"value":51672.02},"last_complete":{"x":"2011-W48","value":309381.73},"previous":{"x":"2011-W47","value":302392.22},"change_pct":0.0231},"notes":["2009-W49、2011-W49 只覆盖了部分时间（数据范围 2009-12-01 至 2011-12-09），不能和完整的周期直接比"]},"net_by_week":{"rows":[{"x":"2009-W49","s":null,"values":[254462.21],"partial":true},{"x":"2009-W50","s":null,"values":[225138.87]},{"x":"2009-W51","s":null,"values":[248916.99]},{"x":"2009-W52","s":null,"values":[49825.01]},{"x":"2010-W01","s":null,"values":[164721.85]},{"x":"2010-W02","s":null,"values":[153852.62]},{"x":"2010-W03","s":null,"values":[143276.551]},{"x":"2010-W04","s":null,"values":[142980.771]},{"x":"2010-W05","s":null,"values":[118850.042]},{"x":"2010-W06","s":null,"values":[85458.28]},{"x":"2010-W07","s":null,"values":[163398.262]},{"x":"2010-W08","s":null,"values":[157627.652]},{"x":"2010-W09","s":null,"values":[159999.51]},{"x":"2010-W10","s":null,"values":[136209.68]},{"x":"2010-W11","s":null,"values":[162274.301]},{"x":"2010-W12","s":null,"values":[169300.15]},{"x":"2010-W13","s":null,"values":[154218.35]},{"x":"2010-W14","s":null,"values":[135963.51]},{"x":"2010-W15","s":null,"values":[137348.301]},{"x":"2010-W16","s":null,"values":[162049.53]},{"x":"2010-W17","s":null,"values":[183291.641]},{"x":"2010-W18","s":null,"values":[156189.49]},{"x":"2010-W19","s":null,"values":[145589.51]},{"x":"2010-W20","s":null,"values":[143445.1]},{"x":"2010-W21","s":null,"values":[148837.87]},{"x":"2010-W22","s":null,"values":[105430.41]},{"x":"2010-W23","s":null,"values":[201656.92]},{"x":"2010-W24","s":null,"values":[134090.93]},{"x":"2010-W25","s":null,"values":[119460.7]},{"x":"2010-W26","s":null,"values":[165803.16]},{"x":"2010-W27","s":null,"values":[145537.76]},{"x":"2010-W28","s":null,"values":[152302.39]},{"x":"2010-W29","s":null,"values":[141807.25]},{"x":"2010-W30","s":null,"values":[150209.71]},{"x":"2010-W31","s":null,"values":[121712.39]},{"x":"2010-W32","s":null,"values":[170163.72]},{"x":"2010-W33","s":null,"values":[165602.06]},{"x":"2010-W34","s":null,"values":[141085.35]},{"x":"2010-W35","s":null,"values":[137490.62]},{"x":"2010-W36","s":null,"values":[127828.04]},{"x":"2010-W37","s":null,"values":[160890.591]},{"x":"2010-W38","s":null,"values":[235861.58]},{"x":"2010-W39","s":null,"values":[287114.44]},{"x":"2010-W40","s":null,"values":[254361.31]},{"x":"2010-W41","s":null,"values":[305222.49]},{"x":"2010-W42","s":null,"values":[232404.11]},{"x":"2010-W43","s":null,"values":[202217.12]},{"x":"2010-W44","s":null,"values":[274381.82]},{"x":"2010-W45","s":null,"values":[359397.511]},{"x":"2010-W46","s":null,"values":[342743.771]},{"x":"2010-W47","s":null,"values":[286262.18]},{"x":"2010-W48","s":null,"values":[309029.05]},{"x":"2010-W49","s":null,"values":[296070.05]},{"x":"2010-W50","s":null,"values":[202183.98]},{"x":"2010-W51","s":null,"values":[82623.94]},{"x":"2011-W01","s":null,"values":[125510.62]},{"x":"2011-W02","s":null,"values":[184947.27]},{"x":"2011-W03","s":null,"values":[130490.66]},{"x":"2011-W04","s":null,"values":[116701.05]},{"x":"2011-W05","s":null,"values":[119042.61]},{"x":"2011-W06","s":null,"values":[100266.79]},{"x":"2011-W07","s":null,"values":[139551.77]},{"x":"2011-W08","s":null,"values":[141993.33]},{"x":"2011-W09","s":null,"values":[126218.29]},{"x":"2011-W10","s":null,"values":[127570.42]},{"x":"2011-W11","s":null,"values":[151299.57]},{"x":"2011-W12","s":null,"values":[143236.19]},{"x":"2011-W13","s":null,"values":[181184.16]},{"x":"2011-W14","s":null,"values":[119040.45]},{"x":"2011-W15","s":null,"values":[144138.001]},{"x":"2011-W16","s":null,"values":[113878.62]},{"x":"2011-W17","s":null,"values":[81447.94]},{"x":"2011-W18","s":null,"values":[135502.05]},{"x":"2011-W19","s":null,"values":[202024.22]},{"x":"2011-W20","s":null,"values":[207926.07]},{"x":"2011-W21","s":null,"values":[157659.72]},{"x":"2011-W22","s":null,"values":[113356.54]},{"x":"2011-W23","s":null,"values":[211930.47]},{"x":"2011-W24","s":null,"values":[182270.95]},{"x":"2011-W25","s":null,"values":[123103.44]},{"x":"2011-W26","s":null,"values":[132677.51]},{"x":"2011-W27","s":null,"values":[167877.09]},{"x":"2011-W28","s":null,"values":[130616.62]},{"x":"2011-W29","s":null,"values":[182809.33]},{"x":"2011-W30","s":null,"values":[177100.921]},{"x":"2011-W31","s":null,"values":[161741.12]},{"x":"2011-W32","s":null,"values":[167782.54]},{"x":"2011-W33","s":null,"values":[169893.42]},{"x":"2011-W34","s":null,"values":[157843.74]},{"x":"2011-W35","s":null,"values":[137221.35]},{"x":"2011-W36","s":null,"values":[185293.56]},{"x":"2011-W37","s":null,"values":[222269.79]},{"x":"2011-W38","s":null,"values":[319745.941]},{"x":"2011-W39","s":null,"values":[202358.82]},{"x":"2011-W40","s":null,"values":[300307.48]},{"x":"2011-W41","s":null,"values":[204251.49]},{"x":"2011-W42","s":null,"values":[259053.85]},{"x":"2011-W43","s":null,"values":[234202.83]},{"x":"2011-W44","s":null,"values":[288344.46]},{"x":"2011-W45","s":null,"values":[350123.4]},{"x":"2011-W46","s":null,"values":[369129.47]},{"x":"2011-W47","s":null,"values":[295233.31]},{"x":"2011-W48","s":null,"values":[306115.06]},{"x":"2011-W49","s":null,"values":[310943.36],"partial":true}],"facts":{"max":{"x":"2011-W46","s":null,"value":369129.47},"min":{"x":"2009-W52","s":null,"value":49825.01},"last_complete":{"x":"2011-W48","value":306115.06},"previous":{"x":"2011-W47","value":295233.31},"change_pct":0.0369},"notes":["2009-W49、2011-W49 只覆盖了部分时间（数据范围 2009-12-01 至 2011-12-09），不能和完整的周期直接比"]},"orders_by_week":{"rows":[{"x":"2009-W49","s":null,"values":[548],"partial":true},{"x":"2009-W50","s":null,"values":[525]},{"x":"2009-W51","s":null,"values":[486]},{"x":"2009-W52","s":null,"values":[107]},{"x":"2010-W01","s":null,"values":[200]},{"x":"2010-W02","s":null,"values":[262]},{"x":"2010-W03","s":null,"values":[262]},{"x":"2010-W04","s":null,"values":[325]},{"x":"2010-W05","s":null,"values":[288]},{"x":"2010-W06","s":null,"values":[276]},{"x":"2010-W07","s":null,"values":[311]},{"x":"2010-W08","s":null,"values":[314]},{"x":"2010-W09","s":null,"values":[385]},{"x":"2010-W10","s":null,"values":[300]},{"x":"2010-W11","s":null,"values":[343]},{"x":"2010-W12","s":null,"values":[389]},{"x":"2010-W13","s":null,"values":[307]},{"x":"2010-W14","s":null,"values":[294]},{"x":"2010-W15","s":null,"values":[299]},{"x":"2010-W16","s":null,"values":[383]},{"x":"2010-W17","s":null,"values":[422]},{"x":"2010-W18","s":null,"values":[342]},{"x":"2010-W19","s":null,"values":[363]},{"x":"2010-W20","s":null,"values":[339]},{"x":"2010-W21","s":null,"values":[400]},{"x":"2010-W22","s":null,"values":[276]},{"x":"2010-W23","s":null,"values":[460]},{"x":"2010-W24","s":null,"values":[336]},{"x":"2010-W25","s":null,"values":[323]},{"x":"2010-W26","s":null,"values":[366]},{"x":"2010-W27","s":null,"values":[347]},{"x":"2010-W28","s":null,"values":[350]},{"x":"2010-W29","s":null,"values":[347]},{"x":"2010-W30","s":null,"values":[344]},{"x":"2010-W31","s":null,"values":[313]},{"x":"2010-W32","s":null,"values":[330]},{"x":"2010-W33","s":null,"values":[335]},{"x":"2010-W34","s":null,"values":[333]},{"x":"2010-W35","s":null,"values":[284]},{"x":"2010-W36","s":null,"values":[308]},{"x":"2010-W37","s":null,"values":[389]},{"x":"2010-W38","s":null,"values":[470]},{"x":"2010-W39","s":null,"values":[544]},{"x":"2010-W40","s":null,"values":[519]},{"x":"2010-W41","s":null,"values":[560]},{"x":"2010-W42","s":null,"values":[548]},{"x":"2010-W43","s":null,"values":[472]},{"x":"2010-W44","s":null,"values":[521]},{"x":"2010-W45","s":null,"values":[657]},{"x":"2010-W46","s":null,"values":[633]},{"x":"2010-W47","s":null,"values":[680]},{"x":"2010-W48","s":null,"values":[652]},{"x":"2010-W49","s":null,"values":[526]},{"x":"2010-W50","s":null,"values":[442]},{"x":"2010-W51","s":null,"values":[158]},{"x":"2011-W01","s":null,"values":[242]},{"x":"2011-W02","s":null,"values":[258]},{"x":"2011-W03","s":null,"values":[229]},{"x":"2011-W04","s":null,"values":[290]},{"x":"2011-W05","s":null,"values":[295]},{"x":"2011-W06","s":null,"values":[222]},{"x":"2011-W07","s":null,"values":[294]},{"x":"2011-W08","s":null,"values":[289]},{"x":"2011-W09","s":null,"values":[283]},{"x":"2011-W10","s":null,"values":[290]},{"x":"2011-W11","s":null,"values":[338]},{"x":"2011-W12","s":null,"values":[323]},{"x":"2011-W13","s":null,"values":[355]},{"x":"2011-W14","s":null,"values":[313]},{"x":"2011-W15","s":null,"values":[367]},{"x":"2011-W16","s":null,"values":[267]},{"x":"2011-W17","s":null,"values":[212]},{"x":"2011-W18","s":null,"values":[362]},{"x":"2011-W19","s":null,"values":[434]},{"x":"2011-W20","s":null,"values":[450]},{"x":"2011-W21","s":null,"values":[350]},{"x":"2011-W22","s":null,"values":[259]},{"x":"2011-W23","s":null,"values":[406]},{"x":"2011-W24","s":null,"values":[370]},{"x":"2011-W25","s":null,"values":[334]},{"x":"2011-W26","s":null,"values":[283]},{"x":"2011-W27","s":null,"values":[357]},{"x":"2011-W28","s":null,"values":[324]},{"x":"2011-W29","s":null,"values":[355]},{"x":"2011-W30","s":null,"values":[343]},{"x":"2011-W31","s":null,"values":[314]},{"x":"2011-W32","s":null,"values":[270]},{"x":"2011-W33","s":null,"values":[315]},{"x":"2011-W34","s":null,"values":[356]},{"x":"2011-W35","s":null,"values":[282]},{"x":"2011-W36","s":null,"values":[391]},{"x":"2011-W37","s":null,"values":[360]},{"x":"2011-W38","s":null,"values":[463]},{"x":"2011-W39","s":null,"values":[441]},{"x":"2011-W40","s":null,"values":[488]},{"x":"2011-W41","s":null,"values":[448]},{"x":"2011-W42","s":null,"values":[446]},{"x":"2011-W43","s":null,"values":[519]},{"x":"2011-W44","s":null,"values":[527]},{"x":"2011-W45","s":null,"values":[634]},{"x":"2011-W46","s":null,"values":[687]},{"x":"2011-W47","s":null,"values":[616]},{"x":"2011-W48","s":null,"values":[663]},{"x":"2011-W49","s":null,"values":[509],"partial":true}],"facts":{"max":{"x":"2011-W46","s":null,"value":687},"min":{"x":"2009-W52","s":null,"value":107},"last_complete":{"x":"2011-W48","value":663},"previous":{"x":"2011-W47","value":616},"change_pct":0.0763},"notes":["2009-W49、2011-W49 只覆盖了部分时间（数据范围 2009-12-01 至 2011-12-09），不能和完整的周期直接比"]},"aov_by_week":{"rows":[{"x":"2009-W49","s":null,"values":[475.9284],"numerator":260808.77,"denominator":548,"partial":true},{"x":"2009-W50","s":null,"values":[445.7775],"numerator":234033.21,"denominator":525},{"x":"2009-W51","s":null,"values":[517.2575],"numerator":251387.16,"denominator":486},{"x":"2009-W52","s":null,"values":[482.9161],"numerator":51672.02,"denominator":107},{"x":"2010-W01","s":null,"values":[830.0539],"numerator":166010.79,"denominator":200},{"x":"2010-W02","s":null,"values":[593.2969],"numerator":155443.79,"denominator":262},{"x":"2010-W03","s":null,"values":[556.9079],"numerator":145909.871,"denominator":262},{"x":"2010-W04","s":null,"values":[445.9476],"numerator":144932.971,"denominator":325},{"x":"2010-W05","s":null,"values":[416.8916],"numerator":120064.772,"denominator":288},{"x":"2010-W06","s":null,"values":[314.8255],"numerator":86891.84,"denominator":276},{"x":"2010-W07","s":null,"values":[548.5392],"numerator":170595.692,"denominator":311},{"x":"2010-W08","s":null,"values":[510.6923],"numerator":160357.372,"denominator":314},{"x":"2010-W09","s":null,"values":[420.3145],"numerator":161821.09,"denominator":385},{"x":"2010-W10","s":null,"values":[460.4771],"numerator":138143.14,"denominator":300},{"x":"2010-W11","s":null,"values":[479.3735],"numerator":164425.121,"denominator":343},{"x":"2010-W12","s":null,"values":[441.2503],"numerator":171646.37,"denominator":389},{"x":"2010-W13","s":null,"values":[507.3438],"numerator":155754.56,"denominator":307},{"x":"2010-W14","s":null,"values":[466.3366],"numerator":137102.96,"denominator":294},{"x":"2010-W15","s":null,"values":[474.3787],"numerator":141839.231,"denominator":299},{"x":"2010-W16","s":null,"values":[430.1925],"numerator":164763.74,"denominator":383},{"x":"2010-W17","s":null,"values":[438.0139],"numerator":184841.871,"denominator":422},{"x":"2010-W18","s":null,"values":[467.8926],"numerator":160019.28,"denominator":342},{"x":"2010-W19","s":null,"values":[463.5905],"numerator":168283.34,"denominator":363},{"x":"2010-W20","s":null,"values":[436.7534],"numerator":148059.4,"denominator":339},{"x":"2010-W21","s":null,"values":[387.0971],"numerator":154838.84,"denominator":400},{"x":"2010-W22","s":null,"values":[386.2388],"numerator":106601.91,"denominator":276},{"x":"2010-W23","s":null,"values":[457.1485],"numerator":210288.29,"denominator":460},{"x":"2010-W24","s":null,"values":[404.6468],"numerator":135961.33,"denominator":336},{"x":"2010-W25","s":null,"values":[378.6291],"numerator":122297.2,"denominator":323},{"x":"2010-W26","s":null,"values":[486.7078],"numerator":178135.07,"denominator":366},{"x":"2010-W27","s":null,"values":[433.928],"numerator":150573.0,"denominator":347},{"x":"2010-W28","s":null,"values":[447.3649],"numerator":156577.73,"denominator":350},{"x":"2010-W29","s":null,"values":[416.4205],"numerator":144497.91,"denominator":347},{"x":"2010-W30","s":null,"values":[450.8075],"numerator":155077.77,"denominator":344},{"x":"2010-W31","s":null,"values":[401.2596],"numerator":125594.26,"denominator":313},{"x":"2010-W32","s":null,"values":[525.77],"numerator":173504.11,"denominator":330},{"x":"2010-W33","s":null,"values":[497.9418],"numerator":166810.5,"denominator":335},{"x":"2010-W34","s":null,"values":[433.606],"numerator":144390.79,"denominator":333},{"x":"2010-W35","s":null,"values":[492.2531],"numerator":139799.88,"denominator":284},{"x":"2010-W36","s":null,"values":[421.3392],"numerator":129772.47,"denominator":308},{"x":"2010-W37","s":null,"values":[418.1887],"numerator":162675.401,"denominator":389},{"x":"2010-W38","s":null,"values":[509.1814],"numerator":239315.26,"denominator":470},{"x":"2010-W39","s":null,"values":[563.1276],"numerator":306341.43,"denominator":544},{"x":"2010-W40","s":null,"values":[496.3126],"numerator":257586.24,"denominator":519},{"x":"2010-W41","s":null,"values":[550.3846],"numerator":308215.36,"denominator":560},{"x":"2010-W42","s":null,"values":[439.6213],"numerator":240912.45,"denominator":548},{"x":"2010-W43","s":null,"values":[449.9279],"numerator":212365.97,"denominator":472},{"x":"2010-W44","s":null,"values":[541.4358],"numerator":282088.03,"denominator":521},{"x":"2010-W45","s":null,"values":[561.3357],"numerator":368797.561,"denominator":657},{"x":"2010-W46","s":null,"values":[547.0232],"numerator":346265.661,"denominator":633},{"x":"2010-W47","s":null,"values":[435.4271],"numerator":296090.42,"denominator":680},{"x":"2010-W48","s":null,"values":[486.4961],"numerator":317195.43,"denominator":652},{"x":"2010-W49","s":null,"values":[572.4],"numerator":301082.39,"denominator":526},{"x":"2010-W50","s":null,"values":[471.9833],"numerator":208616.61,"denominator":442},{"x":"2010-W51","s":null,"values":[539.2597],"numerator":85203.04,"denominator":158},{"x":"2011-W01","s":null,"values":[538.325],"numerator":130274.65,"denominator":242},{"x":"2011-W02","s":null,"values":[725.9353],"numerator":187291.3,"denominator":258},{"x":"2011-W03","s":null,"values":[914.1103],"numerator":209331.26,"denominator":229},{"x":"2011-W04","s":null,"values":[417.2473],"numerator":121001.73,"denominator":290},{"x":"2011-W05","s":null,"values":[411.3597],"numerator":121351.11,"denominator":295},{"x":"2011-W06","s":null,"values":[466.5337],"numerator":103570.49,"denominator":222},{"x":"2011-W07","s":null,"values":[477.2283],"numerator":140305.11,"denominator":294},{"x":"2011-W08","s":null,"values":[502.5504],"numerator":145237.07,"denominator":289},{"x":"2011-W09","s":null,"values":[450.8422],"numerator":127588.35,"denominator":283},{"x":"2011-W10","s":null,"values":[444.9474],"numerator":129034.74,"denominator":290},{"x":"2011-W11","s":null,"values":[453.6697],"numerator":153340.36,"denominator":338},{"x":"2011-W12","s":null,"values":[448.4256],"numerator":144841.46,"denominator":323},{"x":"2011-W13","s":null,"values":[525.4951],"numerator":186550.75,"denominator":355},{"x":"2011-W14","s":null,"values":[392.2813],"numerator":122784.05,"denominator":313},{"x":"2011-W15","s":null,"values":[397.8559],"numerator":146013.111,"denominator":367},{"x":"2011-W16","s":null,"values":[517.9706],"numerator":138298.14,"denominator":267},{"x":"2011-W17","s":null,"values":[393.3587],"numerator":83392.04,"denominator":212},{"x":"2011-W18","s":null,"values":[377.8753],"numerator":136790.86,"denominator":362},{"x":"2011-W19","s":null,"values":[471.6983],"numerator":204717.07,"denominator":434},{"x":"2011-W20","s":null,"values":[467.412],"numerator":210335.39,"denominator":450},{"x":"2011-W21","s":null,"values":[455.6109],"numerator":159463.82,"denominator":350},{"x":"2011-W22","s":null,"values":[444.2664],"numerator":115065.0,"denominator":259},{"x":"2011-W23","s":null,"values":[528.2717],"numerator":214478.31,"denominator":406},{"x":"2011-W24","s":null,"values":[504.2492],"numerator":186572.2,"denominator":370},{"x":"2011-W25","s":null,"values":[381.3435],"numerator":127368.72,"denominator":334},{"x":"2011-W26","s":null,"values":[476.573],"numerator":134870.16,"denominator":283},{"x":"2011-W27","s":null,"values":[476.5393],"numerator":170124.54,"denominator":357},{"x":"2011-W28","s":null,"values":[409.3479],"numerator":132628.72,"denominator":324},{"x":"2011-W29","s":null,"values":[528.961],"numerator":187781.16,"denominator":355},{"x":"2011-W30","s":null,"values":[521.0532],"numerator":178721.261,"denominator":343},{"x":"2011-W31","s":null,"values":[534.6954],"numerator":167894.34,"denominator":314},{"x":"2011-W32","s":null,"values":[627.035],"numerator":169299.45,"denominator":270},{"x":"2011-W33","s":null,"values":[549.6687],"numerator":173145.63,"denominator":315},{"x":"2011-W34","s":null,"values":[452.0272],"numerator":160921.68,"denominator":356},{"x":"2011-W35","s":null,"values":[519.7059],"numerator":146557.05,"denominator":282},{"x":"2011-W36","s":null,"values":[478.676],"numerator":187162.33,"denominator":391},{"x":"2011-W37","s":null,"values":[621.8436],"numerator":223863.7,"denominator":360},{"x":"2011-W38","s":null,"values":[709.9642],"numerator":328713.431,"denominator":463},{"x":"2011-W39","s":null,"values":[468.2785],"numerator":206510.83,"denominator":441},{"x":"2011-W40","s":null,"values":[637.1888],"numerator":310948.14,"denominator":488},{"x":"2011-W41","s":null,"values":[493.902],"numerator":221268.1,"denominator":448},{"x":"2011-W42","s":null,"values":[592.7314],"numerator":264358.21,"denominator":446},{"x":"2011-W43","s":null,"values":[467.5977],"numerator":242683.19,"denominator":519},{"x":"2011-W44","s":null,"values":[555.4987],"numerator":292747.79,"denominator":527},{"x":"2011-W45","s":null,"values":[564.2062],"numerator":357706.72,"denominator":634},{"x":"2011-W46","s":null,"values":[543.1999],"numerator":373178.36,"denominator":687},{"x":"2011-W47","s":null,"values":[490.8965],"numerator":302392.22,"denominator":616},{"x":"2011-W48","s":null,"values":[466.6391],"numerator":309381.73,"denominator":663},{"x":"2011-W49","s":null,"values":[950.3441],"numerator":483725.13,"denominator":509,"partial":true}],"facts":{"max":{"x":"2011-W49","s":null,"value":950.3441},"min":{"x":"2010-W06","s":null,"value":314.8255},"reference":{"value":497.1116,"numerator":19643861.637,"denominator":39516},"last_complete":{"x":"2011-W48","value":466.6391},"previous":{"x":"2011-W47","value":490.8965},"change_pct":-0.0494},"notes":["2009-W49、2011-W49 只覆盖了部分时间（数据范围 2009-12-01 至 2011-12-09），不能和完整的周期直接比"]},"cancel_rate_by_week":{"rows":[{"x":"2009-W49","s":null,"values":[0.0243],"numerator":6346.56,"denominator":260808.77,"partial":true},{"x":"2009-W50","s":null,"values":[0.038],"numerator":8894.34,"denominator":234033.21},{"x":"2009-W51","s":null,"values":[0.0098],"numerator":2470.17,"denominator":251387.16},{"x":"2009-W52","s":null,"values":[0.0357],"numerator":1847.01,"denominator":51672.02},{"x":"2010-W01","s":null,"values":[0.0078],"numerator":1288.94,"denominator":166010.79},{"x":"2010-W02","s":null,"values":[0.0102],"numerator":1591.17,"denominator":155443.79},{"x":"2010-W03","s":null,"values":[0.018],"numerator":2633.32,"denominator":145909.871},{"x":"2010-W04","s":null,"values":[0.0135],"numerator":1952.2,"denominator":144932.971},{"x":"2010-W05","s":null,"values":[0.0101],"numerator":1214.73,"denominator":120064.772},{"x":"2010-W06","s":null,"values":[0.0165],"numerator":1433.56,"denominator":86891.84},{"x":"2010-W07","s":null,"values":[0.0422],"numerator":7197.43,"denominator":170595.692},{"x":"2010-W08","s":null,"values":[0.017],"numerator":2729.72,"denominator":160357.372},{"x":"2010-W09","s":null,"values":[0.0113],"numerator":1821.58,"denominator":161821.09},{"x":"2010-W10","s":null,"values":[0.014],"numerator":1933.46,"denominator":138143.14},{"x":"2010-W11","s":null,"values":[0.0131],"numerator":2150.82,"denominator":164425.121},{"x":"2010-W12","s":null,"values":[0.0137],"numerator":2346.22,"denominator":171646.37},{"x":"2010-W13","s":null,"values":[0.0099],"numerator":1536.21,"denominator":155754.56},{"x":"2010-W14","s":null,"values":[0.0083],"numerator":1139.45,"denominator":137102.96},{"x":"2010-W15","s":null,"values":[0.0317],"numerator":4490.93,"denominator":141839.231},{"x":"2010-W16","s":null,"values":[0.0165],"numerator":2714.21,"denominator":164763.74},{"x":"2010-W17","s":null,"values":[0.0084],"numerator":1550.23,"denominator":184841.871},{"x":"2010-W18","s":null,"values":[0.0239],"numerator":3829.79,"denominator":160019.28},{"x":"2010-W19","s":null,"values":[0.1349],"numerator":22693.83,"denominator":168283.34},{"x":"2010-W20","s":null,"values":[0.0312],"numerator":4614.3,"denominator":148059.4},{"x":"2010-W21","s":null,"values":[0.0388],"numerator":6000.97,"denominator":154838.84},{"x":"2010-W22","s":null,"values":[0.011],"numerator":1171.5,"denominator":106601.91},{"x":"2010-W23","s":null,"values":[0.041],"numerator":8631.37,"denominator":210288.29},{"x":"2010-W24","s":null,"values":[0.0138],"numerator":1870.4,"denominator":135961.33},{"x":"2010-W25","s":null,"values":[0.0232],"numerator":2836.5,"denominator":122297.2},{"x":"2010-W26","s":null,"values":[0.0692],"numerator":12331.91,"denominator":178135.07},{"x":"2010-W27","s":null,"values":[0.0334],"numerator":5035.24,"denominator":150573.0},{"x":"2010-W28","s":null,"values":[0.0273],"numerator":4275.34,"denominator":156577.73},{"x":"2010-W29","s":null,"values":[0.0186],"numerator":2690.66,"denominator":144497.91},{"x":"2010-W30","s":null,"values":[0.0314],"numerator":4868.06,"denominator":155077.77},{"x":"2010-W31","s":null,"values":[0.0309],"numerator":3881.87,"denominator":125594.26},{"x":"2010-W32","s":null,"values":[0.0193],"numerator":3340.39,"denominator":173504.11},{"x":"2010-W33","s":null,"values":[0.0072],"numerator":1208.44,"denominator":166810.5},{"x":"2010-W34","s":null,"values":[0.0229],"numerator":3305.44,"denominator":144390.79},{"x":"2010-W35","s":null,"values":[0.0165],"numerator":2309.26,"denominator":139799.88},{"x":"2010-W36","s":null,"values":[0.015],"numerator":1944.43,"denominator":129772.47},{"x":"2010-W37","s":null,"values":[0.011],"numerator":1784.81,"denominator":162675.401},{"x":"2010-W38","s":null,"values":[0.0144],"numerator":3453.68,"denominator":239315.26},{"x":"2010-W39","s":null,"values":[0.0628],"numerator":19226.99,"denominator":306341.43},{"x":"2010-W40","s":null,"values":[0.0125],"numerator":3224.93,"denominator":257586.24},{"x":"2010-W41","s":null,"values":[0.0097],"numerator":2992.87,"denominator":308215.36},{"x":"2010-W42","s":null,"values":[0.0353],"numerator":8508.34,"denominator":240912.45},{"x":"2010-W43","s":null,"values":[0.0478],"numerator":10148.85,"denominator":212365.97},{"x":"2010-W44","s":null,"values":[0.0273],"numerator":7706.21,"denominator":282088.03},{"x":"2010-W45","s":null,"values":[0.0255],"numerator":9400.05,"denominator":368797.561},{"x":"2010-W46","s":null,"values":[0.0102],"numerator":3521.89,"denominator":346265.661},{"x":"2010-W47","s":null,"values":[0.0332],"numerator":9828.24,"denominator":296090.42},{"x":"2010-W48","s":null,"values":[0.0257],"numerator":8166.38,"denominator":317195.43},{"x":"2010-W49","s":null,"values":[0.0166],"numerator":5012.34,"denominator":301082.39},{"x":"2010-W50","s":null,"values":[0.0308],"numerator":6432.63,"denominator":208616.61},{"x":"2010-W51","s":null,"values":[0.0303],"numerator":2579.1,"denominator":85203.04},{"x":"2011-W01","s":null,"values":[0.0366],"numerator":4764.03,"denominator":130274.65},{"x":"2011-W02","s":null,"values":[0.0125],"numerator":2344.03,"denominator":187291.3},{"x":"2011-W03","s":null,"values":[0.3766],"numerator":78840.6,"denominator":209331.26},{"x":"2011-W04","s":null,"values":[0.0355],"numerator":4300.68,"denominator":121001.73},{"x":"2011-W05","s":null,"values":[0.019],"numerator":2308.5,"denominator":121351.11},{"x":"2011-W06","s":null,"values":[0.0319],"numerator":3303.7,"denominator":103570.49},{"x":"2011-W07","s":null,"values":[0.0054],"numerator":753.34,"denominator":140305.11},{"x":"2011-W08","s":null,"values":[0.0223],"numerator":3243.74,"denominator":145237.07},{"x":"2011-W09","s":null,"values":[0.0107],"numerator":1370.06,"denominator":127588.35},{"x":"2011-W10","s":null,"values":[0.0113],"numerator":1464.32,"denominator":129034.74},{"x":"2011-W11","s":null,"values":[0.0133],"numerator":2040.79,"denominator":153340.36},{"x":"2011-W12","s":null,"values":[0.0111],"numerator":1605.27,"denominator":144841.46},{"x":"2011-W13","s":null,"values":[0.0288],"numerator":5366.59,"denominator":186550.75},{"x":"2011-W14","s":null,"values":[0.0305],"numerator":3743.6,"denominator":122784.05},{"x":"2011-W15","s":null,"values":[0.0128],"numerator":1875.11,"denominator":146013.111},{"x":"2011-W16","s":null,"values":[0.1766],"numerator":24419.52,"denominator":138298.14},{"x":"2011-W17","s":null,"values":[0.0233],"numerator":1944.1,"denominator":83392.04},{"x":"2011-W18","s":null,"values":[0.0094],"numerator":1288.81,"denominator":136790.86},{"x":"2011-W19","s":null,"values":[0.0132],"numerator":2692.85,"denominator":204717.07},{"x":"2011-W20","s":null,"values":[0.0115],"numerator":2409.32,"denominator":210335.39},{"x":"2011-W21","s":null,"values":[0.0113],"numerator":1804.1,"denominator":159463.82},{"x":"2011-W22","s":null,"values":[0.0148],"numerator":1708.46,"denominator":115065.0},{"x":"2011-W23","s":null,"values":[0.0119],"numerator":2547.84,"denominator":214478.31},{"x":"2011-W24","s":null,"values":[0.0231],"numerator":4301.25,"denominator":186572.2},{"x":"2011-W25","s":null,"values":[0.0335],"numerator":4265.28,"denominator":127368.72},{"x":"2011-W26","s":null,"values":[0.0163],"numerator":2192.65,"denominator":134870.16},{"x":"2011-W27","s":null,"values":[0.0132],"numerator":2247.45,"denominator":170124.54},{"x":"2011-W28","s":null,"values":[0.0152],"numerator":2012.1,"denominator":132628.72},{"x":"2011-W29","s":null,"values":[0.0265],"numerator":4971.83,"denominator":187781.16},{"x":"2011-W30","s":null,"values":[0.0091],"numerator":1620.34,"denominator":178721.261},{"x":"2011-W31","s":null,"values":[0.0366],"numerator":6153.22,"denominator":167894.34},{"x":"2011-W32","s":null,"values":[0.009],"numerator":1516.91,"denominator":169299.45},{"x":"2011-W33","s":null,"values":[0.0188],"numerator":3252.21,"denominator":173145.63},{"x":"2011-W34","s":null,"values":[0.0191],"numerator":3077.94,"denominator":160921.68},{"x":"2011-W35","s":null,"values":[0.0637],"numerator":9335.7,"denominator":146557.05},{"x":"2011-W36","s":null,"values":[0.01],"numerator":1868.77,"denominator":187162.33},{"x":"2011-W37","s":null,"values":[0.0071],"numerator":1593.91,"denominator":223863.7},{"x":"2011-W38","s":null,"values":[0.0273],"numerator":8967.49,"denominator":328713.431},{"x":"2011-W39","s":null,"values":[0.0201],"numerator":4152.01,"denominator":206510.83},{"x":"2011-W40","s":null,"values":[0.0342],"numerator":10640.66,"denominator":310948.14},{"x":"2011-W41","s":null,"values":[0.0769],"numerator":17016.61,"denominator":221268.1},{"x":"2011-W42","s":null,"values":[0.0201],"numerator":5304.36,"denominator":264358.21},{"x":"2011-W43","s":null,"values":[0.0349],"numerator":8480.36,"denominator":242683.19},{"x":"2011-W44","s":null,"values":[0.015],"numerator":4403.33,"denominator":292747.79},{"x":"2011-W45","s":null,"values":[0.0212],"numerator":7583.32,"denominator":357706.72},{"x":"2011-W46","s":null,"values":[0.0108],"numerator":4048.89,"denominator":373178.36},{"x":"2011-W47","s":null,"values":[0.0237],"numerator":7158.91,"denominator":302392.22},{"x":"2011-W48","s":null,"values":[0.0106],"numerator":3266.67,"denominator":309381.73},{"x":"2011-W49","s":null,"values":[0.3572],"numerator":172781.77,"denominator":483725.13,"partial":true}],"facts":{"max":{"x":"2011-W03","s":null,"value":0.3766},"min":{"x":"2011-W07","s":null,"value":0.0054},"reference":{"value":0.0365,"numerator":716462.57,"denominator":19643861.637},"last_complete":{"x":"2011-W48","value":0.0106},"previous":{"x":"2011-W47","value":0.0237},"change_pct":-0.5527},"notes":["2009-W49、2011-W49 只覆盖了部分时间（数据范围 2009-12-01 至 2011-12-09），不能和完整的周期直接比"]},"top_weeks_gmv":{"rows":[{"x":"2011-W49","s":null,"values":[483725.13],"share":0.0246,"offset":172781.77,"offset_share":0.3572},{"x":"2011-W46","s":null,"values":[373178.36],"share":0.019,"offset":4048.89,"offset_share":0.0108},{"x":"2010-W45","s":null,"values":[368797.561],"share":0.0188,"offset":9400.05,"offset_share":0.0255},{"x":"2011-W45","s":null,"values":[357706.72],"share":0.0182,"offset":7583.32,"offset_share":0.0212},{"x":"2010-W46","s":null,"values":[346265.661],"share":0.0176,"offset":3521.89,"offset_share":0.0102},{"x":"2011-W38","s":null,"values":[328713.431],"share":0.0167,"offset":8967.49,"offset_share":0.0273},{"x":"2010-W48","s":null,"values":[317195.43],"share":0.0161,"offset":8166.38,"offset_share":0.0257},{"x":"2011-W40","s":null,"values":[310948.14],"share":0.0158,"offset":10640.66,"offset_share":0.0342},{"x":"2011-W48","s":null,"values":[309381.73],"share":0.0157,"offset":3266.67,"offset_share":0.0106},{"x":"2010-W41","s":null,"values":[308215.36],"share":0.0157,"offset":2992.87,"offset_share":0.0097},{"x":"2010-W39","s":null,"values":[306341.43],"share":0.0156,"offset":19226.99,"offset_share":0.0628},{"x":"2011-W47","s":null,"values":[302392.22],"share":0.0154,"offset":7158.91,"offset_share":0.0237},{"x":"其他 92 个","s":null,"values":[15531000.464],"other":true,"share":0.7906}],"facts":{"total":19643861.637,"max":{"x":"2011-W49","s":null,"value":483725.13},"min":{"x":"2011-W47","s":null,"value":302392.22}},"notes":["只显示前 12 个，共 104 个，其余合并成“其他”"]}},"2009":{"kpi_gmv":{"rows":[{"x":null,"s":null,"values":[797901.16]}],"facts":{"value":797901.16},"notes":[]},"kpi_net":{"rows":[{"x":null,"s":null,"values":[778343.08]}],"facts":{"value":778343.08},"notes":[]},"kpi_aov":{"rows":[{"x":null,"s":null,"values":[478.9323]}],"facts":{"value":478.9323,"numerator":797901.16,"denominator":1666},"notes":[]},"gmv_by_week":{"rows":[{"x":"2009-W49","s":null,"values":[260808.77],"partial":true},{"x":"2009-W50","s":null,"values":[234033.21]},{"x":"2009-W51","s":null,"values":[251387.16]},{"x":"2009-W52","s":null,"values":[51672.02]}],"facts":{"max":{"x":"2009-W49","s":null,"value":260808.77},"min":{"x":"2009-W52","s":null,"value":51672.02},"last_complete":{"x":"2009-W52","value":51672.02},"previous":{"x":"2009-W51","value":251387.16},"change_pct":-0.7945},"notes":["2009-W49 只覆盖了部分时间（数据范围 2009-12-01 至 2011-12-09），不能和完整的周期直接比"]},"net_by_week":{"rows":[{"x":"2009-W49","s":null,"values":[254462.21],"partial":true},{"x":"2009-W50","s":null,"values":[225138.87]},{"x":"2009-W51","s":null,"values":[248916.99]},{"x":"2009-W52","s":null,"values":[49825.01]}],"facts":{"max":{"x":"2009-W49","s":null,"value":254462.21},"min":{"x":"2009-W52","s":null,"value":49825.01},"last_complete":{"x":"2009-W52","value":49825.01},"previous":{"x":"2009-W51","value":248916.99},"change_pct":-0.7998},"notes":["2009-W49 只覆盖了部分时间（数据范围 2009-12-01 至 2011-12-09），不能和完整的周期直接比"]},"orders_by_week":{"rows":[{"x":"2009-W49","s":null,"values":[548],"partial":true},{"x":"2009-W50","s":null,"values":[525]},{"x":"2009-W51","s":null,"values":[486]},{"x":"2009-W52","s":null,"values":[107]}],"facts":{"max":{"x":"2009-W49","s":null,"value":548},"min":{"x":"2009-W52","s":null,"value":107},"last_complete":{"x":"2009-W52","value":107},"previous":{"x":"2009-W51","value":486},"change_pct":-0.7798},"notes":["2009-W49 只覆盖了部分时间（数据范围 2009-12-01 至 2011-12-09），不能和完整的周期直接比"]},"aov_by_week":{"rows":[{"x":"2009-W49","s":null,"values":[475.9284],"numerator":260808.77,"denominator":548,"partial":true},{"x":"2009-W50","s":null,"values":[445.7775],"numerator":234033.21,"denominator":525},{"x":"2009-W51","s":null,"values":[517.2575],"numerator":251387.16,"denominator":486},{"x":"2009-W52","s":null,"values":[482.9161],"numerator":51672.02,"denominator":107}],"facts":{"max":{"x":"2009-W51","s":null,"value":517.2575},"min":{"x":"2009-W50","s":null,"value":445.7775},"reference":{"value":478.9323,"numerator":797901.16,"denominator":1666},"last_complete":{"x":"2009-W52","value":482.9161},"previous":{"x":"2009-W51","value":517.2575},"change_pct":-0.0664},"notes":["2009-W49 只覆盖了部分时间（数据范围 2009-12-01 至 2011-12-09），不能和完整的周期直接比"]},"cancel_rate_by_week":{"rows":[{"x":"2009-W49","s":null,"values":[0.0243],"numerator":6346.56,"denominator":260808.77,"partial":true},{"x":"2009-W50","s":null,"values":[0.038],"numerator":8894.34,"denominator":234033.21},{"x":"2009-W51","s":null,"values":[0.0098],"numerator":2470.17,"denominator":251387.16},{"x":"2009-W52","s":null,"values":[0.0357],"numerator":1847.01,"denominator":51672.02}],"facts":{"max":{"x":"2009-W50","s":null,"value":0.038},"min":{"x":"2009-W51","s":null,"value":0.0098},"reference":{"value":0.0245,"numerator":19558.08,"denominator":797901.16},"last_complete":{"x":"2009-W52","value":0.0357},"previous":{"x":"2009-W51","value":0.0098},"change_pct":2.6429},"notes":["2009-W49 只覆盖了部分时间（数据范围 2009-12-01 至 2011-12-09），不能和完整的周期直接比"]},"top_weeks_gmv":{"rows":[{"x":"2009-W49","s":null,"values":[260808.77],"share":0.3269,"offset":6346.56,"offset_share":0.0243},{"x":"2009-W51","s":null,"values":[251387.16],"share":0.3151,"offset":2470.17,"offset_share":0.0098},{"x":"2009-W50","s":null,"values":[234033.21],"share":0.2933,"offset":8894.34,"offset_share":0.038},{"x":"2009-W52","s":null,"values":[51672.02],"share":0.0648,"offset":1847.01,"offset_share":0.0357}],"facts":{"total":797901.16,"max":{"x":"2009-W49","s":null,"value":260808.77},"min":{"x":"2009-W52","s":null,"value":51672.02}},"notes":[]}},"2010":{"kpi_gmv":{"rows":[{"x":null,"s":null,"values":[9374379.514]}],"facts":{"value":9374379.514},"notes":[]},"kpi_net":{"rows":[{"x":null,"s":null,"values":[9135828.324]}],"facts":{"value":9135828.324},"notes":[]},"kpi_aov":{"rows":[{"x":null,"s":null,"values":[477.6267]}],"facts":{"value":477.6267,"numerator":9374379.514,"denominator":19627},"notes":[]},"gmv_by_week":{"rows":[{"x":"2010-W01","s":null,"values":[166010.79]},{"x":"2010-W02","s":null,"values":[155443.79]},{"x":"2010-W03","s":null,"values":[145909.871]},{"x":"2010-W04","s":null,"values":[144932.971]},{"x":"2010-W05","s":null,"values":[120064.772]},{"x":"2010-W06","s":null,"values":[86891.84]},{"x":"2010-W07","s":null,"values":[170595.692]},{"x":"2010-W08","s":null,"values":[160357.372]},{"x":"2010-W09","s":null,"values":[161821.09]},{"x":"2010-W10","s":null,"values":[138143.14]},{"x":"2010-W11","s":null,"values":[164425.121]},{"x":"2010-W12","s":null,"values":[171646.37]},{"x":"2010-W13","s":null,"values":[155754.56]},{"x":"2010-W14","s":null,"values":[137102.96]},{"x":"2010-W15","s":null,"values":[141839.231]},{"x":"2010-W16","s":null,"values":[164763.74]},{"x":"2010-W17","s":null,"values":[184841.871]},{"x":"2010-W18","s":null,"values":[160019.28]},{"x":"2010-W19","s":null,"values":[168283.34]},{"x":"2010-W20","s":null,"values":[148059.4]},{"x":"2010-W21","s":null,"values":[154838.84]},{"x":"2010-W22","s":null,"values":[106601.91]},{"x":"2010-W23","s":null,"values":[210288.29]},{"x":"2010-W24","s":null,"values":[135961.33]},{"x":"2010-W25","s":null,"values":[122297.2]},{"x":"2010-W26","s":null,"values":[178135.07]},{"x":"2010-W27","s":null,"values":[150573.0]},{"x":"2010-W28","s":null,"values":[156577.73]},{"x":"2010-W29","s":null,"values":[144497.91]},{"x":"2010-W30","s":null,"values":[155077.77]},{"x":"2010-W31","s":null,"values":[125594.26]},{"x":"2010-W32","s":null,"values":[173504.11]},{"x":"2010-W33","s":null,"values":[166810.5]},{"x":"2010-W34","s":null,"values":[144390.79]},{"x":"2010-W35","s":null,"values":[139799.88]},{"x":"2010-W36","s":null,"values":[129772.47]},{"x":"2010-W37","s":null,"values":[162675.401]},{"x":"2010-W38","s":null,"values":[239315.26]},{"x":"2010-W39","s":null,"values":[306341.43]},{"x":"2010-W40","s":null,"values":[257586.24]},{"x":"2010-W41","s":null,"values":[308215.36]},{"x":"2010-W42","s":null,"values":[240912.45]},{"x":"2010-W43","s":null,"values":[212365.97]},{"x":"2010-W44","s":null,"values":[282088.03]},{"x":"2010-W45","s":null,"values":[368797.561]},{"x":"2010-W46","s":null,"values":[346265.661]},{"x":"2010-W47","s":null,"values":[296090.42]},{"x":"2010-W48","s":null,"values":[317195.43]},{"x":"2010-W49","s":null,"values":[301082.39]},{"x":"2010-W50","s":null,"values":[208616.61]},{"x":"2010-W51","s":null,"values":[85203.04]}],"facts":{"max":{"x":"2010-W45","s":null,"value":368797.561},"min":{"x":"2010-W51","s":null,"value":85203.04},"last_complete":{"x":"2010-W51","value":85203.04},"previous":{"x":"2010-W50","value":208616.61},"change_pct":-0.5916},"notes":[]},"net_by_week":{"rows":[{"x":"2010-W01","s":null,"values":[164721.85]},{"x":"2010-W02","s":null,"values":[153852.62]},{"x":"2010-W03","s":null,"values":[143276.551]},{"x":"2010-W04","s":null,"values":[142980.771]},{"x":"2010-W05","s":null,"values":[118850.042]},{"x":"2010-W06","s":null,"values":[85458.28]},{"x":"2010-W07","s":null,"values":[163398.262]},{"x":"2010-W08","s":null,"values":[157627.652]},{"x":"2010-W09","s":null,"values":[159999.51]},{"x":"2010-W10","s":null,"values":[136209.68]},{"x":"2010-W11","s":null,"values":[162274.301]},{"x":"2010-W12","s":null,"values":[169300.15]},{"x":"2010-W13","s":null,"values":[154218.35]},{"x":"2010-W14","s":null,"values":[135963.51]},{"x":"2010-W15","s":null,"values":[137348.301]},{"x":"2010-W16","s":null,"values":[162049.53]},{"x":"2010-W17","s":null,"values":[183291.641]},{"x":"2010-W18","s":null,"values":[156189.49]},{"x":"2010-W19","s":null,"values":[145589.51]},{"x":"2010-W20","s":null,"values":[143445.1]},{"x":"2010-W21","s":null,"values":[148837.87]},{"x":"2010-W22","s":null,"values":[105430.41]},{"x":"2010-W23","s":null,"values":[201656.92]},{"x":"2010-W24","s":null,"values":[134090.93]},{"x":"2010-W25","s":null,"values":[119460.7]},{"x":"2010-W26","s":null,"values":[165803.16]},{"x":"2010-W27","s":null,"values":[145537.76]},{"x":"2010-W28","s":null,"values":[152302.39]},{"x":"2010-W29","s":null,"values":[141807.25]},{"x":"2010-W30","s":null,"values":[150209.71]},{"x":"2010-W31","s":null,"values":[121712.39]},{"x":"2010-W32","s":null,"values":[170163.72]},{"x":"2010-W33","s":null,"values":[165602.06]},{"x":"2010-W34","s":null,"values":[141085.35]},{"x":"2010-W35","s":null,"values":[137490.62]},{"x":"2010-W36","s":null,"values":[127828.04]},{"x":"2010-W37","s":null,"values":[160890.591]},{"x":"2010-W38","s":null,"values":[235861.58]},{"x":"2010-W39","s":null,"values":[287114.44]},{"x":"2010-W40","s":null,"values":[254361.31]},{"x":"2010-W41","s":null,"values":[305222.49]},{"x":"2010-W42","s":null,"values":[232404.11]},{"x":"2010-W43","s":null,"values":[202217.12]},{"x":"2010-W44","s":null,"values":[274381.82]},{"x":"2010-W45","s":null,"values":[359397.511]},{"x":"2010-W46","s":null,"values":[342743.771]},{"x":"2010-W47","s":null,"values":[286262.18]},{"x":"2010-W48","s":null,"values":[309029.05]},{"x":"2010-W49","s":null,"values":[296070.05]},{"x":"2010-W50","s":null,"values":[202183.98]},{"x":"2010-W51","s":null,"values":[82623.94]}],"facts":{"max":{"x":"2010-W45","s":null,"value":359397.511},"min":{"x":"2010-W51","s":null,"value":82623.94},"last_complete":{"x":"2010-W51","value":82623.94},"previous":{"x":"2010-W50","value":202183.98},"change_pct":-0.5913},"notes":[]},"orders_by_week":{"rows":[{"x":"2010-W01","s":null,"values":[200]},{"x":"2010-W02","s":null,"values":[262]},{"x":"2010-W03","s":null,"values":[262]},{"x":"2010-W04","s":null,"values":[325]},{"x":"2010-W05","s":null,"values":[288]},{"x":"2010-W06","s":null,"values":[276]},{"x":"2010-W07","s":null,"values":[311]},{"x":"2010-W08","s":null,"values":[314]},{"x":"2010-W09","s":null,"values":[385]},{"x":"2010-W10","s":null,"values":[300]},{"x":"2010-W11","s":null,"values":[343]},{"x":"2010-W12","s":null,"values":[389]},{"x":"2010-W13","s":null,"values":[307]},{"x":"2010-W14","s":null,"values":[294]},{"x":"2010-W15","s":null,"values":[299]},{"x":"2010-W16","s":null,"values":[383]},{"x":"2010-W17","s":null,"values":[422]},{"x":"2010-W18","s":null,"values":[342]},{"x":"2010-W19","s":null,"values":[363]},{"x":"2010-W20","s":null,"values":[339]},{"x":"2010-W21","s":null,"values":[400]},{"x":"2010-W22","s":null,"values":[276]},{"x":"2010-W23","s":null,"values":[460]},{"x":"2010-W24","s":null,"values":[336]},{"x":"2010-W25","s":null,"values":[323]},{"x":"2010-W26","s":null,"values":[366]},{"x":"2010-W27","s":null,"values":[347]},{"x":"2010-W28","s":null,"values":[350]},{"x":"2010-W29","s":null,"values":[347]},{"x":"2010-W30","s":null,"values":[344]},{"x":"2010-W31","s":null,"values":[313]},{"x":"2010-W32","s":null,"values":[330]},{"x":"2010-W33","s":null,"values":[335]},{"x":"2010-W34","s":null,"values":[333]},{"x":"2010-W35","s":null,"values":[284]},{"x":"2010-W36","s":null,"values":[308]},{"x":"2010-W37","s":null,"values":[389]},{"x":"2010-W38","s":null,"values":[470]},{"x":"2010-W39","s":null,"values":[544]},{"x":"2010-W40","s":null,"values":[519]},{"x":"2010-W41","s":null,"values":[560]},{"x":"2010-W42","s":null,"values":[548]},{"x":"2010-W43","s":null,"values":[472]},{"x":"2010-W44","s":null,"values":[521]},{"x":"2010-W45","s":null,"values":[657]},{"x":"2010-W46","s":null,"values":[633]},{"x":"2010-W47","s":null,"values":[680]},{"x":"2010-W48","s":null,"values":[652]},{"x":"2010-W49","s":null,"values":[526]},{"x":"2010-W50","s":null,"values":[442]},{"x":"2010-W51","s":null,"values":[158]}],"facts":{"max":{"x":"2010-W47","s":null,"value":680},"min":{"x":"2010-W51","s":null,"value":158},"last_complete":{"x":"2010-W51","value":158},"previous":{"x":"2010-W50","value":442},"change_pct":-0.6425},"notes":[]},"aov_by_week":{"rows":[{"x":"2010-W01","s":null,"values":[830.0539],"numerator":166010.79,"denominator":200},{"x":"2010-W02","s":null,"values":[593.2969],"numerator":155443.79,"denominator":262},{"x":"2010-W03","s":null,"values":[556.9079],"numerator":145909.871,"denominator":262},{"x":"2010-W04","s":null,"values":[445.9476],"numerator":144932.971,"denominator":325},{"x":"2010-W05","s":null,"values":[416.8916],"numerator":120064.772,"denominator":288},{"x":"2010-W06","s":null,"values":[314.8255],"numerator":86891.84,"denominator":276},{"x":"2010-W07","s":null,"values":[548.5392],"numerator":170595.692,"denominator":311},{"x":"2010-W08","s":null,"values":[510.6923],"numerator":160357.372,"denominator":314},{"x":"2010-W09","s":null,"values":[420.3145],"numerator":161821.09,"denominator":385},{"x":"2010-W10","s":null,"values":[460.4771],"numerator":138143.14,"denominator":300},{"x":"2010-W11","s":null,"values":[479.3735],"numerator":164425.121,"denominator":343},{"x":"2010-W12","s":null,"values":[441.2503],"numerator":171646.37,"denominator":389},{"x":"2010-W13","s":null,"values":[507.3438],"numerator":155754.56,"denominator":307},{"x":"2010-W14","s":null,"values":[466.3366],"numerator":137102.96,"denominator":294},{"x":"2010-W15","s":null,"values":[474.3787],"numerator":141839.231,"denominator":299},{"x":"2010-W16","s":null,"values":[430.1925],"numerator":164763.74,"denominator":383},{"x":"2010-W17","s":null,"values":[438.0139],"numerator":184841.871,"denominator":422},{"x":"2010-W18","s":null,"values":[467.8926],"numerator":160019.28,"denominator":342},{"x":"2010-W19","s":null,"values":[463.5905],"numerator":168283.34,"denominator":363},{"x":"2010-W20","s":null,"values":[436.7534],"numerator":148059.4,"denominator":339},{"x":"2010-W21","s":null,"values":[387.0971],"numerator":154838.84,"denominator":400},{"x":"2010-W22","s":null,"values":[386.2388],"numerator":106601.91,"denominator":276},{"x":"2010-W23","s":null,"values":[457.1485],"numerator":210288.29,"denominator":460},{"x":"2010-W24","s":null,"values":[404.6468],"numerator":135961.33,"denominator":336},{"x":"2010-W25","s":null,"values":[378.6291],"numerator":122297.2,"denominator":323},{"x":"2010-W26","s":null,"values":[486.7078],"numerator":178135.07,"denominator":366},{"x":"2010-W27","s":null,"values":[433.928],"numerator":150573.0,"denominator":347},{"x":"2010-W28","s":null,"values":[447.3649],"numerator":156577.73,"denominator":350},{"x":"2010-W29","s":null,"values":[416.4205],"numerator":144497.91,"denominator":347},{"x":"2010-W30","s":null,"values":[450.8075],"numerator":155077.77,"denominator":344},{"x":"2010-W31","s":null,"values":[401.2596],"numerator":125594.26,"denominator":313},{"x":"2010-W32","s":null,"values":[525.77],"numerator":173504.11,"denominator":330},{"x":"2010-W33","s":null,"values":[497.9418],"numerator":166810.5,"denominator":335},{"x":"2010-W34","s":null,"values":[433.606],"numerator":144390.79,"denominator":333},{"x":"2010-W35","s":null,"values":[492.2531],"numerator":139799.88,"denominator":284},{"x":"2010-W36","s":null,"values":[421.3392],"numerator":129772.47,"denominator":308},{"x":"2010-W37","s":null,"values":[418.1887],"numerator":162675.401,"denominator":389},{"x":"2010-W38","s":null,"values":[509.1814],"numerator":239315.26,"denominator":470},{"x":"2010-W39","s":null,"values":[563.1276],"numerator":306341.43,"denominator":544},{"x":"2010-W40","s":null,"values":[496.3126],"numerator":257586.24,"denominator":519},{"x":"2010-W41","s":null,"values":[550.3846],"numerator":308215.36,"denominator":560},{"x":"2010-W42","s":null,"values":[439.6213],"numerator":240912.45,"denominator":548},{"x":"2010-W43","s":null,"values":[449.9279],"numerator":212365.97,"denominator":472},{"x":"2010-W44","s":null,"values":[541.4358],"numerator":282088.03,"denominator":521},{"x":"2010-W45","s":null,"values":[561.3357],"numerator":368797.561,"denominator":657},{"x":"2010-W46","s":null,"values":[547.0232],"numerator":346265.661,"denominator":633},{"x":"2010-W47","s":null,"values":[435.4271],"numerator":296090.42,"denominator":680},{"x":"2010-W48","s":null,"values":[486.4961],"numerator":317195.43,"denominator":652},{"x":"2010-W49","s":null,"values":[572.4],"numerator":301082.39,"denominator":526},{"x":"2010-W50","s":null,"values":[471.9833],"numerator":208616.61,"denominator":442},{"x":"2010-W51","s":null,"values":[539.2597],"numerator":85203.04,"denominator":158}],"facts":{"max":{"x":"2010-W01","s":null,"value":830.0539},"min":{"x":"2010-W06","s":null,"value":314.8255},"reference":{"value":477.6267,"numerator":9374379.514,"denominator":19627},"last_complete":{"x":"2010-W51","value":539.2597},"previous":{"x":"2010-W50","value":471.9833},"change_pct":0.1425},"notes":[]},"cancel_rate_by_week":{"rows":[{"x":"2010-W01","s":null,"values":[0.0078],"numerator":1288.94,"denominator":166010.79},{"x":"2010-W02","s":null,"values":[0.0102],"numerator":1591.17,"denominator":155443.79},{"x":"2010-W03","s":null,"values":[0.018],"numerator":2633.32,"denominator":145909.871},{"x":"2010-W04","s":null,"values":[0.0135],"numerator":1952.2,"denominator":144932.971},{"x":"2010-W05","s":null,"values":[0.0101],"numerator":1214.73,"denominator":120064.772},{"x":"2010-W06","s":null,"values":[0.0165],"numerator":1433.56,"denominator":86891.84},{"x":"2010-W07","s":null,"values":[0.0422],"numerator":7197.43,"denominator":170595.692},{"x":"2010-W08","s":null,"values":[0.017],"numerator":2729.72,"denominator":160357.372},{"x":"2010-W09","s":null,"values":[0.0113],"numerator":1821.58,"denominator":161821.09},{"x":"2010-W10","s":null,"values":[0.014],"numerator":1933.46,"denominator":138143.14},{"x":"2010-W11","s":null,"values":[0.0131],"numerator":2150.82,"denominator":164425.121},{"x":"2010-W12","s":null,"values":[0.0137],"numerator":2346.22,"denominator":171646.37},{"x":"2010-W13","s":null,"values":[0.0099],"numerator":1536.21,"denominator":155754.56},{"x":"2010-W14","s":null,"values":[0.0083],"numerator":1139.45,"denominator":137102.96},{"x":"2010-W15","s":null,"values":[0.0317],"numerator":4490.93,"denominator":141839.231},{"x":"2010-W16","s":null,"values":[0.0165],"numerator":2714.21,"denominator":164763.74},{"x":"2010-W17","s":null,"values":[0.0084],"numerator":1550.23,"denominator":184841.871},{"x":"2010-W18","s":null,"values":[0.0239],"numerator":3829.79,"denominator":160019.28},{"x":"2010-W19","s":null,"values":[0.1349],"numerator":22693.83,"denominator":168283.34},{"x":"2010-W20","s":null,"values":[0.0312],"numerator":4614.3,"denominator":148059.4},{"x":"2010-W21","s":null,"values":[0.0388],"numerator":6000.97,"denominator":154838.84},{"x":"2010-W22","s":null,"values":[0.011],"numerator":1171.5,"denominator":106601.91},{"x":"2010-W23","s":null,"values":[0.041],"numerator":8631.37,"denominator":210288.29},{"x":"2010-W24","s":null,"values":[0.0138],"numerator":1870.4,"denominator":135961.33},{"x":"2010-W25","s":null,"values":[0.0232],"numerator":2836.5,"denominator":122297.2},{"x":"2010-W26","s":null,"values":[0.0692],"numerator":12331.91,"denominator":178135.07},{"x":"2010-W27","s":null,"values":[0.0334],"numerator":5035.24,"denominator":150573.0},{"x":"2010-W28","s":null,"values":[0.0273],"numerator":4275.34,"denominator":156577.73},{"x":"2010-W29","s":null,"values":[0.0186],"numerator":2690.66,"denominator":144497.91},{"x":"2010-W30","s":null,"values":[0.0314],"numerator":4868.06,"denominator":155077.77},{"x":"2010-W31","s":null,"values":[0.0309],"numerator":3881.87,"denominator":125594.26},{"x":"2010-W32","s":null,"values":[0.0193],"numerator":3340.39,"denominator":173504.11},{"x":"2010-W33","s":null,"values":[0.0072],"numerator":1208.44,"denominator":166810.5},{"x":"2010-W34","s":null,"values":[0.0229],"numerator":3305.44,"denominator":144390.79},{"x":"2010-W35","s":null,"values":[0.0165],"numerator":2309.26,"denominator":139799.88},{"x":"2010-W36","s":null,"values":[0.015],"numerator":1944.43,"denominator":129772.47},{"x":"2010-W37","s":null,"values":[0.011],"numerator":1784.81,"denominator":162675.401},{"x":"2010-W38","s":null,"values":[0.0144],"numerator":3453.68,"denominator":239315.26},{"x":"2010-W39","s":null,"values":[0.0628],"numerator":19226.99,"denominator":306341.43},{"x":"2010-W40","s":null,"values":[0.0125],"numerator":3224.93,"denominator":257586.24},{"x":"2010-W41","s":null,"values":[0.0097],"numerator":2992.87,"denominator":308215.36},{"x":"2010-W42","s":null,"values":[0.0353],"numerator":8508.34,"denominator":240912.45},{"x":"2010-W43","s":null,"values":[0.0478],"numerator":10148.85,"denominator":212365.97},{"x":"2010-W44","s":null,"values":[0.0273],"numerator":7706.21,"denominator":282088.03},{"x":"2010-W45","s":null,"values":[0.0255],"numerator":9400.05,"denominator":368797.561},{"x":"2010-W46","s":null,"values":[0.0102],"numerator":3521.89,"denominator":346265.661},{"x":"2010-W47","s":null,"values":[0.0332],"numerator":9828.24,"denominator":296090.42},{"x":"2010-W48","s":null,"values":[0.0257],"numerator":8166.38,"denominator":317195.43},{"x":"2010-W49","s":null,"values":[0.0166],"numerator":5012.34,"denominator":301082.39},{"x":"2010-W50","s":null,"values":[0.0308],"numerator":6432.63,"denominator":208616.61},{"x":"2010-W51","s":null,"values":[0.0303],"numerator":2579.1,"denominator":85203.04}],"facts":{"max":{"x":"2010-W19","s":null,"value":0.1349},"min":{"x":"2010-W33","s":null,"value":0.0072},"reference":{"value":0.0254,"numerator":238551.19,"denominator":9374379.514},"last_complete":{"x":"2010-W51","value":0.0303},"previous":{"x":"2010-W50","value":0.0308},"change_pct":-0.0162},"notes":[]},"top_weeks_gmv":{"rows":[{"x":"2010-W45","s":null,"values":[368797.561],"share":0.0393,"offset":9400.05,"offset_share":0.0255},{"x":"2010-W46","s":null,"values":[346265.661],"share":0.0369,"offset":3521.89,"offset_share":0.0102},{"x":"2010-W48","s":null,"values":[317195.43],"share":0.0338,"offset":8166.38,"offset_share":0.0257},{"x":"2010-W41","s":null,"values":[308215.36],"share":0.0329,"offset":2992.87,"offset_share":0.0097},{"x":"2010-W39","s":null,"values":[306341.43],"share":0.0327,"offset":19226.99,"offset_share":0.0628},{"x":"2010-W49","s":null,"values":[301082.39],"share":0.0321,"offset":5012.34,"offset_share":0.0166},{"x":"2010-W47","s":null,"values":[296090.42],"share":0.0316,"offset":9828.24,"offset_share":0.0332},{"x":"2010-W44","s":null,"values":[282088.03],"share":0.0301,"offset":7706.21,"offset_share":0.0273},{"x":"2010-W40","s":null,"values":[257586.24],"share":0.0275,"offset":3224.93,"offset_share":0.0125},{"x":"2010-W42","s":null,"values":[240912.45],"share":0.0257,"offset":8508.34,"offset_share":0.0353},{"x":"2010-W38","s":null,"values":[239315.26],"share":0.0255,"offset":3453.68,"offset_share":0.0144},{"x":"2010-W43","s":null,"values":[212365.97],"share":0.0227,"offset":10148.85,"offset_share":0.0478},{"x":"其他 39 个","s":null,"values":[5898123.312],"other":true,"share":0.6292}],"facts":{"total":9374379.514,"max":{"x":"2010-W45","s":null,"value":368797.561},"min":{"x":"2010-W43","s":null,"value":212365.97}},"notes":["只显示前 12 个，共 51 个，其余合并成“其他”"]}},"2011":{"kpi_gmv":{"rows":[{"x":null,"s":null,"values":[9471580.963]}],"facts":{"value":9471580.963},"notes":[]},"kpi_net":{"rows":[{"x":null,"s":null,"values":[9013227.663]}],"facts":{"value":9013227.663},"notes":[]},"kpi_aov":{"rows":[{"x":null,"s":null,"values":[519.7597]}],"facts":{"value":519.7597,"numerator":9471580.963,"denominator":18223},"notes":[]},"gmv_by_week":{"rows":[{"x":"2011-W01","s":null,"values":[130274.65]},{"x":"2011-W02","s":null,"values":[187291.3]},{"x":"2011-W03","s":null,"values":[209331.26]},{"x":"2011-W04","s":null,"values":[121001.73]},{"x":"2011-W05","s":null,"values":[121351.11]},{"x":"2011-W06","s":null,"values":[103570.49]},{"x":"2011-W07","s":null,"values":[140305.11]},{"x":"2011-W08","s":null,"values":[145237.07]},{"x":"2011-W09","s":null,"values":[127588.35]},{"x":"2011-W10","s":null,"values":[129034.74]},{"x":"2011-W11","s":null,"values":[153340.36]},{"x":"2011-W12","s":null,"values":[144841.46]},{"x":"2011-W13","s":null,"values":[186550.75]},{"x":"2011-W14","s":null,"values":[122784.05]},{"x":"2011-W15","s":null,"values":[146013.111]},{"x":"2011-W16","s":null,"values":[138298.14]},{"x":"2011-W17","s":null,"values":[83392.04]},{"x":"2011-W18","s":null,"values":[136790.86]},{"x":"2011-W19","s":null,"values":[204717.07]},{"x":"2011-W20","s":null,"values":[210335.39]},{"x":"2011-W21","s":null,"values":[159463.82]},{"x":"2011-W22","s":null,"values":[115065.0]},{"x":"2011-W23","s":null,"values":[214478.31]},{"x":"2011-W24","s":null,"values":[186572.2]},{"x":"2011-W25","s":null,"values":[127368.72]},{"x":"2011-W26","s":null,"values":[134870.16]},{"x":"2011-W27","s":null,"values":[170124.54]},{"x":"2011-W28","s":null,"values":[132628.72]},{"x":"2011-W29","s":null,"values":[187781.16]},{"x":"2011-W30","s":null,"values":[178721.261]},{"x":"2011-W31","s":null,"values":[167894.34]},{"x":"2011-W32","s":null,"values":[169299.45]},{"x":"2011-W33","s":null,"values":[173145.63]},{"x":"2011-W34","s":null,"values":[160921.68]},{"x":"2011-W35","s":null,"values":[146557.05]},{"x":"2011-W36","s":null,"values":[187162.33]},{"x":"2011-W37","s":null,"values":[223863.7]},{"x":"2011-W38","s":null,"values":[328713.431]},{"x":"2011-W39","s":null,"values":[206510.83]},{"x":"2011-W40","s":null,"values":[310948.14]},{"x":"2011-W41","s":null,"values":[221268.1]},{"x":"2011-W42","s":null,"values":[264358.21]},{"x":"2011-W43","s":null,"values":[242683.19]},{"x":"2011-W44","s":null,"values":[292747.79]},{"x":"2011-W45","s":null,"values":[357706.72]},{"x":"2011-W46","s":null,"values":[373178.36]},{"x":"2011-W47","s":null,"values":[302392.22]},{"x":"2011-W48","s":null,"values":[309381.73]},{"x":"2011-W49","s":null,"values":[483725.13],"partial":true}],"facts":{"max":{"x":"2011-W49","s":null,"value":483725.13},"min":{"x":"2011-W17","s":null,"value":83392.04},"last_complete":{"x":"2011-W48","value":309381.73},"previous":{"x":"2011-W47","value":302392.22},"change_pct":0.0231},"notes":["2011-W49 只覆盖了部分时间（数据范围 2009-12-01 至 2011-12-09），不能和完整的周期直接比"]},"net_by_week":{"rows":[{"x":"2011-W01","s":null,"values":[125510.62]},{"x":"2011-W02","s":null,"values":[184947.27]},{"x":"2011-W03","s":null,"values":[130490.66]},{"x":"2011-W04","s":null,"values":[116701.05]},{"x":"2011-W05","s":null,"values":[119042.61]},{"x":"2011-W06","s":null,"values":[100266.79]},{"x":"2011-W07","s":null,"values":[139551.77]},{"x":"2011-W08","s":null,"values":[141993.33]},{"x":"2011-W09","s":null,"values":[126218.29]},{"x":"2011-W10","s":null,"values":[127570.42]},{"x":"2011-W11","s":null,"values":[151299.57]},{"x":"2011-W12","s":null,"values":[143236.19]},{"x":"2011-W13","s":null,"values":[181184.16]},{"x":"2011-W14","s":null,"values":[119040.45]},{"x":"2011-W15","s":null,"values":[144138.001]},{"x":"2011-W16","s":null,"values":[113878.62]},{"x":"2011-W17","s":null,"values":[81447.94]},{"x":"2011-W18","s":null,"values":[135502.05]},{"x":"2011-W19","s":null,"values":[202024.22]},{"x":"2011-W20","s":null,"values":[207926.07]},{"x":"2011-W21","s":null,"values":[157659.72]},{"x":"2011-W22","s":null,"values":[113356.54]},{"x":"2011-W23","s":null,"values":[211930.47]},{"x":"2011-W24","s":null,"values":[182270.95]},{"x":"2011-W25","s":null,"values":[123103.44]},{"x":"2011-W26","s":null,"values":[132677.51]},{"x":"2011-W27","s":null,"values":[167877.09]},{"x":"2011-W28","s":null,"values":[130616.62]},{"x":"2011-W29","s":null,"values":[182809.33]},{"x":"2011-W30","s":null,"values":[177100.921]},{"x":"2011-W31","s":null,"values":[161741.12]},{"x":"2011-W32","s":null,"values":[167782.54]},{"x":"2011-W33","s":null,"values":[169893.42]},{"x":"2011-W34","s":null,"values":[157843.74]},{"x":"2011-W35","s":null,"values":[137221.35]},{"x":"2011-W36","s":null,"values":[185293.56]},{"x":"2011-W37","s":null,"values":[222269.79]},{"x":"2011-W38","s":null,"values":[319745.941]},{"x":"2011-W39","s":null,"values":[202358.82]},{"x":"2011-W40","s":null,"values":[300307.48]},{"x":"2011-W41","s":null,"values":[204251.49]},{"x":"2011-W42","s":null,"values":[259053.85]},{"x":"2011-W43","s":null,"values":[234202.83]},{"x":"2011-W44","s":null,"values":[288344.46]},{"x":"2011-W45","s":null,"values":[350123.4]},{"x":"2011-W46","s":null,"values":[369129.47]},{"x":"2011-W47","s":null,"values":[295233.31]},{"x":"2011-W48","s":null,"values":[306115.06]},{"x":"2011-W49","s":null,"values":[310943.36],"partial":true}],"facts":{"max":{"x":"2011-W46","s":null,"value":369129.47},"min":{"x":"2011-W17","s":null,"value":81447.94},"last_complete":{"x":"2011-W48","value":306115.06},"previous":{"x":"2011-W47","value":295233.31},"change_pct":0.0369},"notes":["2011-W49 只覆盖了部分时间（数据范围 2009-12-01 至 2011-12-09），不能和完整的周期直接比"]},"orders_by_week":{"rows":[{"x":"2011-W01","s":null,"values":[242]},{"x":"2011-W02","s":null,"values":[258]},{"x":"2011-W03","s":null,"values":[229]},{"x":"2011-W04","s":null,"values":[290]},{"x":"2011-W05","s":null,"values":[295]},{"x":"2011-W06","s":null,"values":[222]},{"x":"2011-W07","s":null,"values":[294]},{"x":"2011-W08","s":null,"values":[289]},{"x":"2011-W09","s":null,"values":[283]},{"x":"2011-W10","s":null,"values":[290]},{"x":"2011-W11","s":null,"values":[338]},{"x":"2011-W12","s":null,"values":[323]},{"x":"2011-W13","s":null,"values":[355]},{"x":"2011-W14","s":null,"values":[313]},{"x":"2011-W15","s":null,"values":[367]},{"x":"2011-W16","s":null,"values":[267]},{"x":"2011-W17","s":null,"values":[212]},{"x":"2011-W18","s":null,"values":[362]},{"x":"2011-W19","s":null,"values":[434]},{"x":"2011-W20","s":null,"values":[450]},{"x":"2011-W21","s":null,"values":[350]},{"x":"2011-W22","s":null,"values":[259]},{"x":"2011-W23","s":null,"values":[406]},{"x":"2011-W24","s":null,"values":[370]},{"x":"2011-W25","s":null,"values":[334]},{"x":"2011-W26","s":null,"values":[283]},{"x":"2011-W27","s":null,"values":[357]},{"x":"2011-W28","s":null,"values":[324]},{"x":"2011-W29","s":null,"values":[355]},{"x":"2011-W30","s":null,"values":[343]},{"x":"2011-W31","s":null,"values":[314]},{"x":"2011-W32","s":null,"values":[270]},{"x":"2011-W33","s":null,"values":[315]},{"x":"2011-W34","s":null,"values":[356]},{"x":"2011-W35","s":null,"values":[282]},{"x":"2011-W36","s":null,"values":[391]},{"x":"2011-W37","s":null,"values":[360]},{"x":"2011-W38","s":null,"values":[463]},{"x":"2011-W39","s":null,"values":[441]},{"x":"2011-W40","s":null,"values":[488]},{"x":"2011-W41","s":null,"values":[448]},{"x":"2011-W42","s":null,"values":[446]},{"x":"2011-W43","s":null,"values":[519]},{"x":"2011-W44","s":null,"values":[527]},{"x":"2011-W45","s":null,"values":[634]},{"x":"2011-W46","s":null,"values":[687]},{"x":"2011-W47","s":null,"values":[616]},{"x":"2011-W48","s":null,"values":[663]},{"x":"2011-W49","s":null,"values":[509],"partial":true}],"facts":{"max":{"x":"2011-W46","s":null,"value":687},"min":{"x":"2011-W17","s":null,"value":212},"last_complete":{"x":"2011-W48","value":663},"previous":{"x":"2011-W47","value":616},"change_pct":0.0763},"notes":["2011-W49 只覆盖了部分时间（数据范围 2009-12-01 至 2011-12-09），不能和完整的周期直接比"]},"aov_by_week":{"rows":[{"x":"2011-W01","s":null,"values":[538.325],"numerator":130274.65,"denominator":242},{"x":"2011-W02","s":null,"values":[725.9353],"numerator":187291.3,"denominator":258},{"x":"2011-W03","s":null,"values":[914.1103],"numerator":209331.26,"denominator":229},{"x":"2011-W04","s":null,"values":[417.2473],"numerator":121001.73,"denominator":290},{"x":"2011-W05","s":null,"values":[411.3597],"numerator":121351.11,"denominator":295},{"x":"2011-W06","s":null,"values":[466.5337],"numerator":103570.49,"denominator":222},{"x":"2011-W07","s":null,"values":[477.2283],"numerator":140305.11,"denominator":294},{"x":"2011-W08","s":null,"values":[502.5504],"numerator":145237.07,"denominator":289},{"x":"2011-W09","s":null,"values":[450.8422],"numerator":127588.35,"denominator":283},{"x":"2011-W10","s":null,"values":[444.9474],"numerator":129034.74,"denominator":290},{"x":"2011-W11","s":null,"values":[453.6697],"numerator":153340.36,"denominator":338},{"x":"2011-W12","s":null,"values":[448.4256],"numerator":144841.46,"denominator":323},{"x":"2011-W13","s":null,"values":[525.4951],"numerator":186550.75,"denominator":355},{"x":"2011-W14","s":null,"values":[392.2813],"numerator":122784.05,"denominator":313},{"x":"2011-W15","s":null,"values":[397.8559],"numerator":146013.111,"denominator":367},{"x":"2011-W16","s":null,"values":[517.9706],"numerator":138298.14,"denominator":267},{"x":"2011-W17","s":null,"values":[393.3587],"numerator":83392.04,"denominator":212},{"x":"2011-W18","s":null,"values":[377.8753],"numerator":136790.86,"denominator":362},{"x":"2011-W19","s":null,"values":[471.6983],"numerator":204717.07,"denominator":434},{"x":"2011-W20","s":null,"values":[467.412],"numerator":210335.39,"denominator":450},{"x":"2011-W21","s":null,"values":[455.6109],"numerator":159463.82,"denominator":350},{"x":"2011-W22","s":null,"values":[444.2664],"numerator":115065.0,"denominator":259},{"x":"2011-W23","s":null,"values":[528.2717],"numerator":214478.31,"denominator":406},{"x":"2011-W24","s":null,"values":[504.2492],"numerator":186572.2,"denominator":370},{"x":"2011-W25","s":null,"values":[381.3435],"numerator":127368.72,"denominator":334},{"x":"2011-W26","s":null,"values":[476.573],"numerator":134870.16,"denominator":283},{"x":"2011-W27","s":null,"values":[476.5393],"numerator":170124.54,"denominator":357},{"x":"2011-W28","s":null,"values":[409.3479],"numerator":132628.72,"denominator":324},{"x":"2011-W29","s":null,"values":[528.961],"numerator":187781.16,"denominator":355},{"x":"2011-W30","s":null,"values":[521.0532],"numerator":178721.261,"denominator":343},{"x":"2011-W31","s":null,"values":[534.6954],"numerator":167894.34,"denominator":314},{"x":"2011-W32","s":null,"values":[627.035],"numerator":169299.45,"denominator":270},{"x":"2011-W33","s":null,"values":[549.6687],"numerator":173145.63,"denominator":315},{"x":"2011-W34","s":null,"values":[452.0272],"numerator":160921.68,"denominator":356},{"x":"2011-W35","s":null,"values":[519.7059],"numerator":146557.05,"denominator":282},{"x":"2011-W36","s":null,"values":[478.676],"numerator":187162.33,"denominator":391},{"x":"2011-W37","s":null,"values":[621.8436],"numerator":223863.7,"denominator":360},{"x":"2011-W38","s":null,"values":[709.9642],"numerator":328713.431,"denominator":463},{"x":"2011-W39","s":null,"values":[468.2785],"numerator":206510.83,"denominator":441},{"x":"2011-W40","s":null,"values":[637.1888],"numerator":310948.14,"denominator":488},{"x":"2011-W41","s":null,"values":[493.902],"numerator":221268.1,"denominator":448},{"x":"2011-W42","s":null,"values":[592.7314],"numerator":264358.21,"denominator":446},{"x":"2011-W43","s":null,"values":[467.5977],"numerator":242683.19,"denominator":519},{"x":"2011-W44","s":null,"values":[555.4987],"numerator":292747.79,"denominator":527},{"x":"2011-W45","s":null,"values":[564.2062],"numerator":357706.72,"denominator":634},{"x":"2011-W46","s":null,"values":[543.1999],"numerator":373178.36,"denominator":687},{"x":"2011-W47","s":null,"values":[490.8965],"numerator":302392.22,"denominator":616},{"x":"2011-W48","s":null,"values":[466.6391],"numerator":309381.73,"denominator":663},{"x":"2011-W49","s":null,"values":[950.3441],"numerator":483725.13,"denominator":509,"partial":true}],"facts":{"max":{"x":"2011-W49","s":null,"value":950.3441},"min":{"x":"2011-W18","s":null,"value":377.8753},"reference":{"value":519.7597,"numerator":9471580.963,"denominator":18223},"last_complete":{"x":"2011-W48","value":466.6391},"previous":{"x":"2011-W47","value":490.8965},"change_pct":-0.0494},"notes":["2011-W49 只覆盖了部分时间（数据范围 2009-12-01 至 2011-12-09），不能和完整的周期直接比"]},"cancel_rate_by_week":{"rows":[{"x":"2011-W01","s":null,"values":[0.0366],"numerator":4764.03,"denominator":130274.65},{"x":"2011-W02","s":null,"values":[0.0125],"numerator":2344.03,"denominator":187291.3},{"x":"2011-W03","s":null,"values":[0.3766],"numerator":78840.6,"denominator":209331.26},{"x":"2011-W04","s":null,"values":[0.0355],"numerator":4300.68,"denominator":121001.73},{"x":"2011-W05","s":null,"values":[0.019],"numerator":2308.5,"denominator":121351.11},{"x":"2011-W06","s":null,"values":[0.0319],"numerator":3303.7,"denominator":103570.49},{"x":"2011-W07","s":null,"values":[0.0054],"numerator":753.34,"denominator":140305.11},{"x":"2011-W08","s":null,"values":[0.0223],"numerator":3243.74,"denominator":145237.07},{"x":"2011-W09","s":null,"values":[0.0107],"numerator":1370.06,"denominator":127588.35},{"x":"2011-W10","s":null,"values":[0.0113],"numerator":1464.32,"denominator":129034.74},{"x":"2011-W11","s":null,"values":[0.0133],"numerator":2040.79,"denominator":153340.36},{"x":"2011-W12","s":null,"values":[0.0111],"numerator":1605.27,"denominator":144841.46},{"x":"2011-W13","s":null,"values":[0.0288],"numerator":5366.59,"denominator":186550.75},{"x":"2011-W14","s":null,"values":[0.0305],"numerator":3743.6,"denominator":122784.05},{"x":"2011-W15","s":null,"values":[0.0128],"numerator":1875.11,"denominator":146013.111},{"x":"2011-W16","s":null,"values":[0.1766],"numerator":24419.52,"denominator":138298.14},{"x":"2011-W17","s":null,"values":[0.0233],"numerator":1944.1,"denominator":83392.04},{"x":"2011-W18","s":null,"values":[0.0094],"numerator":1288.81,"denominator":136790.86},{"x":"2011-W19","s":null,"values":[0.0132],"numerator":2692.85,"denominator":204717.07},{"x":"2011-W20","s":null,"values":[0.0115],"numerator":2409.32,"denominator":210335.39},{"x":"2011-W21","s":null,"values":[0.0113],"numerator":1804.1,"denominator":159463.82},{"x":"2011-W22","s":null,"values":[0.0148],"numerator":1708.46,"denominator":115065.0},{"x":"2011-W23","s":null,"values":[0.0119],"numerator":2547.84,"denominator":214478.31},{"x":"2011-W24","s":null,"values":[0.0231],"numerator":4301.25,"denominator":186572.2},{"x":"2011-W25","s":null,"values":[0.0335],"numerator":4265.28,"denominator":127368.72},{"x":"2011-W26","s":null,"values":[0.0163],"numerator":2192.65,"denominator":134870.16},{"x":"2011-W27","s":null,"values":[0.0132],"numerator":2247.45,"denominator":170124.54},{"x":"2011-W28","s":null,"values":[0.0152],"numerator":2012.1,"denominator":132628.72},{"x":"2011-W29","s":null,"values":[0.0265],"numerator":4971.83,"denominator":187781.16},{"x":"2011-W30","s":null,"values":[0.0091],"numerator":1620.34,"denominator":178721.261},{"x":"2011-W31","s":null,"values":[0.0366],"numerator":6153.22,"denominator":167894.34},{"x":"2011-W32","s":null,"values":[0.009],"numerator":1516.91,"denominator":169299.45},{"x":"2011-W33","s":null,"values":[0.0188],"numerator":3252.21,"denominator":173145.63},{"x":"2011-W34","s":null,"values":[0.0191],"numerator":3077.94,"denominator":160921.68},{"x":"2011-W35","s":null,"values":[0.0637],"numerator":9335.7,"denominator":146557.05},{"x":"2011-W36","s":null,"values":[0.01],"numerator":1868.77,"denominator":187162.33},{"x":"2011-W37","s":null,"values":[0.0071],"numerator":1593.91,"denominator":223863.7},{"x":"2011-W38","s":null,"values":[0.0273],"numerator":8967.49,"denominator":328713.431},{"x":"2011-W39","s":null,"values":[0.0201],"numerator":4152.01,"denominator":206510.83},{"x":"2011-W40","s":null,"values":[0.0342],"numerator":10640.66,"denominator":310948.14},{"x":"2011-W41","s":null,"values":[0.0769],"numerator":17016.61,"denominator":221268.1},{"x":"2011-W42","s":null,"values":[0.0201],"numerator":5304.36,"denominator":264358.21},{"x":"2011-W43","s":null,"values":[0.0349],"numerator":8480.36,"denominator":242683.19},{"x":"2011-W44","s":null,"values":[0.015],"numerator":4403.33,"denominator":292747.79},{"x":"2011-W45","s":null,"values":[0.0212],"numerator":7583.32,"denominator":357706.72},{"x":"2011-W46","s":null,"values":[0.0108],"numerator":4048.89,"denominator":373178.36},{"x":"2011-W47","s":null,"values":[0.0237],"numerator":7158.91,"denominator":302392.22},{"x":"2011-W48","s":null,"values":[0.0106],"numerator":3266.67,"denominator":309381.73},{"x":"2011-W49","s":null,"values":[0.3572],"numerator":172781.77,"denominator":483725.13,"partial":true}],"facts":{"max":{"x":"2011-W03","s":null,"value":0.3766},"min":{"x":"2011-W07","s":null,"value":0.0054},"reference":{"value":0.0484,"numerator":458353.3,"denominator":9471580.963},"last_complete":{"x":"2011-W48","value":0.0106},"previous":{"x":"2011-W47","value":0.0237},"change_pct":-0.5527},"notes":["2011-W49 只覆盖了部分时间（数据范围 2009-12-01 至 2011-12-09），不能和完整的周期直接比"]},"top_weeks_gmv":{"rows":[{"x":"2011-W49","s":null,"values":[483725.13],"share":0.0511,"offset":172781.77,"offset_share":0.3572},{"x":"2011-W46","s":null,"values":[373178.36],"share":0.0394,"offset":4048.89,"offset_share":0.0108},{"x":"2011-W45","s":null,"values":[357706.72],"share":0.0378,"offset":7583.32,"offset_share":0.0212},{"x":"2011-W38","s":null,"values":[328713.431],"share":0.0347,"offset":8967.49,"offset_share":0.0273},{"x":"2011-W40","s":null,"values":[310948.14],"share":0.0328,"offset":10640.66,"offset_share":0.0342},{"x":"2011-W48","s":null,"values":[309381.73],"share":0.0327,"offset":3266.67,"offset_share":0.0106},{"x":"2011-W47","s":null,"values":[302392.22],"share":0.0319,"offset":7158.91,"offset_share":0.0237},{"x":"2011-W44","s":null,"values":[292747.79],"share":0.0309,"offset":4403.33,"offset_share":0.015},{"x":"2011-W42","s":null,"values":[264358.21],"share":0.0279,"offset":5304.36,"offset_share":0.0201},{"x":"2011-W43","s":null,"values":[242683.19],"share":0.0256,"offset":8480.36,"offset_share":0.0349},{"x":"2011-W37","s":null,"values":[223863.7],"share":0.0236,"offset":1593.91,"offset_share":0.0071},{"x":"2011-W41","s":null,"values":[221268.1],"share":0.0234,"offset":17016.61,"offset_share":0.0769},{"x":"其他 37 个","s":null,"values":[5760614.242],"other":true,"share":0.6082}],"facts":{"total":9471580.963,"max":{"x":"2011-W49","s":null,"value":483725.13},"min":{"x":"2011-W41","s":null,"value":221268.1}},"notes":["只显示前 12 个，共 49 个，其余合并成“其他”"]}}}}</script>
+<script>/* 看板图表组件：M12 手工看板和 M13 Agent 生成的看板共用。不依赖第三方库，图直接画成 SVG。
+   规范（dataviz 方法）：柱宽不超过 24px、数据端 4px 圆角、2px 背景色缝、2px 折线、≥8px 端点、发丝细网格；
+   每张图都能悬停（也能用 Tab 键聚焦）看数，并有表格视图。来自数据的文字一律用文本节点写进页面，不拼 HTML。 */
+window.DashCharts = (() => {
+  'use strict';
+  const NS = 'http://www.w3.org/2000/svg';
+
+  // ---------- 小工具 ----------
+  const h = (tag, attrs = {}, ...children) => {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v == null || v === false) continue;
+      if (k === 'class') el.className = v;
+      else if (k === 'style') el.style.cssText = v;
+      else el.setAttribute(k, v === true ? '' : v);
+    }
+    for (const c of children.flat()) {
+      if (c != null && c !== false) el.append(c instanceof Node ? c : document.createTextNode(String(c)));
+    }
+    return el;
+  };
+  const s = (tag, attrs, parent) => {
+    const el = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) if (v != null) el.setAttribute(k, v);
+    if (parent) parent.append(el);
+    return el;
+  };
+  const label = (parent, x, y, content, attrs = {}) => {
+    const t = s('text', {x, y, ...attrs}, parent);
+    t.textContent = content;
+    return t;
+  };
+  const token = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  const num = v => Number(v).toLocaleString('en-US');
+  const money = v => '£' + Number(v).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const moneyShort = v => {
+    const a = Math.abs(v);
+    if (a >= 1e8) return '£' + (v / 1e8).toLocaleString('en-US', {maximumFractionDigits: 2}) + '亿';
+    if (a >= 1e4) return '£' + (v / 1e4).toLocaleString('en-US', {maximumFractionDigits: 1}) + '万';
+    return '£' + Math.round(v).toLocaleString('en-US');
+  };
+  const pct = (r, d = 1) => (r == null ? '—' : (r * 100).toFixed(d) + '%');
+  const monthName = m => `${m.slice(0, 4)} 年 ${Number(m.slice(5))} 月`;
+  const sum = xs => xs.reduce((a, b) => a + b, 0);
+  // 12px 字号下文字大约多宽：西文和数字约 7px，中文约 12px（只用来排标签，不需要精确）
+  const textWidth = text => [...String(text)].reduce((w, ch) => w + (/[\u0000-\u00ff]/.test(ch) ? 7 : 12), 0);
+
+  // 坐标刻度取整：1、2、2.5、5 × 10^k
+  function niceTicks(max, count = 4) {
+    const raw = max / count;
+    const mag = 10 ** Math.floor(Math.log10(raw || 1));
+    const step = [1, 2, 2.5, 5, 10].map(f => f * mag).find(st => st >= raw);
+    const ticks = [];
+    for (let t = 0; t < max + step * 0.999; t += step) ticks.push(t);
+    return ticks.length > 1 ? ticks : [0, step];
+  }
+
+  // 顺序色阶：7 个色阶之间线性插值。深色模式的色阶在 CSS 里已经反过来（数值小的接近背景）
+  function seqColor(t) {
+    const steps = [0, 1, 2, 3, 4, 5, 6].map(i => token(`--seq-${i}`));
+    const x = Math.min(Math.max(t, 0), 1) * 6, i = Math.min(Math.floor(x), 5), f = x - i;
+    const rgb = hex => [1, 3, 5].map(k => parseInt(hex.slice(k, k + 2), 16));
+    const [a, b] = [rgb(steps[i]), rgb(steps[i + 1])];
+    return `rgb(${a.map((v, k) => Math.round(v + (b[k] - v) * f)).join(',')})`;
+  }
+
+  // ---------- 悬停提示：数值在前（加粗），名称在后；系列用短线标识 ----------
+  const tip = h('div', {class: 'tip dash-tip', role: 'status'});
+  tip.hidden = true;
+  document.body.append(tip);
+  function showTip([title, rows], x, y) {
+    tip.replaceChildren(h('div', {class: 'tip-title'}, title), ...rows.map(r => h('div', {class: 'tip-row'},
+      r.color ? h('i', {class: 'key', style: `background:${r.color}`}) : null,
+      h('strong', {}, r.value), h('span', {}, r.label))));
+    tip.hidden = false;
+    const b = tip.getBoundingClientRect();
+    tip.style.left = Math.min(Math.max(8, x + 14), innerWidth - b.width - 8) + 'px';
+    tip.style.top = (y - b.height - 14 < 8 ? y + 18 : y - b.height - 14) + 'px';
+  }
+  const hideTip = () => { tip.hidden = true; };
+  function hover(el, getTip) {
+    el.addEventListener('pointermove', e => showTip(getTip(e), e.clientX, e.clientY));
+    el.addEventListener('pointerleave', hideTip);
+    el.addEventListener('focus', () => {
+      const b = el.getBoundingClientRect();
+      showTip(getTip(null), b.left + b.width / 2, b.top);
+    });
+    el.addEventListener('blur', hideTip);
+  }
+
+  // ---------- 图表 ----------
+  // 柱状图（单系列或堆叠）：柱宽不超过 24px，顶端 4px 圆角、底部贴基线；堆叠段之间留 2px 背景色缝。
+  // points：[{key, partial}]；key 是 YYYY-MM 时，横轴标签对齐到 1、4、7、10 月这类整月，否则每隔几个标一个
+  // colorAt(i)：单系列时每根柱自己的颜色（突出几个分组，其余变灰）；reference：{value, text} 画一条整体值的虚线
+  function drawColumns(host, {points, series, format, onTip, title, name = k => k, height = 240, colorAt = null,
+                              reference = null}) {
+    const W = Math.max(host.clientWidth, 280), H = height, m = {l: 64, r: reference ? REF_MARGIN : 8, t: 24, b: 28};
+    const pw = W - m.l - m.r, ph = H - m.t - m.b, n = points.length;
+    const totals = points.map((_, i) => sum(series.map(sr => Math.max(0, sr.values[i] || 0))));
+    // 坐标轴按数据的最大值取整，不设下限 1：比率 0.25 要占满高度，而不是画成 0–100% 里矮矮的一截
+    const ticks = niceTicks(Math.max(...totals, reference ? reference.value : 0) || 1);
+    const top = ticks[ticks.length - 1];
+    const y = v => m.t + ph - (v / top) * ph;
+    const svg = s('svg', {viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', 'aria-label': title});
+    for (const t of ticks) {
+      s('line', {x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), class: t ? 'grid' : 'base'}, svg);
+      label(svg, m.l - 8, y(t) + 4, format(t), {class: 'tick', 'text-anchor': 'end'});
+    }
+    const band = pw / n, bw = Math.min(24, band * 0.72);
+    xLabels(svg, points.map(p => p.key), i => m.l + band * i + band / 2, H - 8, band);
+    points.forEach((p, i) => {
+      const g = s('g', {class: 'mark' + (p.partial ? ' partial' : '')}, svg);
+      const x = m.l + band * i + (band - bw) / 2;
+      const shown = series.filter(sr => sr.values[i] > 0);
+      let base = y(0);
+      for (const sr of shown) {
+        const top_ = base - (sr.values[i] / top) * ph;
+        const bottom = sr === shown[0] ? base : base - 2;
+        if (bottom - top_ > 0.5) {
+          const r = sr === shown[shown.length - 1] ? Math.min(4, (bottom - top_) / 2, bw / 2) : 0;
+          s('path', {d: `M${x},${bottom}V${top_ + r}Q${x},${top_} ${x + r},${top_}H${x + bw - r}` +
+                       `Q${x + bw},${top_} ${x + bw},${top_ + r}V${bottom}Z`,
+                     fill: colorAt && series.length === 1 ? colorAt(i) : sr.color}, g);
+        }
+        base = top_;
+      }
+      // 不完整的周期只标一个 *：手机上柱子只有十几像素宽，写字会压到旁边的柱子；说明写在图下方
+      if (p.partial) label(svg, x + bw / 2, base - 6, '*', {class: 'val', 'text-anchor': 'middle'});
+      const hit = s('rect', {x: m.l + band * i, y: m.t, width: band, height: ph, class: 'hit', tabindex: 0,
+                             'aria-label': `${name(p.key)}：${format(totals[i])}`}, g);
+      hover(hit, () => onTip(i));
+    });
+    if (reference) referenceLine(svg, m.l, W - m.r, y(reference.value), reference.text);
+    host.replaceChildren(svg);
+  }
+
+  // 参考线：虚线横穿整个绘图区，文字“整体 15.5%”写在绘图区右边留出的空白里，不压在柱子和点上
+  const REF_MARGIN = 76;
+  function referenceLine(svg, x1, x2, yy, text) {
+    s('line', {x1, x2, y1: yy, y2: yy, class: 'refline'}, svg);
+    if (text) label(svg, x2 + 4, yy + 4, text, {class: 'reflabel'});
+  }
+
+  // 横轴标签：YYYY-MM 对齐整月；其他每隔几个标一个。间距按最长的标签算（至少 28px）：
+  // “2011-12”要约 58px，“Mar”只要约 30px，半宽的图上 10 个月份也能全部标出来
+  function xLabels(svg, keys, xAt, y, band) {
+    const monthly = keys.every(k => /^\d{4}-\d{2}$/.test(k));
+    const gap = Math.max(28, Math.max(...keys.map(textWidth)) + 10);
+    const every = [1, 2, 3, 6, 12].find(k => band * k >= gap) || Math.ceil(gap / band);
+    keys.forEach((k, i) => {
+      const show = monthly ? (Number(k.slice(5)) - 1) % every === 0 : i % every === 0;
+      if (show) label(svg, xAt(i), y, k, {class: 'tick', 'text-anchor': 'middle'});
+    });
+  }
+
+  // 折线（可多条）：2px 线、round 连接；竖线跟随指针找到最近的横轴位置，提示里列出每条线在这一点的值
+  function drawLines(host, {points, series, format, onTip, title, name = k => k, height = 240, reference = null}) {
+    const W = Math.max(host.clientWidth, 280), H = height, m = {l: 64, r: reference ? REF_MARGIN : 16, t: 16, b: 28};
+    const pw = W - m.l - m.r, ph = H - m.t - m.b, n = points.length;
+    // 纵轴从 0 起（有负数时包含负数）：按整齐的步长向外取整，0 一定是其中一条刻度线
+    const all = series.flatMap(sr => sr.values).filter(v => v != null).concat(reference ? [reference.value] : []);
+    const lo = Math.min(0, ...all), hi = Math.max(0, ...all);
+    const tickStep = niceTicks(hi - lo || 1)[1];
+    const bottom = Math.floor(lo / tickStep) * tickStep, top = Math.ceil(hi / tickStep) * tickStep || tickStep;
+    const ticks = [];
+    for (let t = bottom; t <= top + tickStep * 1e-9; t += tickStep) ticks.push(Math.abs(t) < tickStep * 1e-9 ? 0 : t);
+    const x = i => m.l + (n > 1 ? (i / (n - 1)) * pw : pw / 2);
+    const y = v => m.t + ph - ((v - bottom) / (top - bottom || 1)) * ph;
+    const svg = s('svg', {viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', 'aria-label': title});
+    for (const t of ticks) {
+      s('line', {x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), class: t === 0 ? 'base' : 'grid'}, svg);
+      label(svg, m.l - 8, y(t) + 4, format(t), {class: 'tick', 'text-anchor': 'end'});
+    }
+    xLabels(svg, points.map(p => p.key), x, H - 8, pw / Math.max(n - 1, 1));
+    if (reference) referenceLine(svg, m.l, W - m.r, y(reference.value), reference.text);
+    for (const sr of series) {
+      let d = '';
+      sr.values.forEach((v, i) => { if (v != null) d += `${d && sr.values[i - 1] != null ? 'L' : 'M'}${x(i)},${y(v)}`; });
+      s('path', {d, fill: 'none', stroke: sr.color, 'stroke-width': 2, 'stroke-linejoin': 'round',
+                 'stroke-linecap': 'round'}, svg);
+      const last = sr.values.map((v, i) => [v, i]).filter(([v]) => v != null).pop();
+      if (last) s('circle', {cx: x(last[1]), cy: y(last[0]), r: 4, fill: sr.color, stroke: token('--surface'),
+                             'stroke-width': 2}, svg);
+    }
+    points.forEach((p, i) => {
+      if (p.partial) label(svg, x(i), m.t + 10, '*', {class: 'val', 'text-anchor': 'middle'});
+    });
+    const cross = s('line', {y1: m.t, y2: m.t + ph, class: 'cross', visibility: 'hidden'}, svg);
+    const step = n > 1 ? pw / (n - 1) : pw;
+    points.forEach((p, i) => {
+      const hit = s('rect', {x: x(i) - step / 2, y: m.t, width: step, height: ph, class: 'hit', tabindex: 0,
+                             'aria-label': `${name(p.key)}：` + series.map(sr => `${sr.name} ${sr.values[i] == null ? '—' : format(sr.values[i])}`).join('，')}, svg);
+      hover(hit, () => {
+        cross.setAttribute('x1', x(i));
+        cross.setAttribute('x2', x(i));
+        cross.setAttribute('visibility', 'visible');
+        return onTip(i);
+      });
+      hit.addEventListener('pointerleave', () => cross.setAttribute('visibility', 'hidden'));
+    });
+    host.replaceChildren(svg);
+  }
+
+  // 横向条形（HTML）：数据端 4px 圆角，数值在右侧一列；长名字截断，完整名字在悬停提示和表格里。
+  // item.accent 突出（名字加粗）、item.dim 变灰；reference：{value} 在每一行的同一位置画虚线，连起来是一条竖线
+  function drawBars(host, items, {reference = null} = {}) {
+    const max = Math.max(...items.map(it => it.value), reference ? reference.value : 0) || 1;
+    host.replaceChildren(h('div', {class: 'hbars', role: 'list'}, items.map(it => {
+      const cls = 'hbar' + (it.muted ? ' muted' : '') + (it.dim ? ' dim' : '') + (it.accent ? ' accent' : '');
+      const row = h('div', {class: cls, role: 'listitem', tabindex: 0, 'aria-label': `${it.label}：${it.valueText}`},
+        h('span', {class: 'hbar-label'}, it.label),
+        h('span', {class: 'hbar-track'}, h('span', {class: 'hbar-fill', style: `width:${(it.value / max) * 100}%`}),
+          reference ? h('span', {class: 'hbar-ref', style: `left:${(reference.value / max) * 100}%`}) : null),
+        h('span', {class: 'hbar-value'}, it.valueText));
+      hover(row, () => [it.tipTitle || it.label, it.tip]);
+      return row;
+    })));
+  }
+
+  // 热力图：格子之间 2px 背景色缝；悬停格子描边
+  function drawHeatmap(host, {rowLabels, colLabels, colEvery = 1, values, max, onTip, title, minWidth = 0,
+                              cellH = 24, labelW = 44}) {
+    const W = Math.max(host.clientWidth, minWidth), cols = colLabels.length, m = {l: labelW, r: 2, t: 18, b: 2};
+    const cw = (W - m.l - m.r) / cols, H = m.t + rowLabels.length * cellH + m.b;
+    const svg = s('svg', {viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', 'aria-label': title,
+                          style: minWidth ? `min-width:${minWidth}px` : null});
+    colLabels.forEach((c, j) => {
+      if (j % colEvery === 0) label(svg, m.l + cw * j + cw / 2, 12, c, {class: 'tick', 'text-anchor': 'middle'});
+    });
+    rowLabels.forEach((r, i) => label(svg, m.l - 6, m.t + cellH * i + cellH / 2 + 4, r,
+                                      {class: 'tick', 'text-anchor': 'end'}));
+    values.forEach((row, i) => row.forEach((v, j) => {
+      if (v == null) return;
+      const cell = s('rect', {x: m.l + cw * j + 1, y: m.t + cellH * i + 1, width: Math.max(cw - 2, 1),
+                              height: cellH - 2, rx: 2, fill: seqColor(max ? v / max : 0), class: 'cell'}, svg);
+      hover(cell, () => onTip(i, j));
+    }));
+    host.replaceChildren(svg);
+  }
+
+  // 散点图：每个分类一个点，横轴一个指标（通常是规模）、纵轴另一个（通常是比率）；两个轴都从 0 起。
+  // 有突出的点时，只有它们用强调色并一定标名字，其余变灰；没有时，点少就全标，点多只标横轴最大的几个。
+  // 名字按顺序放，和已放的名字重叠就不放（悬停和表格里都能看到）
+  function drawScatter(host, {points, xFormat, yFormat, xTitle, yTitle, reference = null, onTip, title, height = 300}) {
+    const W = Math.max(host.clientWidth, 280), H = height, m = {l: 64, r: reference ? REF_MARGIN : 24, t: 26, b: 44};
+    const pw = W - m.l - m.r, ph = H - m.t - m.b;
+    const xt = niceTicks(Math.max(...points.map(p => p.x)) || 1);
+    const yt = niceTicks(Math.max(...points.map(p => p.y), reference ? reference.value : 0) || 1);
+    const xTop = xt[xt.length - 1], yTop = yt[yt.length - 1];
+    const x = v => m.l + (v / xTop) * pw, y = v => m.t + ph - (v / yTop) * ph;
+    const svg = s('svg', {viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', 'aria-label': title});
+    for (const t of yt) {
+      s('line', {x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), class: t ? 'grid' : 'base'}, svg);
+      label(svg, m.l - 8, y(t) + 4, yFormat(t), {class: 'tick', 'text-anchor': 'end'});
+    }
+    for (const t of xt) label(svg, x(t), m.t + ph + 18, xFormat(t), {class: 'tick', 'text-anchor': 'middle'});
+    label(svg, m.l, 14, `↑ ${yTitle}`, {class: 'axis-title'});
+    label(svg, W - m.r, H - 4, `${xTitle} →`, {class: 'axis-title', 'text-anchor': 'end'});
+    if (reference) referenceLine(svg, m.l, W - m.r, y(reference.value), reference.text);
+    const anyAccent = points.some(p => p.accent);
+    const accent = token('--series-1'), grey = token('--muted');
+    const order = points.map((p, i) => i).sort((a, b) => (points[b].accent - points[a].accent) || (points[b].x - points[a].x));
+    const named = new Set(anyAccent ? order.filter(i => points[i].accent)
+                                    : order.slice(0, points.length <= 12 ? points.length : 6));
+    for (const i of order.slice().reverse()) {  // 大的先画，突出的最后画，压在最上面
+      const p = points[i];
+      s('circle', {cx: x(p.x), cy: y(p.y), r: p.accent ? 6 : 5, fill: anyAccent && !p.accent ? grey : accent,
+                   'fill-opacity': anyAccent && !p.accent ? 0.75 : 0.9, stroke: token('--surface'), 'stroke-width': 1.5}, svg);
+    }
+    const placed = [];
+    for (const i of order) {
+      if (!named.has(i)) continue;
+      const p = points[i], w = textWidth(p.label), right = x(p.x) + 9 + w <= W - 2;
+      const box = {x1: right ? x(p.x) + 8 : x(p.x) - 8 - w, x2: right ? x(p.x) + 8 + w : x(p.x) - 8, y1: y(p.y) - 9, y2: y(p.y) + 5};
+      if (placed.some(b => b.x1 < box.x2 && box.x1 < b.x2 && b.y1 < box.y2 && box.y1 < b.y2)) continue;
+      placed.push(box);
+      label(svg, right ? x(p.x) + 8 : x(p.x) - 8, y(p.y) + 4, p.label,
+            {class: 'dot-label' + (p.accent ? ' accent' : ''), 'text-anchor': right ? 'start' : 'end'});
+    }
+    points.forEach((p, i) => {
+      const hit = s('circle', {cx: x(p.x), cy: y(p.y), r: 10, class: 'dot-hit', tabindex: 0,
+                               'aria-label': `${p.label}：${xTitle} ${xFormat(p.x)}，${yTitle} ${yFormat(p.y)}`}, svg);
+      hover(hit, () => onTip(i));
+    });
+    host.replaceChildren(svg);
+  }
+
+  function refLegend(text) {
+    return h('div', {class: 'legend'}, h('span', {}, h('b', {class: 'ref-key', 'aria-hidden': 'true'}), text));
+  }
+
+  function scaleLegend(minText, maxText) {
+    const stops = [0, 1, 2, 3, 4, 5, 6].map(i => token(`--seq-${i}`)).join(',');
+    return h('div', {class: 'scale'}, minText, h('span', {class: 'ramp', style: `background:linear-gradient(90deg,${stops})`}),
+             maxText);
+  }
+
+  // 集中度曲线：横轴是商品排名前 x%，纵轴是这些商品贡献的净销售额占比；竖线跟随指针，方向键也能移动
+  function drawPareto(host, pareto, count, title) {
+    const W = Math.max(host.clientWidth, 280), H = 260, m = {l: 44, r: 16, t: 14, b: 44};
+    const pw = W - m.l - m.r, ph = H - m.t - m.b;
+    const x = p => m.l + (p / 100) * pw, y = v => m.t + ph - v * ph;
+    const svg = s('svg', {viewBox: `0 0 ${W} ${H}`, class: 'chart', role: 'img', 'aria-label': title});
+    for (const v of [0, 0.25, 0.5, 0.75, 1]) {
+      s('line', {x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), class: v ? 'grid' : 'base'}, svg);
+      label(svg, m.l - 8, y(v) + 4, pct(v, 0), {class: 'tick', 'text-anchor': 'end'});
+    }
+    for (const p of [0, 20, 40, 60, 80, 100]) label(svg, x(p), m.t + ph + 18, p + '%', {class: 'tick', 'text-anchor': 'middle'});
+    label(svg, m.l + pw / 2, H - 4, '商品数量占比（按净销售额从高到低）', {class: 'tick', 'text-anchor': 'middle'});
+    s('line', {x1: x(0), y1: y(0), x2: x(100), y2: y(1), class: 'ref'}, svg);
+    label(svg, x(62), y(0.62) + 16, '如果每个商品卖得一样多', {class: 'tick', 'text-anchor': 'middle'});
+    const pts = pareto.map((v, p) => `${x(p).toFixed(1)},${y(v).toFixed(1)}`);
+    const color = token('--series-1');
+    s('path', {d: `M${x(0)},${y(0)}L${pts.join('L')}L${x(100)},${y(0)}Z`, fill: color, 'fill-opacity': 0.1}, svg);
+    s('polyline', {points: pts.join(' '), fill: 'none', stroke: color, 'stroke-width': 2,
+                   'stroke-linejoin': 'round', 'stroke-linecap': 'round'}, svg);
+    s('circle', {cx: x(20), cy: y(pareto[20]), r: 4, fill: color, stroke: token('--surface'), 'stroke-width': 2}, svg);
+    label(svg, x(20) + 10, y(pareto[20]) + 16, `前 20% 的商品贡献 ${pct(pareto[20])}`, {class: 'ann'});
+    const cross = s('line', {y1: m.t, y2: m.t + ph, class: 'cross', visibility: 'hidden'}, svg);
+    const dot = s('circle', {r: 4, fill: color, stroke: token('--surface'), 'stroke-width': 2, visibility: 'hidden'}, svg);
+    const overlay = s('rect', {x: m.l, y: m.t, width: pw, height: ph, class: 'hit', tabindex: 0,
+                               'aria-label': `${title}；用左右方向键移动`}, svg);
+    let at = 20;
+    const place = p => {
+      at = Math.min(100, Math.max(0, p));
+      for (const [el, k, v] of [[cross, 'x1', x(at)], [cross, 'x2', x(at)], [dot, 'cx', x(at)], [dot, 'cy', y(pareto[at])]]) {
+        el.setAttribute(k, v);
+      }
+      cross.setAttribute('visibility', 'visible');
+      dot.setAttribute('visibility', 'visible');
+    };
+    const tipFor = () => [`排名前 ${at}% 的商品（${num(Math.floor(count * at / 100))} 个）`,
+                          [{value: pct(pareto[at]), label: '的净销售额'}]];
+    hover(overlay, e => {
+      if (e) place(Math.round(((e.clientX - svg.getBoundingClientRect().left) * (W / svg.getBoundingClientRect().width) - m.l) / pw * 100));
+      else place(at);
+      return tipFor();
+    });
+    overlay.addEventListener('keydown', e => {
+      const step = {ArrowLeft: -1, ArrowRight: 1}[e.key];
+      if (!step) return;
+      e.preventDefault();
+      place(at + step);
+      const b = overlay.getBoundingClientRect();
+      showTip(tipFor(), b.left + (at / 100) * b.width, b.top);
+    });
+    overlay.addEventListener('pointerleave', () => {
+      cross.setAttribute('visibility', 'hidden');
+      dot.setAttribute('visibility', 'hidden');
+    });
+    host.replaceChildren(svg);
+  }
+
+  function sparkline(values, W) {
+    const H = 48, pad = 5, max = Math.max(...values), min = Math.min(...values);
+    const x = i => pad + (i / Math.max(values.length - 1, 1)) * (W - pad * 2);
+    const y = v => H - pad - ((v - min) / (max - min || 1)) * (H - pad * 2);
+    const svg = s('svg', {viewBox: `0 0 ${W} ${H}`, width: W, height: H, class: 'spark', 'aria-hidden': 'true'});
+    s('polyline', {points: values.map((v, i) => `${x(i)},${y(v)}`).join(' '), fill: 'none', stroke: token('--muted'),
+                   'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round'}, svg);
+    const last = values.length - 1;
+    s('circle', {cx: x(last), cy: y(values[last]), r: 4, fill: token('--series-1'), stroke: token('--surface'),
+                 'stroke-width': 2}, svg);
+    return svg;
+  }
+
+  function table(columns, rows) {
+    return h('table', {}, h('thead', {}, h('tr', {}, columns.map(c => h('th', {class: c.num ? 'num' : null}, c.label)))),
+             h('tbody', {}, rows.map(r => h('tr', {}, r.map((v, i) => h('td', {class: columns[i].num ? 'num' : null}, v))))));
+  }
+
+  function empty(message) {
+    return host => host.replaceChildren(h('p', {class: 'empty'}, message));
+  }
+
+  function legendOf(items) {  // items: [{name, color}]
+    return h('div', {class: 'legend'}, items.map(it => h('span', {}, h('i', {style: `background:${it.color}`}), it.name)));
+  }
+
+
+  return {h, s, label, token, num, money, moneyShort, pct, monthName, sum, niceTicks, seqColor, showTip, hideTip, hover, drawColumns, drawLines, drawBars, drawHeatmap, drawScatter, refLegend, scaleLegend, drawPareto, sparkline, table, empty, legendOf};
+})();
+</script><script>/* Agent 生成的看板（M13）：读取页面里内嵌的编译结果，按方案画出指标卡和图。图表组件和 M12 手工看板共用（charts.js）。
+   标题、结论、取值都来自模型或数据，当作不可信文本：一律用文本节点写进页面。 */
+(() => {
+  'use strict';
+  const DATA = JSON.parse(document.getElementById('dashboard-data').textContent);
+  const {h, num, pct, token, sum, showTip, hideTip, hover, drawColumns, drawLines, drawBars, drawHeatmap, drawScatter,
+         refLegend, scaleLegend, table, empty, legendOf} = window.DashCharts;
+  const SLOTS = ['--series-1', '--series-2', '--series-3', '--series-4', '--series-5'];
+  const state = Object.fromEntries(DATA.filters.map(f => [f.id, 'all']));
+
+  const sliceKey = () => DATA.filters.map(f => state[f.id]).join('|') || 'all';
+  const isDefault = () => sliceKey() === DATA.default_slice;
+
+  // 数字格式：金额带单位，1 万以上按万、亿缩写；计数等其他数字 100 万以内写全（39,516 而不是“4万”）；比率按百分比
+  function formatter(chart, full = false) {
+    const metric = DATA.metrics[chart.metrics[0]];
+    const unit = (chart.metric_units && chart.metric_units[chart.metrics[0]]) ?? chart.unit ?? '';
+    if (metric.format === 'percent') return v => (v == null ? '—' : pct(v, full ? 2 : 1));
+    const shortFrom = metric.format === 'money' ? 1e4 : 1e6;
+    return v => {
+      if (v == null) return '—';
+      const a = Math.abs(v);
+      if (!full && a >= 1e8) return unit + (v / 1e8).toLocaleString('en-US', {maximumFractionDigits: 2}) + '亿';
+      if (!full && a >= shortFrom) return unit + (v / 1e4).toLocaleString('en-US', {maximumFractionDigits: 1}) + '万';
+      return unit + Number(v).toLocaleString('en-US', {maximumFractionDigits: 2});
+    };
+  }
+
+  // 比率的分子和分母（例如 订阅数 / 联系人数）：各用自己指标的格式，金额才带单位
+  function partsOf(chart) {
+    if (!chart.ratio_parts) return null;
+    return chart.ratio_parts.map(id => {
+      const metric = DATA.metrics[id], unit = metric.format === 'money' ? (chart.unit || '') : '';
+      return {label: metric.label,
+              format: v => (v == null ? '—' : unit + Number(v).toLocaleString('en-US', {maximumFractionDigits: 2}))};
+    });
+  }
+  const partTips = (chart, r) => {
+    const parts = partsOf(chart);
+    return parts && r.numerator !== undefined
+      ? [{value: parts[0].format(r.numerator), label: parts[0].label}, {value: parts[1].format(r.denominator), label: parts[1].label}]
+      : [];
+  };
+
+  // 参考线：整体值（当前筛选下，由程序算出）。图上写“整体 15.5%”，图下的图例带上分子分母
+  function referenceOf(chart, data) {
+    const ref = data.facts && data.facts.reference;
+    if (!chart.reference || !ref || ref.value == null) return null;
+    const fmt = formatter({...chart, metrics: [chart.metrics[chart.type === 'scatter' ? 1 : 0]]});
+    const parts = ref.numerator != null ? `（${num(ref.numerator)} / ${num(ref.denominator)}）` : '';
+    return {value: ref.value, text: `整体 ${fmt(ref.value)}`, legend: `虚线：整体 ${fmt(ref.value)}${parts}`};
+  }
+  const highlighted = chart => new Set(chart.highlight || []);
+
+  // 分组的颜色跟着分组走，不跟着排名走：按默认视图（全部数据）里的分组顺序固定下来，筛选后不会换色
+  const seriesOrder = Object.fromEntries(DATA.charts.map(c => [c.id,
+    DATA.slices[DATA.default_slice][c.id].series_order || []]));
+  const colorOf = (chart, name) => token(SLOTS[Math.max(seriesOrder[chart.id].indexOf(name), 0) % SLOTS.length]);
+
+  function pivot(chart, rows) {
+    const xs = [...new Set(rows.map(r => r.x))];
+    const partial = Object.fromEntries(rows.map(r => [r.x, !!r.partial]));
+    const names = seriesOrder[chart.id].filter(n => rows.some(r => r.s === n));
+    const cell = new Map(rows.map(r => [`${r.x}\u0000${r.s}`, r.values[0]]));
+    return {points: xs.map(x => ({key: x, partial: partial[x]})),
+            series: names.map(n => ({name: n, color: colorOf(chart, n), values: xs.map(x => cell.get(`${x}\u0000${n}`) ?? null)}))};
+  }
+
+  function renderKpis(slice) {
+    const kpis = DATA.charts.filter(c => c.type === 'kpi');
+    document.getElementById('kpis').replaceChildren(...kpis.map(c => {
+      const value = slice[c.id].rows[0].values[0], facts = slice[c.id].facts, parts = partsOf(c);
+      const sub = parts && facts.numerator !== undefined
+        ? h('div', {class: 'sub'}, `${parts[0].label} ${parts[0].format(facts.numerator)} / ${parts[1].label} ${parts[1].format(facts.denominator)}`)
+        : null;
+      return h('div', {class: 'kpi'}, h('div', {class: 'label'}, c.title),
+               h('div', {class: 'value', title: formatter(c, true)(value)}, formatter(c)(value)),
+               ...(sub ? [sub] : []), h('div', {class: 'note'}, c.why));
+    }));
+  }
+
+  function chartView(chart, data) {
+    const fmt = formatter(chart), full = formatter(chart, true);
+    const metricLabel = DATA.metrics[chart.metrics[0]].label;
+    const rows = data.rows;
+    if (!rows.length) return {draw: empty('当前筛选下没有数据。')};
+    const ref = referenceOf(chart, data), hl = highlighted(chart);
+    if (chart.type === 'column') {
+      return {legend: ref ? refLegend(ref.legend) : null, draw: host => drawColumns(host, {
+        points: rows.map(r => ({key: r.x, partial: r.partial})), format: fmt, title: chart.title, reference: ref,
+        colorAt: hl.size ? i => token(hl.has(rows[i].x) ? '--series-1' : '--muted') : null,
+        series: [{name: metricLabel, color: token('--series-1'), values: rows.map(r => r.values[0])}],
+        onTip: i => [rows[i].x + (rows[i].partial ? '（不完整）' : ''), [{value: full(rows[i].values[0]), label: metricLabel}]
+          .concat(rows[i].share != null ? [{value: pct(rows[i].share), label: '占比'}] : [], partTips(chart, rows[i]))]})};
+    }
+    if (chart.type === 'stacked_column' || chart.type === 'line') {
+      const {points, series} = chart.series_label ? pivot(chart, rows)
+        : {points: rows.map(r => ({key: r.x, partial: r.partial})),
+           series: [{name: metricLabel, color: token('--series-1'), values: rows.map(r => r.values[0])}]};
+      const draw = chart.type === 'line' ? drawLines : drawColumns;
+      return {
+        draw: host => draw(host, {points, series, format: fmt, title: chart.title, reference: chart.series_label ? null : ref,
+                                  onTip: i => [points[i].key + (points[i].partial ? '（不完整）' : ''),
+                                               series.map(sr => ({color: sr.color, value: full(sr.values[i]), label: sr.name}))
+                                                 .concat(chart.series_label ? [] : partTips(chart, rows[i]))]}),
+        legend: series.length > 1 ? legendOf(series) : (ref && !chart.series_label ? refLegend(ref.legend) : null),
+      };
+    }
+    if (chart.type === 'scatter') {
+      const [xm, ym] = chart.metrics.map(id => DATA.metrics[id]);
+      const fx = formatter({...chart, metrics: [chart.metrics[0]]}), fy = formatter({...chart, metrics: [chart.metrics[1]]});
+      const fxFull = formatter({...chart, metrics: [chart.metrics[0]]}, true);
+      const fyFull = formatter({...chart, metrics: [chart.metrics[1]]}, true);
+      const pts = rows.filter(r => r.values[0] != null && r.values[1] != null)
+        .map(r => ({label: r.x, x: r.values[0], y: r.values[1], accent: hl.has(r.x)}));
+      if (!pts.length) return {draw: empty('当前筛选下没有数据。')};
+      return {
+        draw: host => drawScatter(host, {points: pts, xFormat: fx, yFormat: fy, xTitle: xm.label, yTitle: ym.label,
+                                         reference: ref, title: chart.title,
+                                         onTip: i => [pts[i].label, [{value: fxFull(pts[i].x), label: xm.label},
+                                                                     {value: fyFull(pts[i].y), label: ym.label}]]}),
+        legend: ref ? refLegend(ref.legend) : null,
+      };
+    }
+    if (chart.type === 'bar') {
+      return {legend: ref ? refLegend(ref.legend) : null, draw: host => drawBars(host, rows.map(r => ({
+        label: r.x, value: Math.max(r.values[0] || 0, 0), valueText: fmt(r.values[0]), muted: !!r.other,
+        accent: hl.has(r.x), dim: hl.size > 0 && !hl.has(r.x) && !r.other,
+        tip: [{value: full(r.values[0]), label: metricLabel}]
+          .concat(r.share != null ? [{value: pct(r.share), label: '占比'}] : [], partTips(chart, r)),
+      })), {reference: ref})};
+    }
+    if (chart.type === 'heatmap') {
+      const xs = [...new Set(rows.map(r => r.x))], ys = seriesOrder[chart.id].filter(n => rows.some(r => r.s === n));
+      const cell = new Map(rows.map(r => [`${r.x}\u0000${r.s}`, r.values[0]]));
+      const rowAt = new Map(rows.map(r => [`${r.x}\u0000${r.s}`, r]));
+      const values = ys.map(y => xs.map(x => cell.get(`${x}\u0000${y}`) ?? null));
+      const max = Math.max(0, ...values.flat().filter(v => v != null));
+      return {
+        draw: host => drawHeatmap(host, {rowLabels: ys, colLabels: xs, colEvery: xs.length > 12 ? 2 : 1, values, max,
+                                         title: chart.title, labelW: 64,
+                                         onTip: (i, j) => [`${ys[i]} · ${xs[j]}`, [{value: full(values[i][j]), label: metricLabel}]
+                                           .concat(partTips(chart, rowAt.get(`${xs[j]}\u0000${ys[i]}`) || {}))]}),
+        legend: scaleLegend(fmt(0), fmt(max)),
+      };
+    }
+    return {draw: host => host.replaceChildren(tableOf(chart, rows))};  // table
+  }
+
+  function tableOf(chart, rows) {
+    const fmts = chart.metrics.map(id => formatter({...chart, metrics: [id]}, true));
+    const parts = rows.some(r => r.numerator !== undefined) ? partsOf(chart) : null;
+    const columns = [{label: chart.x_label || ''}].concat(chart.series_label ? [{label: chart.series_label}] : [])
+      .concat(chart.metrics.map(id => ({label: DATA.metrics[id].label, num: true})))
+      .concat(parts ? parts.map(p => ({label: p.label, num: true})) : [])
+      .concat(rows.some(r => r.share != null) ? [{label: '占比', num: true}] : []);
+    return table(columns, rows.map(r => [r.x + (r.partial ? '（不完整）' : '')]
+      .concat(chart.series_label ? [r.s] : [])
+      .concat(r.values.map((v, i) => fmts[i](v)))
+      .concat(parts ? [r.numerator, r.denominator].map((v, i) => (v === undefined ? '' : parts[i].format(v))) : [])
+      .concat(rows.some(x => x.share != null) ? [r.share == null ? '' : pct(r.share)] : [])));
+  }
+
+  function renderCharts(slice) {
+    for (const chart of DATA.charts.filter(c => c.type !== 'kpi')) {
+      const card = document.getElementById(`chart-${chart.id}`);
+      const data = slice[chart.id];
+      const view = chartView(chart, data);
+      view.draw(card.querySelector('.chart-host'));
+      card.querySelector('.extras').replaceChildren(...(view.legend ? [view.legend] : []));
+      card.querySelector('.table-host').replaceChildren(data.rows.length ? tableOf(chart, data.rows) : '');
+      const insight = card.querySelector('.insight');
+      insight.textContent = chart.insight ? (isDefault() ? chart.insight : '（结论是按全部数据写的，加了筛选后不显示）') : '';
+      insight.classList.toggle('muted', !isDefault());
+      card.querySelector('.note').replaceChildren(...data.notes.map(n => h('div', {}, `⚠ ${n}`)));
+    }
+  }
+
+  // 半行的图两两并排：width 是 half 的图，以及 auto 时的条形图；落单的占满一行
+  function halves(charts) {
+    const wantsHalf = c => c.width === 'half' || ((c.width || 'auto') === 'auto' && c.type === 'bar');
+    const half = new Set();
+    for (let i = 0; i < charts.length - 1; i++) {
+      if (wantsHalf(charts[i]) && wantsHalf(charts[i + 1])) {
+        half.add(charts[i].id).add(charts[i + 1].id);
+        i++;
+      }
+    }
+    return half;
+  }
+
+  // 按 section 分区（按第一次出现的顺序），每个分区一个小标题和一个网格；没有分区时只有一个网格
+  function buildCards() {
+    const host = document.getElementById('charts');
+    const groups = [];
+    for (const chart of DATA.charts.filter(c => c.type !== 'kpi')) {
+      const title = chart.section || '';
+      let group = groups.find(g => g.title === title);
+      if (!group) groups.push(group = {title, charts: []});
+      group.charts.push(chart);
+    }
+    host.replaceChildren(...groups.flatMap(g => [
+      g.title ? h('h2', {class: 'section-title'}, g.title) : null,
+      h('div', {class: 'auto-grid'}, cardsOf(g.charts)),
+    ]).filter(Boolean));
+  }
+
+  function cardsOf(charts) {
+    const half = halves(charts);
+    return charts.map(chart => {
+      const toggle = h('button', {type: 'button', class: 'view-toggle', 'aria-pressed': 'false'}, '看表格');
+      const card = h('section', {class: `card dash-card${half.has(chart.id) ? '' : ' span-2'}`, id: `chart-${chart.id}`},
+        h('div', {class: 'card-head'}, h('h2', {}, chart.title), toggle),
+        h('p', {class: 'insight'}), h('div', {class: 'chart-host'}), h('div', {class: 'extras'}),
+        h('div', {class: 'table-host table-wrap', hidden: true}),
+        h('p', {class: 'why'}, `为什么放这张图：${chart.why}`), h('div', {class: 'note'}));
+      toggle.addEventListener('click', () => {
+        const showTable = toggle.getAttribute('aria-pressed') !== 'true';
+        toggle.setAttribute('aria-pressed', String(showTable));
+        toggle.textContent = showTable ? '看图' : '看表格';
+        card.querySelector('.chart-host').hidden = showTable;
+        card.querySelector('.extras').hidden = showTable;
+        card.querySelector('.table-host').hidden = !showTable;
+      });
+      return card;
+    });
+  }
+
+  function buildFilters() {
+    const host = document.getElementById('filters');
+    if (!DATA.filters.length) { host.remove(); return; }
+    host.replaceChildren(...DATA.filters.map(f => h('fieldset', {}, h('legend', {}, f.label),
+      h('div', {class: 'seg'}, f.options.map((o, i) => {
+        const input = h('input', {type: 'radio', name: f.id, value: o.id, checked: i === 0});
+        input.addEventListener('change', () => { state[f.id] = o.id; hideTip(); render(); });
+        return h('label', {}, input, h('span', {}, o.label));
+      })))));
+  }
+
+  function render() {
+    const slice = DATA.slices[sliceKey()];
+    renderKpis(slice);
+    renderCharts(slice);
+  }
+
+  buildFilters();
+  buildCards();
+  let timer, lastWidth = 0;
+  const later = () => { clearTimeout(timer); timer = setTimeout(render, 120); };
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', later);
+  new ResizeObserver(entries => {
+    const w = Math.round(entries[0].contentRect.width);
+    if (w !== lastWidth) { lastWidth = w; later(); }
+  }).observe(document.querySelector('main'));
+  render();
+})();
+</script>
+</main>
+</body>
+</html>

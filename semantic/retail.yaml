@@ -50,49 +50,76 @@ metrics:
     table: order_lines
     sql: sum(gmv_amount)
     definition: 商品销售额（下单口径）：数量 × 单价之和，含之后被取消的订单
+    dashboard: {agg: sum, column: gmv_amount, format: money}
   cancelled_amount:
     label: 取消金额
     table: order_lines
     sql: sum(cancelled_amount)
     definition: 这段时间里取消单的商品金额（正数）；可能对应更早下的订单
+    dashboard: {agg: sum, column: cancelled_amount, format: money}
   net_sales:
     label: 净销售额
     table: order_lines
     sql: sum(net_amount)
     definition: GMV − 取消金额
+    dashboard: {agg: sum, column: net_amount, format: money}
   cancel_rate:
     label: 取消率
     table: order_lines
     sql: sum(cancelled_amount) / sum(gmv_amount)
     definition: 取消金额 ÷ GMV；分子分母不一定是同一批订单
+    dashboard: {agg: ratio, left: cancelled_amount, right: gmv, format: percent}
   orders:
     label: 订单数
     table: order_lines
     sql: count(DISTINCT order_id)
     definition: 不同发票号的个数，只数销售订单
+    dashboard: {agg: count_distinct, column: order_id}
   aov:
     label: 客单价
     table: order_lines
     sql: sum(gmv_amount) / count(DISTINCT order_id)
     definition: GMV ÷ 订单数
+    dashboard: {agg: ratio, left: gmv, right: orders, format: money}
   active_customers:
     label: 活跃客户数
     table: order_lines
     sql: count(DISTINCT buyer_id)
     definition: 有购买的可识别客户数（不含缺客户 ID 的订单）
+    dashboard: {agg: count_distinct, column: buyer_id}
   new_customers:
     label: 新客数
     table: order_lines
     sql: count(DISTINCT buyer_id) FILTER (WHERE customer_type = '新客')
     definition: 第一次购买落在当周的客户数；只适合按单个周统计。越靠近数据起点（2009-12），越可能把老客算成新客
+    dashboard: {agg: count_distinct, column: buyer_id, where: {customer_type: [新客]}}
   trading_days:
     label: 交易天数
     table: order_lines
     sql: count(DISTINCT order_date) FILTER (WHERE line_type = '销售')
     definition: 有销售的日期数
+    dashboard: {agg: count_distinct, column: order_date, where: {line_type: [销售]}}
 notes:
   - 周是 ISO 周；数据截止到 2011-12-09（周五），所以 2011-W49 不是完整的一周，和完整的周比总量会偏低。
   - 2010-12-23 到 2011-01-03 停业，这期间没有数据。
   - 约四分之一的行缺客户 ID：按客户统计（活跃客户、新老客）时这些行不计入，但它们的金额计入 GMV。
   - 取消单按取消发生的时间入账，不回溯到原订单所在的周。
   - 有少数金额极大、下单后很快又全部取消的订单（例如发票 541431、581483），会抬高当周的 GMV 和商品排名；净销售额不受影响。
+# 看板 Agent 怎么用这份配置（M23）：和查询 Agent 读同一张表，指标按上面每个指标的 dashboard 写法算。
+# 下面的规则由看板的校验器强制执行（含义见 src/da_agent/autodash/sources.py 的 Source）。
+dashboard:
+  table: order_lines
+  time_column: order_time
+  row_meaning: 订单里的一个商品（取消单里的一个商品）
+  pin_by:
+    amount: [line_type]
+    quantity: [line_type]
+  units:
+    amount: £
+    price: £
+    gmv_amount: £
+    cancelled_amount: £
+    net_amount: £
+  offsets:
+    amount: {by: line_type, value: 销售, against: 取消}
+    gmv_amount: {column: cancelled_amount, against: 取消}
