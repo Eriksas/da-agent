@@ -122,10 +122,12 @@ def test_same_named_metrics_must_follow_the_config(con) -> None:
              Metric(id="cancelled", label="取消金额", agg="sum", column="cancelled_amount"),
              Metric(id="cancel_rate", label="取消率", agg="ratio", left="gmv", right="cancelled", format="percent"),  # 分子分母反了
              Metric(id="gmv_alt", label="gmv", agg="sum", column="amount", where={"line_type": ["销售"]}),  # 同名（不分大小写）
-             Metric(id="lines", label="订单数（张）", agg="count")]  # 括号里的补充不算
+             Metric(id="lines", label="订单数（张）", agg="count"),  # 括号里的补充不算
+             Metric(id="avg_gmv", label="GMV", agg="avg", column="gmv_amount", format="money")]  # 同一列，聚合方式不同
     problems = definition_problems(wrong, source)
     assert [p.split("）")[0] for p in problems] == ["指标 orders（订单", "指标 buyers（新客数", "指标 days（交易天数",
-                                                  "指标 cancel_rate（取消率", "指标 gmv_alt（gmv", "指标 lines（订单数（张"]
+                                                  "指标 cancel_rate（取消率", "指标 gmv_alt（gmv", "指标 lines（订单数（张",
+                                                  "指标 avg_gmv（GMV"]
     assert "配置的定义是 count_distinct(order_id)。" in problems[0]
     assert "count_distinct(order_date)，where line_type = ['销售']" in problems[2]
     assert "ratio：取消金额（sum(cancelled_amount)）÷ GMV（sum(gmv_amount)）" in problems[3]

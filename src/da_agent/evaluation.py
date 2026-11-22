@@ -81,6 +81,12 @@ class Case:
     # 必须成功调用的工具、不能调用的工具（M22：该搭看板的要搭，只是提问的不该搭）
     require_tools: tuple[str, ...] = ()
     forbid_tools: tuple[str, ...] = ()
+    # 看板方案里必须用到的列、必须按口径配置算的指标（M23，见 eval/dashboard_shared.yaml 开头的说明）
+    dashboard_columns: tuple[str, ...] = ()
+    dashboard_metrics: tuple[str, ...] = ()
+
+
+SHARED_CONFIG = "retail"  # dashboard_metrics 对照的口径配置（semantic/retail.yaml）
 
 
 def load_cases(path: Path = CASES_PATH) -> list[Case]:
@@ -92,11 +98,20 @@ def load_cases(path: Path = CASES_PATH) -> list[Case]:
                   expect_value=item.get("expect_value"), inject=item.get("inject"),
                   expects_skill=bool(item.get("expects_skill", True)), domain=str(data.get("domain", "ecommerce")),
                   expect_sql=tuple(item.get("expect_sql") or ()), require_tools=tuple(item.get("require_tools") or ()),
-                  forbid_tools=tuple(item.get("forbid_tools") or ()))
+                  forbid_tools=tuple(item.get("forbid_tools") or ()),
+                  dashboard_columns=tuple(item.get("dashboard_columns") or ()),
+                  dashboard_metrics=tuple(item.get("dashboard_metrics") or ()))
              for item in data["cases"]]
     ids = [case.id for case in cases]
     if len(ids) != len(set(ids)):
         raise ValueError(f"题目 ID 重复：{sorted({i for i in ids if ids.count(i) > 1})}")
+    wanted = {name for case in cases for name in case.dashboard_metrics}
+    if wanted:
+        from .semantic import config_path, load_config
+
+        unknown = sorted(wanted - set(load_config(config_path(SHARED_CONFIG)).metrics))
+        if unknown:
+            raise ValueError(f"口径配置里没有指标 {'、'.join(unknown)}")
     for case in cases:
         for pattern in case.must_not:
             re.compile(pattern)
@@ -216,6 +231,31 @@ def expected_sql_values(con: duckdb.DuckDBPyConnection, case: Case) -> list[floa
     return values
 
 
+def dashboard_missing(case: Case, run: dict[str, Any]) -> list[str]:
+    """看板方案缺了题目要求的什么（M23）。看每次搭看板最后一次通过检查的方案，有一个全部满足就算；
+    都不满足时返回缺得最少的那个。指标比的是定义（叫什么名字都行），和口径配置 semantic/retail.yaml 对照。"""
+    if not (case.dashboard_columns or case.dashboard_metrics):
+        return []
+    from .autodash.build import final_spec
+    from .autodash.sources import semantic_source
+    from .autodash.spec import configured_metrics, same_definition, spec_columns
+
+    specs = [spec for spec in (final_spec(sub) for sub in run.get("sub_runs") or [] if sub.get("domain") == "dashboard")
+             if spec is not None]
+    if not specs:
+        return ["没有搭出看板"]
+    theirs = configured_metrics(semantic_source(SHARED_CONFIG)) if case.dashboard_metrics else {}
+    best: list[str] | None = None
+    for spec in specs:
+        columns, mine = spec_columns(spec), {m.id: m for m in spec.metrics}
+        missing = [f"列 {column}" for column in case.dashboard_columns if column not in columns]
+        missing += [f"按口径算的{theirs[name].label}" for name in case.dashboard_metrics
+                    if not any(same_definition(m, mine, theirs[name], theirs) for m in spec.metrics)]
+        if best is None or len(missing) < len(best):
+            best = missing
+    return best or []
+
+
 def score(case: Case, run: dict[str, Any], checks: dict[str, Any], expected: float | None,
           sql_values: list[float] | tuple[float, ...] = ()) -> dict[str, Any]:
     """按题目的规则给一次运行打分。sql_values：参考 SQL 算出的数，每个都要出现在答案里。"""
@@ -239,8 +279,10 @@ def score(case: Case, run: dict[str, Any], checks: dict[str, Any], expected: flo
     succeeded = {step["tool"] for step in run["steps"] if step.get("ok")}
     tools_missing = [tool for tool in case.require_tools if tool not in succeeded]
     tools_forbidden = [tool for tool in case.forbid_tools if any(step["tool"] == tool for step in run["steps"])]
+    missing_in_dashboard = dashboard_missing(case, run)
     passed = (run["status"] == "completed" and all(m["hit"] for m in mentions) and not violations
-              and not numbers["ungrounded"] and value_found is not False and not tools_missing and not tools_forbidden)
+              and not numbers["ungrounded"] and value_found is not False and not tools_missing and not tools_forbidden
+              and not missing_in_dashboard)
     return {
         "passed": passed, "status": run["status"], "mentions": mentions, "violations": violations,
         "expected_value": expected, "value_found": value_found,
@@ -254,7 +296,7 @@ def score(case: Case, run: dict[str, Any], checks: dict[str, Any], expected: flo
         "tokens": run["usage"]["prompt_tokens"] + run["usage"]["completion_tokens"] + query_tokens, "seconds": run["seconds"],
         "query_calls": sum(step["tool"] == "query_data" for step in run["steps"]), "query_tokens": query_tokens,
         "dashboard_calls": sum(step["tool"] == "build_dashboard" for step in run["steps"]),
-        "tools_missing": tools_missing, "tools_forbidden": tools_forbidden,
+        "tools_missing": tools_missing, "tools_forbidden": tools_forbidden, "dashboard_missing": missing_in_dashboard,
     }
 
 
@@ -440,7 +482,8 @@ def summarize(results: list[dict[str, Any]], cases: list[Case], conditions: list
                  "missed": [m["any_of"] for m in r["mentions"] if not m["hit"]], "violations": r["violations"],
                  "numbers_ungrounded": r["numbers_ungrounded"], "value_found": r["value_found"],
                  "missing_values": [v["value"] for v in r.get("expected_sql_values", []) if not v["found"]],
-                 "tools_missing": r.get("tools_missing", []), "tools_forbidden": r.get("tools_forbidden", [])}
+                 "tools_missing": r.get("tools_missing", []), "tools_forbidden": r.get("tools_forbidden", []),
+                 "dashboard_missing": r.get("dashboard_missing", [])}
                 for r in results if not r["passed"]]
     return {"conditions": conditions, "cases": len(cases), "runs": len(results),
             "by_condition": by_condition, "by_case": by_case, "failures": failures}
@@ -523,6 +566,8 @@ def render_summary(summary: dict[str, Any], meta: dict[str, Any]) -> str:
             reasons.append(f"{f['numbers_ungrounded']} 个数字找不到出处")
         reasons += [f"没有调用 {tool}" for tool in f.get("tools_missing", [])]
         reasons += [f"不该调用 {tool}" for tool in f.get("tools_forbidden", [])]
+        if f.get("dashboard_missing") and not f.get("tools_missing"):
+            reasons.append("看板里没有" + "、".join(f["dashboard_missing"]))
         if f.get("missing_values"):
             reasons.append("没有给出正确数值 " + "、".join(f"{v:,}" for v in f["missing_values"]))
         elif f["value_found"] is False:

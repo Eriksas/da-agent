@@ -324,15 +324,22 @@ def configured_metrics(source: Source) -> dict[str, Metric]:
     return {key: Metric.model_validate({k: v for k, v in m.items() if k != "definition"}) for key, m in source.metrics.items()}
 
 
-def _same_definition(m: Metric, mine: dict[str, Metric], c: Metric, theirs: dict[str, Metric]) -> bool:
+def same_definition(m: Metric, mine: dict[str, Metric], c: Metric, theirs: dict[str, Metric]) -> bool:
     """m（看板里的）和 c（配置里的）算的是不是同一个东西。看板可以多加筛选条件（例如只看英国的 GMV），
     但配置里的条件一条都不能少；ratio / difference 逐个比较引用的两个指标。"""
     if m.agg != c.agg:
         return False
     if c.agg in ("ratio", "difference"):
-        return all(a in mine and b in theirs and _same_definition(mine[a], mine, theirs[b], theirs)
+        return all(a in mine and b in theirs and same_definition(mine[a], mine, theirs[b], theirs)
                    for a, b in ((m.left, c.left), (m.right, c.right)))
     return m.column == c.column and all(sorted(m.where.get(k, [])) == sorted(v) for k, v in c.where.items())
+
+
+def spec_columns(spec: DashboardSpec) -> set[str]:
+    """方案用到的列：指标的 column 和 where、图的横轴和分组、筛选器（M23 评测用）。"""
+    columns = {m.column for m in spec.metrics if m.column} | {k for m in spec.metrics for k in m.where}
+    columns |= {d.column for c in spec.charts for d in (c.x, c.series) if d is not None}
+    return columns | {d.column for d in spec.filters}
 
 
 def _describe(c: Metric, theirs: dict[str, Metric]) -> str:
@@ -359,7 +366,7 @@ def definition_problems(spec_metrics: list[Metric], source: Source) -> list[str]
     problems = []
     for m in spec_metrics:
         c = theirs.get(m.id) or by_label.get(_label_key(m.label))
-        if c is not None and not _same_definition(m, mine, c, theirs):
+        if c is not None and not same_definition(m, mine, c, theirs):
             problems.append(f"指标 {m.id}（{m.label}）和口径配置里的“{c.label}”（{c.id}）同名，定义却不同。配置的定义是 "
                             f"{_describe(c, theirs)}。照配置写；要用别的口径就换一个名字，并在 notes 里写明")
     return problems
