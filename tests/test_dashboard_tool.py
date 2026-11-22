@@ -84,3 +84,46 @@ def test_the_record_is_serialisable(con: duckdb.DuckDBPyConnection, tmp_path: Pa
     main = FakeLLM(replies=[call("build_dashboard", {"goal": GOAL}), LLMReply(content="看板做好了。")])
     run = run_agent("搭个看板", llm=main, con=con, max_tool_calls=5, tool_contexts={"build_dashboard": service(tmp_path)})
     assert json.loads(json.dumps(asdict(run), ensure_ascii=False, default=str))["sub_runs"][0]["status"] == "completed"
+
+
+def test_routing_is_scored() -> None:
+    from da_agent.evaluation import Case, score
+
+    checks = {"numbers": {"checked": 0, "ungrounded": []}, "process": {"skills": []}}
+
+    def run_with(*steps: tuple[str, bool]) -> dict:
+        return {"answer": "好的。", "status": "completed", "seconds": 1.0, "usage": {"llm_calls": 1, "prompt_tokens": 1, "completion_tokens": 1},
+                "steps": [{"tool": tool, "ok": ok} for tool, ok in steps]}
+
+    wants = Case(id="d", category="看板", question="搭个看板", expects_skill=False, require_tools=("build_dashboard",))
+    asks = Case(id="q", category="提问", question="上周 GMV？", expects_skill=False, forbid_tools=("build_dashboard",))
+    assert score(wants, run_with(("build_dashboard", True)), checks, None)["passed"] is True
+    failed = score(wants, run_with(("build_dashboard", False)), checks, None)  # 调了但没搭出来，也不算
+    assert failed["passed"] is False and failed["tools_missing"] == ["build_dashboard"]
+    assert score(asks, run_with(("metric_summary", True)), checks, None)["passed"] is True
+    wrong = score(asks, run_with(("build_dashboard", False)), checks, None)  # 不该搭看板的，试了也算错
+    assert wrong["passed"] is False and wrong["tools_forbidden"] == ["build_dashboard"]
+
+
+def test_the_dashboard_condition_end_to_end(tmp_path: Path) -> None:
+    from test_evaluation import FixtureConnections
+
+    from da_agent.evaluation import Case, render_summary, run_eval
+
+    case = Case(id="d", category="看板", question="搭个看板给研究员看盈利能力", expects_skill=False,
+                require_tools=("build_dashboard",), must_mention=(("dashboard.html", "看板"),))
+    connections = FixtureConnections()
+    connections.dashboard_source = "financials"
+    connections.query_dir = tmp_path / "q"
+    dashboard_replies = FakeLLM.from_file(DASHBOARD_SCRIPT).replies
+
+    def make_llm(case: Case, condition: str, i: int) -> FakeLLM:  # 主 Agent 和看板 Agent 共用一个客户端：剧本按调用顺序排
+        return FakeLLM(replies=[call("build_dashboard", {"goal": GOAL}), *dashboard_replies, LLMReply(content="看板做好了。")])
+
+    summary = run_eval([case], ["agent_dashboard"], 1, make_llm, connections, tmp_path / "out", max_tool_calls=5, progress=lambda _: None)
+    stats = summary["by_condition"]["agent_dashboard"]
+    assert stats["passed"] == 1 and stats["runs_using_dashboard"] == 1
+    pages = list((tmp_path / "out" / "runs" / "d" / "agent_dashboard-1" / "dashboards").glob("*/dashboard.html"))
+    assert len(pages) == 1  # 看板存在这次评测运行自己的目录里
+    text = render_summary(summary, {"name": "t", "model": "fake", "repeats": 1, "finished_at": "now"})
+    assert "用到搭看板的运行" in text

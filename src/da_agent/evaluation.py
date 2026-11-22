@@ -43,8 +43,10 @@ CONDITIONS = {
     "agent": "Agent 不带流程",
     "agent_skill": "Agent 带流程",
     "agent_query": "Agent 带流程 + 取数（query_data）",
+    "agent_dashboard": "Agent 带流程 + 取数 + 搭看板（build_dashboard）",
 }
-SKILL_CONDITIONS = ("agent_skill", "agent_query")  # 有分析流程的组
+SKILL_CONDITIONS = ("agent_skill", "agent_query", "agent_dashboard")  # 有分析流程的组
+QUERY_CONDITIONS = ("agent_query", "agent_dashboard")  # 有取数工具的组
 # 模型接口的这几类报错（限流、超时、连不上、服务端错误）不是被评测对象的表现：等一会儿重跑，不算它没答上来
 RETRYABLE_ERRORS = ("RateLimitError", "APITimeoutError", "APIConnectionError", "InternalServerError")
 API_RETRIES = 4
@@ -76,6 +78,9 @@ class Case:
     domain: str = "ecommerce"  # 题集文件开头的 domain：ecommerce 电商运营 / company 上市公司财报
     # 答案里必须出现的数，由参考 SQL 现算（M19b）：每条 SQL 返回一行，这一行里的每个数都要出现在答案里
     expect_sql: tuple[str, ...] = ()
+    # 必须成功调用的工具、不能调用的工具（M22：该搭看板的要搭，只是提问的不该搭）
+    require_tools: tuple[str, ...] = ()
+    forbid_tools: tuple[str, ...] = ()
 
 
 def load_cases(path: Path = CASES_PATH) -> list[Case]:
@@ -86,7 +91,8 @@ def load_cases(path: Path = CASES_PATH) -> list[Case]:
                   must_not=tuple(item.get("must_not") or []),
                   expect_value=item.get("expect_value"), inject=item.get("inject"),
                   expects_skill=bool(item.get("expects_skill", True)), domain=str(data.get("domain", "ecommerce")),
-                  expect_sql=tuple(item.get("expect_sql") or ()))
+                  expect_sql=tuple(item.get("expect_sql") or ()), require_tools=tuple(item.get("require_tools") or ()),
+                  forbid_tools=tuple(item.get("forbid_tools") or ()))
              for item in data["cases"]]
     ids = [case.id for case in cases]
     if len(ids) != len(set(ids)):
@@ -230,8 +236,11 @@ def score(case: Case, run: dict[str, Any], checks: dict[str, Any], expected: flo
     numbers = checks["numbers"]
     skills = checks["process"]["skills"]
     query_tokens = sum(sub["usage"]["prompt_tokens"] + sub["usage"]["completion_tokens"] for sub in run.get("sub_runs") or [])
+    succeeded = {step["tool"] for step in run["steps"] if step.get("ok")}
+    tools_missing = [tool for tool in case.require_tools if tool not in succeeded]
+    tools_forbidden = [tool for tool in case.forbid_tools if any(step["tool"] == tool for step in run["steps"])]
     passed = (run["status"] == "completed" and all(m["hit"] for m in mentions) and not violations
-              and not numbers["ungrounded"] and value_found is not False)
+              and not numbers["ungrounded"] and value_found is not False and not tools_missing and not tools_forbidden)
     return {
         "passed": passed, "status": run["status"], "mentions": mentions, "violations": violations,
         "expected_value": expected, "value_found": value_found,
@@ -244,6 +253,8 @@ def score(case: Case, run: dict[str, Any], checks: dict[str, Any], expected: flo
         # token 含嵌套的查询 Agent（M19b）：取数的成本也算在这次回答上
         "tokens": run["usage"]["prompt_tokens"] + run["usage"]["completion_tokens"] + query_tokens, "seconds": run["seconds"],
         "query_calls": sum(step["tool"] == "query_data" for step in run["steps"]), "query_tokens": query_tokens,
+        "dashboard_calls": sum(step["tool"] == "build_dashboard" for step in run["steps"]),
+        "tools_missing": tools_missing, "tools_forbidden": tools_forbidden,
     }
 
 
@@ -286,6 +297,7 @@ class Connections:
     def __init__(self, parquet_path: Path = PARQUET_PATH, query_dir: Path | None = None) -> None:
         self.parquet_path = parquet_path
         self.query_dir = query_dir
+        self.dashboard_source = "retail"  # agent_dashboard 组的看板 Agent 用哪份数据（测试里换成仓库自带的财报数据）
         self._cache: dict[str, duckdb.DuckDBPyConnection] = {}
         self._query: dict[str, Any] = {}
 
@@ -350,10 +362,15 @@ def run_eval(cases: list[Case], conditions: list[str], repeats: int,
                 run = run_baseline(case.question, llm=llm, con=con, domain=case.domain)
             else:
                 contexts = {}
-                if condition == "agent_query":
+                if condition in QUERY_CONDITIONS:
                     from .analyst import QueryService
 
                     contexts["query_data"] = QueryService(llm=llm, db=connections.query_db(case))
+                if condition == "agent_dashboard":
+                    from .dashboard_tool import DashboardService
+
+                    contexts["build_dashboard"] = DashboardService(
+                        llm=llm, source=connections.dashboard_source, runs_dir=out_dir / "runs" / case.id / f"{condition}-{i}" / "dashboards")
                 run = run_agent(case.question, llm=llm, con=con, max_tool_calls=max_tool_calls,
                                 use_skills=condition in SKILL_CONDITIONS, domain=case.domain, tool_contexts=contexts)
             retryable = run.status == "llm_error" and (run.error or "").startswith(RETRYABLE_ERRORS)
@@ -402,6 +419,7 @@ def summarize(results: list[dict[str, Any]], cases: list[Case], conditions: list
                                       if condition in SKILL_CONDITIONS else None),
             # 取数（M19b）：用到 query_data 的运行数、平均调用次数和平均花在取数上的 token；以前的结果没有这几项
             "runs_using_query": sum(r.get("query_calls", 0) > 0 for r in rows),
+            "runs_using_dashboard": sum(r.get("dashboard_calls", 0) > 0 for r in rows),
             "avg_query_calls": _ratio(sum(r.get("query_calls", 0) for r in rows), len(rows)),
             "avg_query_tokens": _ratio(sum(r.get("query_tokens", 0) for r in rows), len(rows)),
             "api_retries": sum(r.get("api_retries", 0) for r in rows),
@@ -420,7 +438,8 @@ def summarize(results: list[dict[str, Any]], cases: list[Case], conditions: list
     failures = [{"case": r["case"], "condition": r["condition"], "repeat": r["repeat"], "status": r["status"],
                  "missed": [m["any_of"] for m in r["mentions"] if not m["hit"]], "violations": r["violations"],
                  "numbers_ungrounded": r["numbers_ungrounded"], "value_found": r["value_found"],
-                 "missing_values": [v["value"] for v in r.get("expected_sql_values", []) if not v["found"]]}
+                 "missing_values": [v["value"] for v in r.get("expected_sql_values", []) if not v["found"]],
+                 "tools_missing": r.get("tools_missing", []), "tools_forbidden": r.get("tools_forbidden", [])}
                 for r in results if not r["passed"]]
     return {"conditions": conditions, "cases": len(cases), "runs": len(results),
             "by_condition": by_condition, "by_case": by_case, "failures": failures}
@@ -477,12 +496,13 @@ def render_summary(summary: dict[str, Any], meta: dict[str, Any]) -> str:
                   "| 组别 | 运行 | 被退回 | 修正前通过 | 修正后通过 |", "|---|---:|---:|---:|---:|"]
         lines += [f"| {s['label']} | {s['runs']} | {s['repaired']} | {s['passed_without_repair']} | {s['passed']} |"
                   for s in summary["by_condition"].values()]
-    if "agent_query" in summary["conditions"]:
-        lines += ["", "## 取数（query_data）", "",
-                  "token 含嵌套的查询 Agent。", "",
-                  "| 组别 | 运行 | 用到取数的运行 | 平均取数次数 | 平均取数 token | 模型接口报错后重跑 |", "|---|---:|---:|---:|---:|---:|"]
+    if any(c in QUERY_CONDITIONS for c in summary["conditions"]):
+        lines += ["", "## 取数（query_data）和搭看板（build_dashboard）", "",
+                  "token 含嵌套的查询 Agent 和看板 Agent。", "",
+                  "| 组别 | 运行 | 用到取数的运行 | 平均取数次数 | 平均嵌套 Agent token | 用到搭看板的运行 | 模型接口报错后重跑 |",
+                  "|---|---:|---:|---:|---:|---:|---:|"]
         lines += [f"| {s['label']} | {s['runs']} | {s['runs_using_query']} | {s['avg_query_calls']} | {s['avg_query_tokens']:.0f} | "
-                  f"{s['api_retries']} |" for s in summary["by_condition"].values()]
+                  f"{s.get('runs_using_dashboard', 0)} | {s['api_retries']} |" for s in summary["by_condition"].values()]
     labels = [CONDITIONS[c] for c in summary["conditions"]]
     lines += ["", "## 按题目（通过次数 / 运行次数）", "",
               "| 题目 | 类别 | " + " | ".join(labels) + " |", "|---|---|" + "---:|" * len(labels)]
@@ -500,6 +520,8 @@ def render_summary(summary: dict[str, Any], meta: dict[str, Any]) -> str:
         reasons += [f"出现违规说法 `{pattern}`" for pattern in f["violations"]]
         if f["numbers_ungrounded"]:
             reasons.append(f"{f['numbers_ungrounded']} 个数字找不到出处")
+        reasons += [f"没有调用 {tool}" for tool in f.get("tools_missing", [])]
+        reasons += [f"不该调用 {tool}" for tool in f.get("tools_forbidden", [])]
         if f.get("missing_values"):
             reasons.append("没有给出正确数值 " + "、".join(f"{v:,}" for v in f["missing_values"]))
         elif f["value_found"] is False:
