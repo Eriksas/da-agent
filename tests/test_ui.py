@@ -201,3 +201,33 @@ def test_query_results_show_the_sql_and_the_first_rows() -> None:
                         "result": result})
     texts = [args[0] for name, args, _ in box.calls if name == "markdown"]
     assert "取数（查询 Agent）（query_data）" in texts[0] and "```sql" in texts[1]
+
+
+def test_dashboard_steps_show_the_charts_and_the_page(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """界面里打开“允许搭看板”：看板 Agent 搭好的页面能找到，步骤里列出每张图和数据问题（M22）。"""
+    from functools import partial
+
+    from da_agent import dashboard_tool
+    from da_agent.cleaning import connect_frame
+    from da_agent.metrics import _ensure
+
+    base = connect_frame(make_frame(ROWS))
+    _ensure(base)
+    import da_agent.cleaning as cleaning
+
+    monkeypatch.setattr(cleaning, "connect", lambda path: base)
+    monkeypatch.setattr(dashboard_tool, "DashboardService",
+                        partial(dashboard_tool.DashboardService, source="financials", runs_dir=tmp_path / "dashboards"))
+    script = Path(__file__).parents[1] / "fixtures" / "fake_llm" / "dashboard_financials.json"
+    llm = FakeLLM(replies=[tools(call(1, "build_dashboard", goal="给研究员看四家平台的盈利能力")),
+                           *FakeLLM.from_file(script).replies, LLMReply(content="看板做好了。")])
+    monkeypatch.setattr(ui, "make_llm", lambda settings: llm)
+    monkeypatch.setattr(ui, "RUNS_DIR", tmp_path)
+    run_dir = ui.ask("搭个看板", "ecommerce", Settings(_env_file=None), with_dashboard=True)
+    saved = ui.load_run(run_dir).run
+    pages = ui.dashboard_pages(saved)
+    assert saved["steps"][0]["tool"] == "build_dashboard" and len(pages) == 1 and pages[0].parent.parent == tmp_path / "dashboards"
+    result = json.loads(saved["messages"][3]["content"])
+    text = ui.dashboard_preview(result)
+    assert "看板 Agent 搭好了「电商平台盈利能力看板」，3 张图" in text and "（kpi）" in text
+    assert ui.tool_label("build_dashboard") == "搭看板（看板 Agent）（build_dashboard）"
