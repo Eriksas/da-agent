@@ -297,7 +297,8 @@ class Connections:
     def __init__(self, parquet_path: Path = PARQUET_PATH, query_dir: Path | None = None) -> None:
         self.parquet_path = parquet_path
         self.query_dir = query_dir
-        self.dashboard_source = "retail"  # agent_dashboard 组的看板 Agent 用哪份数据（测试里换成仓库自带的财报数据）
+        # agent_dashboard 组的看板 Agent 用哪份数据（测试里换成仓库自带的财报数据）。M23 起和查询 Agent 用同一份口径配置
+        self.dashboard_source = "semantic:retail"
         self._cache: dict[str, duckdb.DuckDBPyConnection] = {}
         self._query: dict[str, Any] = {}
 

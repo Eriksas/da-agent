@@ -8,6 +8,7 @@
 每条问题都写成模型能照着改的中文。
 """
 
+import re
 from datetime import date, timedelta
 from typing import Annotated, Any, Literal
 
@@ -286,7 +287,7 @@ def chart_problems(c: Chart, metrics: dict[str, Metric], types: dict[str, str], 
 
 def check_spec(spec: DashboardSpec, types: dict[str, str], source: Source) -> list[str]:
     """整个方案的静态校验，返回问题列表（空表示通过）。types：列名 → 类型（sources.column_types）。"""
-    problems = metric_problems(spec.metrics, types)
+    problems = metric_problems(spec.metrics, types) + definition_problems(spec.metrics, source)
     metrics = {m.id: m for m in spec.metrics}
     if len({c.id for c in spec.charts}) < len(spec.charts):
         problems.append("图的 id 有重复")
@@ -315,6 +316,52 @@ def check_spec(spec: DashboardSpec, types: dict[str, str], source: Source) -> li
         problems.append("这份数据没有时间戳列，不能用 year_filter；可以把年份放在横轴上")
     if not any(c.type == "kpi" for c in spec.charts):
         problems.append("至少放一张 kpi：读者先看到最重要的数")
+    return problems
+
+
+def configured_metrics(source: Source) -> dict[str, Metric]:
+    """口径配置里的指标（M23），写成看板方案的格式。"""
+    return {key: Metric.model_validate({k: v for k, v in m.items() if k != "definition"}) for key, m in source.metrics.items()}
+
+
+def _same_definition(m: Metric, mine: dict[str, Metric], c: Metric, theirs: dict[str, Metric]) -> bool:
+    """m（看板里的）和 c（配置里的）算的是不是同一个东西。看板可以多加筛选条件（例如只看英国的 GMV），
+    但配置里的条件一条都不能少；ratio / difference 逐个比较引用的两个指标。"""
+    if m.agg != c.agg:
+        return False
+    if c.agg in ("ratio", "difference"):
+        return all(a in mine and b in theirs and _same_definition(mine[a], mine, theirs[b], theirs)
+                   for a, b in ((m.left, c.left), (m.right, c.right)))
+    return m.column == c.column and all(sorted(m.where.get(k, [])) == sorted(v) for k, v in c.where.items())
+
+
+def _describe(c: Metric, theirs: dict[str, Metric]) -> str:
+    if c.agg in ("ratio", "difference"):
+        sign = "÷" if c.agg == "ratio" else "−"
+        return f"{c.agg}：{theirs[c.left].label}（{_describe(theirs[c.left], theirs)}）{sign} {theirs[c.right].label}（{_describe(theirs[c.right], theirs)}）"
+    text = f"{c.agg}({c.column or ''})"
+    return text + "".join(f"，where {k} = {v}" for k, v in c.where.items())
+
+
+def _label_key(label: str) -> str:
+    """比较显示名时去掉括号里的补充和空格：“GMV（英镑）”和“GMV”算同名。"""
+    return re.sub(r"[（(].*?[）)]|\s", "", label).lower()
+
+
+def definition_problems(spec_metrics: list[Metric], source: Source) -> list[str]:
+    """看板里和口径配置同名（id 或显示名相同）的指标，定义必须和配置一致（M23）。
+    这样看板上的“GMV”“客单价”和查询数据、固定报表算出来的是同一个数。"""
+    if not source.metrics:
+        return []
+    theirs = configured_metrics(source)
+    by_label = {_label_key(c.label): c for c in theirs.values()}
+    mine = {m.id: m for m in spec_metrics}
+    problems = []
+    for m in spec_metrics:
+        c = theirs.get(m.id) or by_label.get(_label_key(m.label))
+        if c is not None and not _same_definition(m, mine, c, theirs):
+            problems.append(f"指标 {m.id}（{m.label}）和口径配置里的“{c.label}”（{c.id}）同名，定义却不同。配置的定义是 "
+                            f"{_describe(c, theirs)}。照配置写；要用别的口径就换一个名字，并在 notes 里写明")
     return problems
 
 

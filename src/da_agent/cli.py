@@ -782,7 +782,9 @@ def main(argv: list[str] | None = None) -> int:
     site_parser = commands.add_parser("build-site", help="生成项目展示网站（静态网页，用于 GitHub Pages）")
     site_parser.add_argument("--out", type=Path, default=Path("_site"), help="输出目录，默认 _site")
     build_parser = commands.add_parser("build-dashboard", help="Agent 根据数据自己设计看板，生成 runs/<编号>/dashboard.html")
-    build_parser.add_argument("source", help="retail 电商交易；financials 上市公司财报；或者一个 .csv / .xlsx 文件（没有任何规则和说明）")
+    build_parser.add_argument("source", help=(
+        "semantic:retail 电商数据（和查询 Agent 同一份口径配置，有新老客、周、月）；retail 电商交易（M13 的交易表）；"
+        "financials 上市公司财报；或者一个 .csv / .xlsx 文件（没有任何规则和说明）"))
     build_parser.add_argument("--sheet", help="Excel 的工作表名；不填读第一个工作表")
     build_parser.add_argument("--goal", help="看板给谁看、帮他判断什么；不填用默认（业务负责人看整体情况）")
     build_parser.add_argument("--llm", choices=["real", "fake"], default="real", help="real 调用真实模型（默认）；fake 按剧本回放")

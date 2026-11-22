@@ -37,6 +37,11 @@ class Source:
     # 会被之后的记录抵消的数值：列 → (分类列, 原记录的取值, 抵消记录的取值)。电商的销售会被之后的取消抵消
     offsets: dict[str, tuple[str, str, str]] = field(default_factory=dict)
     row_meaning: str | None = None  # 数据说明里写明的“一行是什么”；用户给的 CSV 没有
+    # 抵消的金额记在另一列（M23，口径配置的表）：列 → (记着抵消金额的列, 抵消记录叫什么)。gmv_amount 被 cancelled_amount 抵消
+    offset_columns: dict[str, tuple[str, str]] = field(default_factory=dict)
+    # 口径配置里的指标（M23）：id → 看板方案里的写法（agg、column、where、left、right、format）加 label、definition。
+    # 看板里和它们同名的指标，定义必须一致（spec.definition_problems）
+    metrics: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 def _connect_retail() -> duckdb.DuckDBPyConnection:
@@ -207,6 +212,50 @@ def excel_source(path: Path | str, sheet: str | None = None, label: str | None =
     return Source(name, label, CSV_TABLE, description, {}, connect, time_column=None)
 
 
+SEMANTIC_PREFIX = "semantic:"
+
+
+def semantic_source(config: str) -> Source:
+    """口径配置里的表（M23）：和查询 Agent 读同一个数据库文件、同一张表、同一份指标口径。
+
+    config 是口径配置的名字（semantic/<名字>.yaml），配置里要有 dashboard 一节。
+    连接时才准备数据库（semantic.prepare：已经准备过、比数据和配置都新时直接复用），以只读方式打开，和查询 Agent 一样。
+    """
+    from ..semantic import config_path, load_config
+
+    cfg = load_config(config_path(config))
+    dash = cfg.dashboard
+    if dash is None:
+        raise ValueError(f"口径配置 {config} 没有写看板用法（dashboard 一节），看板不能用它")
+    table = cfg.tables[dash.table]
+    name = f"{SEMANTIC_PREFIX}{config}"
+    notes = "".join(f"\n- {note}" for note in cfg.notes)
+    description = (f"{cfg.description}表 {dash.table}：{table.description}这张表和查询数据的同事用的是同一份口径配置。"
+                   + (f"\n注意：{notes}" if notes else ""))
+    metrics = {key: {"id": key, "label": m.label, "definition": m.definition, **m.dashboard}
+               for key, m in cfg.metrics.items() if m.dashboard is not None}
+
+    def connect() -> duckdb.DuckDBPyConnection:
+        from ..semantic import prepare
+
+        return open_semantic(prepare(config).path, name, cfg.label)
+
+    return Source(name, cfg.label, dash.table, description, dict(table.columns), connect, time_column=dash.time_column,
+                  pin_by={k: tuple(v) for k, v in dash.pin_by.items()}, units=dict(dash.units),
+                  offsets={k: (o.by, o.value, o.against) for k, o in dash.offsets.items() if o.by and o.value},
+                  offset_columns={k: (o.column, o.against) for k, o in dash.offsets.items() if o.column},
+                  row_meaning=dash.row_meaning, metrics=metrics)
+
+
+def open_semantic(path: Path, name: str, label: str) -> duckdb.DuckDBPyConnection:
+    """以只读方式打开口径配置的数据库（和查询 Agent 同样的限制），记下它是哪份数据。临时表只属于这个连接。"""
+    from ..sqlrun import open_readonly
+
+    con = open_readonly(path)
+    con.execute("CREATE TEMP TABLE dash_source AS SELECT ? AS name, ? AS label", [name, label])
+    return con
+
+
 def _with_time_column(con: duckdb.DuckDBPyConnection, source: Source) -> Source:
     """CSV 的时间列：第一个时间戳或日期列（没有就是 None，不能按年筛选）。"""
     for column, kind in column_types(con, source).items():
@@ -221,6 +270,8 @@ def source_of(con: duckdb.DuckDBPyConnection) -> Source:
                                                  "SELECT table_name FROM duckdb_tables()")}
     if "dash_source" in tables:
         meta = fetch_one(con, "SELECT name, label FROM dash_source")
+        if meta["name"].startswith(SEMANTIC_PREFIX):
+            return semantic_source(meta["name"].removeprefix(SEMANTIC_PREFIX))
         excel = split_excel_name(meta["name"]) if meta["name"].startswith("xlsx:") else None
         source = excel_source(*excel, meta["label"]) if excel else csv_source(meta["name"].removeprefix("csv:"), meta["label"])
         return _with_time_column(con, source)
@@ -231,15 +282,18 @@ def source_of(con: duckdb.DuckDBPyConnection) -> Source:
 
 
 def connect_source(name: str) -> duckdb.DuckDBPyConnection:
-    """内置数据用名字（retail、financials）；CSV 用 csv:路径，或者直接给一个 .csv 文件的路径；
+    """内置数据用名字（retail、financials）；口径配置用 semantic:名字（例如 semantic:retail，和查询 Agent 同一份数据）；
+    CSV 用 csv:路径，或者直接给一个 .csv 文件的路径；
     Excel 给 .xlsx 文件的路径，要读别的工作表时写成“文件.xlsx#工作表名”（不写读第一个工作表）。"""
+    if name.startswith(SEMANTIC_PREFIX):
+        return semantic_source(name.removeprefix(SEMANTIC_PREFIX)).connect()
     if name.startswith("csv:") or name.lower().endswith(".csv"):
         return csv_source(name.removeprefix("csv:")).connect()
     excel = split_excel_name(name)
     if excel:
         return excel_source(*excel).connect()
     if name not in SOURCES:
-        raise ValueError(f"没有名为 {name} 的数据；可选：{list(SOURCES)}，或者一个 .csv / .xlsx 文件的路径")
+        raise ValueError(f"没有名为 {name} 的数据；可选：{list(SOURCES)}、semantic:retail，或者一个 .csv / .xlsx 文件的路径")
     return SOURCES[name].connect()
 
 
@@ -295,10 +349,20 @@ def profile_table(con: duckdb.DuckDBPyConnection) -> dict[str, Any]:
     rules += [f"{value}（{by} = {orig}）可能被之后 {by} = {offset} 的记录抵消：按下单口径给类别排名时，"
               f"大部分被抵消的分组会被高估，preview 的 notes 会提示；看真实成交用 difference（{orig} − {offset}）"
               for value, (by, orig, offset) in source.offsets.items()]
-    return {"tool": "profile_table", "source": source.name, "label": source.label, "table": source.table,
-            "description": source.description, "rows": rows, "time_column": source.time_column,
-            "row_identity": _row_identity(con, source, columns, rows), "possible_missing": _possible_missing(columns),
-            "columns": columns, "rules": rules}
+    rules += [f"{value} 可能被之后的{against}抵消（抵消的金额在 {column} 列）：按下单口径给类别排名时，"
+              f"大部分被抵消的分组会被高估，preview 的 notes 会提示；看真实成交用 difference（{value} 的合计 − {column} 的合计）"
+              for value, (column, against) in source.offset_columns.items()]
+    if source.metrics:
+        rules.append("metrics 是口径配置里定义好的指标，查询数据和固定报表用的是同一套口径：用到这些指标时照抄它们的 "
+                     "agg、column、where、left、right、format（ratio 引用的两个指标也要一起定义）；看板里的指标和它们同名"
+                     "（id 或显示名相同）时定义必须一致，校验器会检查。需要别的口径就换一个名字，并在 notes 里写明")
+    profile = {"tool": "profile_table", "source": source.name, "label": source.label, "table": source.table,
+               "description": source.description, "rows": rows, "time_column": source.time_column,
+               "row_identity": _row_identity(con, source, columns, rows), "possible_missing": _possible_missing(columns),
+               "columns": columns, "rules": rules}
+    if source.metrics:
+        profile["metrics"] = list(source.metrics.values())
+    return profile
 
 
 MISSING_LIKE = {"unknown", "unk", "n/a", "na", "null", "missing", "?", "未知", "不详", "缺失", ""}

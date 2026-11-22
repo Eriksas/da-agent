@@ -24,8 +24,9 @@ UNVERIFIED_NOTE = "看板 Agent 自己写的数据说明，程序没有核对：
 class BuildDashboardArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    goal: str = Field(min_length=8, max_length=300, description=(
-        "看板给谁看、帮他判断什么，例如“给运营负责人看 2011 年各国销售走势和取消情况，判断哪些市场要重点跟进”"))
+    # M22 留出题里 8 次有 5 次第一次写的目标超过 300 字被退回、白跑一轮；M23 放宽到 600，描述里请它写短
+    goal: str = Field(min_length=8, max_length=600, description=(
+        "看板给谁看、帮他判断什么，一般 200 字以内，例如“给运营负责人看 2011 年各国销售走势和取消情况，判断哪些市场要重点跟进”"))
 
 
 @dataclass
@@ -33,7 +34,8 @@ class DashboardService:
     """主 Agent 调用看板 Agent 时用的上下文。每次运行新建一个：records 是这次运行里每次搭看板的完整记录。"""
 
     llm: LLMClient
-    source: str = "retail"
+    # M23：默认用口径配置的表，和查询 Agent 同一份数据、同一套指标口径（以前是 M13 的交易表，没有新老客、周、月这些列）
+    source: str = "semantic:retail"
     max_tool_calls: int | None = None  # 不填用看板 Agent 自己的上限（autodash.build.MAX_TOOL_CALLS）
     runs_dir: Path | None = None  # 看板运行目录放哪；不填放 runs/
     records: list[dict[str, Any]] = field(default_factory=list)

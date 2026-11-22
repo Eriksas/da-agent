@@ -51,6 +51,29 @@ class MetricConfig(_Config):
     table: str
     sql: str = Field(min_length=1)  # 聚合表达式，例如 sum(gmv_amount)
     definition: str = Field(min_length=1)
+    # 同一个指标在看板方案里的写法（M23）：agg、column、where、left、right、format，和 autodash.spec.Metric 一致；
+    # ratio / difference 的 left、right 是配置里别的指标名。tests/test_semantic_dashboard.py 核对两种写法算出来一样
+    dashboard: dict[str, Any] | None = None
+
+
+class OffsetConfig(_Config):
+    """会被之后的记录抵消的金额（M23，看板用）：按下单口径给类别排名时，大部分被抵消的分组会被高估。"""
+
+    against: str = Field(min_length=1)  # 抵消它的记录叫什么，例如“取消”
+    by: str | None = None  # 同一列、按分类区分：amount 在 line_type = 销售 的行被 line_type = 取消 的行抵消
+    value: str | None = None
+    column: str | None = None  # 抵消的金额在另一列：gmv_amount 被 cancelled_amount 抵消
+
+
+class DashboardConfig(_Config):
+    """看板 Agent 怎么用这份配置（M23）：用哪张表、时间列，以及校验器要强制执行的规则（见 autodash.sources.Source）。"""
+
+    table: str
+    time_column: str | None = None
+    row_meaning: str | None = None
+    pin_by: dict[str, list[str]] = Field(default_factory=dict)
+    units: dict[str, str] = Field(default_factory=dict)
+    offsets: dict[str, OffsetConfig] = Field(default_factory=dict)
 
 
 class SemanticConfig(_Config):
@@ -61,6 +84,7 @@ class SemanticConfig(_Config):
     tables: dict[str, TableConfig] = Field(min_length=1)
     metrics: dict[str, MetricConfig] = Field(default_factory=dict)
     notes: list[str] = Field(default_factory=list)
+    dashboard: DashboardConfig | None = None  # 不写时看板不能用这份配置
 
 
 @dataclass(frozen=True)
@@ -76,6 +100,15 @@ class QueryDB:
 
 def load_config(path: Path) -> SemanticConfig:
     return SemanticConfig.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+
+
+def config_path(data: str) -> Path:
+    """口径配置的名字（semantic/<名字>.yaml）或配置文件的路径 → 文件路径；找不到时报错并列出可选的名字。"""
+    path = Path(data) if data.lower().endswith((".yaml", ".yml")) else SEMANTIC_DIR / f"{data}.yaml"
+    if not path.exists():
+        available = sorted(p.stem for p in SEMANTIC_DIR.glob("*.yaml"))
+        raise ValueError(f"没有名为 {data} 的口径配置；可选：{available}，或者一个 .csv 文件的路径")
+    return path
 
 
 def _profile(con: duckdb.DuckDBPyConnection, table: str, described: dict[str, str]) -> dict[str, Any]:
@@ -99,6 +132,33 @@ def _profile(con: duckdb.DuckDBPyConnection, table: str, described: dict[str, st
             column["range"] = [str(low), str(high)]
         columns.append(column)
     return {"rows": rows, "columns": columns}
+
+
+def check_dashboard_config(config: SemanticConfig) -> None:
+    """看板用法（dashboard 一节）里提到的表、列、指标都要存在，写错了直接报错。"""
+    dash = config.dashboard
+    if dash is None:
+        return
+    if dash.table not in config.tables:
+        raise ValueError(f"看板用的表 {dash.table} 不在配置里")
+    named = [*([dash.time_column] if dash.time_column else []), *dash.pin_by, *dash.units, *dash.offsets]
+    named += [column for by in dash.pin_by.values() for column in by]
+    for column, offset in dash.offsets.items():
+        if bool(offset.column) == bool(offset.by and offset.value):
+            raise ValueError(f"看板用法里 {column} 的抵消规则：要么写 by 和 value（同一列按分类区分），要么写 column（另一列）")
+        named += [c for c in (offset.by, offset.column) if c]
+    missing = sorted({c for c in named if c not in config.tables[dash.table].columns})
+    if missing:
+        raise ValueError(f"看板用法里的列不在表 {dash.table} 里：{missing}")
+    for name, metric in config.metrics.items():
+        if metric.dashboard is None:
+            continue
+        if metric.table != dash.table:
+            raise ValueError(f"指标 {name} 有看板写法，但它用的表 {metric.table} 不是看板用的表 {dash.table}")
+        for side in ("left", "right"):
+            ref = metric.dashboard.get(side)
+            if ref is not None and (ref not in config.metrics or config.metrics[ref].dashboard is None):
+                raise ValueError(f"指标 {name} 的看板写法引用了 {ref}，它不是配置里有看板写法的指标")
 
 
 def build_database(config: SemanticConfig, base: duckdb.DuckDBPyConnection, out_path: Path) -> QueryDB:
@@ -133,10 +193,13 @@ def build_database(config: SemanticConfig, base: duckdb.DuckDBPyConnection, out_
                 con.execute(f'SELECT {metric.sql} FROM "{metric.table}"').fetchall()
             except duckdb.Error as exc:
                 raise ValueError(f"指标 {name} 的表达式跑不通：{str(exc).splitlines()[0]}") from exc
+        check_dashboard_config(config)
     finally:
         con.close()
+    # 看板写法不放进数据说明：查询 Agent 看到的和以前一字不差
     catalog = {"name": config.name, "label": config.label, "description": config.description, "tables": tables,
-               "metrics": {name: metric.model_dump() for name, metric in config.metrics.items()}, "notes": config.notes}
+               "metrics": {name: metric.model_dump(exclude={"dashboard"}) for name, metric in config.metrics.items()},
+               "notes": config.notes}
     os.replace(building, out_path)
     out_path.with_suffix(".catalog.json").write_text(json.dumps(catalog, ensure_ascii=False, indent=2) + "\n",
                                                      encoding="utf-8", newline="\n")
@@ -199,17 +262,14 @@ def prepare(data: str, *, force: bool = False) -> QueryDB:
         csv_path = Path(data).resolve()
         out = QUERY_DB_DIR / f"csv-{hashlib.sha1(csv_path.as_posix().encode()).hexdigest()[:12]}.duckdb"
         return _load_catalog(out) if not force and _fresh(out, csv_path) else build_csv_database(csv_path, out)
-    config_path = Path(data) if data.lower().endswith((".yaml", ".yml")) else SEMANTIC_DIR / f"{data}.yaml"
-    if not config_path.exists():
-        available = sorted(p.stem for p in SEMANTIC_DIR.glob("*.yaml"))
-        raise ValueError(f"没有名为 {data} 的口径配置；可选：{available}，或者一个 .csv 文件的路径")
-    config = load_config(config_path)
+    path = config_path(data)
+    config = load_config(path)
     if config.base not in BASES:
         raise ValueError(f"配置 {config.name} 的基础数据 {config.base} 不认识；可选：{list(BASES)}")
     out = QUERY_DB_DIR / f"{config.name}.duckdb"
     from .dataset import PARQUET_PATH
 
-    if not force and _fresh(out, config_path, PARQUET_PATH):
+    if not force and _fresh(out, path, PARQUET_PATH):
         return _load_catalog(out)
     base = BASES[config.base]()
     try:
