@@ -127,3 +127,13 @@ def test_the_dashboard_condition_end_to_end(tmp_path: Path) -> None:
     assert len(pages) == 1  # 看板存在这次评测运行自己的目录里
     text = render_summary(summary, {"name": "t", "model": "fake", "repeats": 1, "finished_at": "now"})
     assert "用到搭看板的运行" in text
+
+
+def test_at_most_two_builds_per_answer(con: duckdb.DuckDBPyConnection, tmp_path: Path) -> None:
+    """搭一次看板要几分钟：没搭出来可以缩小目标再试一次，第三次程序直接拒绝。"""
+    main = FakeLLM(replies=[call("build_dashboard", {"goal": GOAL}, "c1"), call("build_dashboard", {"goal": GOAL}, "c2"),
+                            call("build_dashboard", {"goal": GOAL}, "c3"), LLMReply(content="看板没有做出来。")])
+    run = run_agent("搭个看板", llm=main, con=con, max_tool_calls=5, tool_contexts={"build_dashboard": service(tmp_path, None)})
+    errors = [step["error"] for step in run.steps]
+    assert errors[0].startswith("看板 Agent 没有交出") and errors[1].startswith("看板 Agent 没有交出")
+    assert errors[2].startswith("这次回答已经试过 2 次搭看板") and len(run.sub_runs) == 2

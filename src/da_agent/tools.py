@@ -19,7 +19,7 @@ from .abtest import proportion_test, sample_size_proportions, srm_check
 from .analyst import QueryDataArgs, RunSqlArgs, SubmitQueryArgs, query_data, run_sql, submit_query
 from .autodash.compile import compile_dashboard, preview_chart
 from .autodash.sources import profile_table
-from .autodash.spec import MAX_SUBMIT_CHARTS, Chart, DashboardSpec, Metric
+from .autodash.spec import MAX_SUBMIT_CHARTS, Chart, DashboardSpec, Metric, Period
 from .calculator import MAX_LENGTH, calculate
 from .company import RATIOS, company_overview, dupont, financial_summary, peer_compare
 from .dashboard_tool import BuildDashboardArgs, build_dashboard_tool
@@ -108,6 +108,7 @@ class SampleSizeArgs(_Args):
 class PreviewChartArgs(_Args):
     metrics: list[Metric] = Field(min_length=1, max_length=6, description="这张图用到的指标定义（ratio 要连同它引用的两个指标一起给）")
     chart: Chart = Field(description="要预览的图")
+    period: Period | None = Field(None, description="整个看板只看一段时间时，预览也带上同样的 period")
 
 
 class SubmitDashboardArgs(DashboardSpec):
@@ -254,7 +255,7 @@ TOOLS: dict[str, Tool] = {tool.name: tool for tool in (
     Tool("preview_chart",
          "预览一张图的数据（不加筛选）：每个点的数值、合计、占比、最大最小、最近一期变化，以及自动发现的数据问题（notes）。"
          "insight 里的数字只能用这里返回的数。方案有问题时返回修改意见。",
-         PreviewChartArgs, lambda con, a: preview_chart(con, a.metrics, a.chart), PREVIEW_HINT),
+         PreviewChartArgs, lambda con, a: preview_chart(con, a.metrics, a.chart, a.period), PREVIEW_HINT),
     Tool("submit_dashboard",
          f"提交整个看板方案：标题、读者和目标、指标、图（2–{MAX_SUBMIT_CHARTS} 张，至少 1 张 kpi）、筛选器、数据说明。"
          "程序校验后计算所有数字并生成看板；不通过时返回逐条修改意见，改完再提交。",

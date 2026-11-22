@@ -37,6 +37,8 @@ class DashboardService:
     max_tool_calls: int | None = None  # 不填用看板 Agent 自己的上限（autodash.build.MAX_TOOL_CALLS）
     runs_dir: Path | None = None  # 看板运行目录放哪；不填放 runs/
     records: list[dict[str, Any]] = field(default_factory=list)
+    # 一次回答里最多搭几次：搭一次要几分钟、几十万 token，没搭出来时主 Agent 会把目标缩小再试，但不能一直试
+    max_builds: int = 2
 
 
 def _accepted_charts(record: dict[str, Any]) -> list[dict[str, Any]]:
@@ -51,6 +53,8 @@ def _accepted_charts(record: dict[str, Any]) -> list[dict[str, Any]]:
 def build_dashboard_tool(service: DashboardService, args: BuildDashboardArgs) -> dict[str, Any]:
     from .autodash.build import MAX_TOOL_CALLS, build_dashboard, final_spec
 
+    if len(service.records) >= service.max_builds:
+        raise ValueError(f"这次回答已经试过 {service.max_builds} 次搭看板，不再尝试。请在回答中照实说明，并建议用户把要看的内容说得更具体")
     run, run_dir, page = build_dashboard(service.source, args.goal, service.llm, service.max_tool_calls or MAX_TOOL_CALLS,
                                          runs_dir=service.runs_dir)
     record = asdict(run)

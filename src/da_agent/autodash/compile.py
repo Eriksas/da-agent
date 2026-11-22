@@ -27,11 +27,13 @@ from .spec import (
     DashboardSpec,
     Dimension,
     Metric,
+    Period,
     base_metrics,
     chart_problems,
     check_spec,
     is_additive,
     metric_problems,
+    period_problems,
 )
 
 WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
@@ -147,11 +149,25 @@ def bin_labels(edges: list[float], integer: bool, lo: float | None, hi: float | 
 class Compiler:
     """一份数据上的编译器：缓存表的概况，按筛选条件（slice）算图的数据。"""
 
-    def __init__(self, con: duckdb.DuckDBPyConnection) -> None:
+    def __init__(self, con: duckdb.DuckDBPyConnection, period: Period | None = None) -> None:
         self.con = con
         self.source: Source = source_of(con)
         self.types = column_types(con, self.source)
         self.table = _q(self.source.table)
+        self.period = period
+        if period is not None:  # 整个看板只看一段时间：后面所有查询都查这个临时视图，不会有哪一处漏了
+            problems = period_problems(period, self.source)
+            if problems:
+                raise DashboardProblems(problems)
+            start, end = period.bounds()
+            view = f"dash_period_{start:%Y%m%d}_{end:%Y%m%d}"
+            col = _q(self.source.time_column)
+            con.execute(f"CREATE OR REPLACE TEMP VIEW {view} AS SELECT * FROM {self.table} "
+                        f"WHERE {col} >= DATE '{start}' AND {col} < DATE '{end}'")
+            if not fetch_one(con, f"SELECT count(*) AS n FROM {view}")["n"]:
+                full = fetch_one(con, f"SELECT min({col}) AS lo, max({col}) AS hi FROM {self.table}")
+                raise DashboardProblems([f"period {period.label()} 里没有数据；数据范围是 {full['lo']:%Y-%m-%d} 至 {full['hi']:%Y-%m-%d}"])
+            self.table = view
         bounds = None
         if self.source.time_column:
             col = _q(self.source.time_column)
@@ -674,11 +690,11 @@ def ungrounded_numbers(text: str, data: dict[str, Any]) -> list[str]:
 # ---------- 整个看板 ----------
 def compile_dashboard(con: duckdb.DuckDBPyConnection, spec: DashboardSpec) -> dict[str, Any]:
     """校验并编译整个方案。有问题时抛出 DashboardProblems（每条都是修改意见）。"""
-    compiler = Compiler(con)
-    source = compiler.source
-    problems = check_spec(spec, compiler.types, source)
+    problems = check_spec(spec, column_types(con, source_of(con)), source_of(con))
     if problems:
         raise DashboardProblems(problems)
+    compiler = Compiler(con, spec.period)  # 方案本身先查过了（上面）；这里建好只看 period 的视图
+    source = compiler.source
     problems = compiler.data_problems(spec.metrics, spec.charts, spec.filters)
     if problems:
         raise DashboardProblems(problems)
@@ -739,9 +755,10 @@ def compile_dashboard(con: duckdb.DuckDBPyConnection, spec: DashboardSpec) -> di
     }
 
 
-def preview_chart(con: duckdb.DuckDBPyConnection, metrics: list[Metric], chart: Chart) -> dict[str, Any]:
-    """先看一张图的数据长什么样（不加筛选）。返回的数字可以写进 insight。"""
-    compiler = Compiler(con)
+def preview_chart(con: duckdb.DuckDBPyConnection, metrics: list[Metric], chart: Chart,
+                  period: Period | None = None) -> dict[str, Any]:
+    """先看一张图的数据长什么样（不加筛选；给了 period 就只看那段时间）。返回的数字可以写进 insight。"""
+    compiler = Compiler(con, period)
     by_id = {m.id: m for m in metrics}
     problems = metric_problems(metrics, compiler.types) + chart_problems(chart, by_id, compiler.types,
                                                                           compiler.source)
