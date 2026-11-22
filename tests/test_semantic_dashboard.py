@@ -8,6 +8,7 @@
 
 from pathlib import Path
 
+import duckdb
 import pytest
 from test_metrics import ROWS
 
@@ -19,6 +20,7 @@ from da_agent.autodash.spec import Chart, DashboardSpec, Metric, configured_metr
 from da_agent.cleaning import connect, connect_frame
 from da_agent.dashboard_tool import BuildDashboardArgs, DashboardService
 from da_agent.dataset import PARQUET_PATH
+from da_agent.evaluation import Connections
 from da_agent.llm import FakeLLM
 from da_agent.metrics import _ensure
 from da_agent.semantic import SEMANTIC_DIR, build_database, check_dashboard_config, load_config
@@ -92,8 +94,12 @@ def test_the_dashboard_agent_sees_the_configured_table(con) -> None:
         <= next(m for m in profile["metrics"] if m["id"] == "new_customers").items()
     assert any(rule.startswith("metrics 是口径配置里定义好的指标") for rule in profile["rules"])
     assert any("gmv_amount 可能被之后的取消抵消" in rule for rule in profile["rules"])
+    assert any(rule.startswith("amount（line_type = 销售）可能被之后") for rule in profile["rules"])
+    assert any(rule.startswith("amount 的含义取决于 line_type") for rule in profile["rules"])
     assert "2011-W49 不是完整的一周" in source.description and "同一份口径配置" in source.description
     assert profile["row_identity"]["note"] == "数据说明：每行是订单里的一个商品（取消单里的一个商品）"
+    with pytest.raises(duckdb.Error):  # 和查询 Agent 一样只读
+        con.execute("CREATE TABLE x AS SELECT 1")
 
 
 GMV = Metric(id="gmv", label="GMV", agg="sum", column="gmv_amount", format="money")
@@ -115,10 +121,11 @@ def test_same_named_metrics_must_follow_the_config(con) -> None:
              Metric(id="days", label="交易天数", agg="count_distinct", column="order_date"),  # 少了 line_type = 销售
              Metric(id="cancelled", label="取消金额", agg="sum", column="cancelled_amount"),
              Metric(id="cancel_rate", label="取消率", agg="ratio", left="gmv", right="cancelled", format="percent"),  # 分子分母反了
-             Metric(id="gmv_alt", label="gmv", agg="sum", column="amount", where={"line_type": ["销售"]})]  # 同名（不分大小写）
+             Metric(id="gmv_alt", label="gmv", agg="sum", column="amount", where={"line_type": ["销售"]}),  # 同名（不分大小写）
+             Metric(id="lines", label="订单数（张）", agg="count")]  # 括号里的补充不算
     problems = definition_problems(wrong, source)
     assert [p.split("）")[0] for p in problems] == ["指标 orders（订单", "指标 buyers（新客数", "指标 days（交易天数",
-                                                  "指标 cancel_rate（取消率", "指标 gmv_alt（gmv"]
+                                                  "指标 cancel_rate（取消率", "指标 gmv_alt（gmv", "指标 lines（订单数（张"]
     assert "配置的定义是 count_distinct(order_id)。" in problems[0]
     assert "count_distinct(order_date)，where line_type = ['销售']" in problems[2]
     assert "ratio：取消金额（sum(cancelled_amount)）÷ GMV（sum(gmv_amount)）" in problems[3]
@@ -171,7 +178,9 @@ def test_a_new_and_returning_customer_dashboard_can_be_built(con, tmp_path: Path
 def test_ranking_by_gmv_flags_groups_that_were_mostly_cancelled(con) -> None:
     chart = Chart(id="products", title="商品 GMV 排名", type="bar", metrics=["gmv"], x={"column": "description"}, why="排名")
     out = preview_chart(con, [GMV], chart)
-    assert {r["x"]: r.get("offset_share") for r in out["rows"]}["F"] == 1.0
+    shares = {r["x"]: r.get("offset_share") for r in out["rows"]}
+    assert shares["F"] == 1.0 and shares["A"] == round(5 / 85, 4) and shares.get("D") is None  # A 取消了 £5；D 没有取消
+    assert out["unit"] == "£"
     assert ("F 的GMV有 100.0% 后来被取消（£100.00），按下单口径排名会高估它；"
             "看真实成交改用 difference（gmv_amount 的合计 − cancelled_amount 的合计）") in out["notes"]
     net = Metric(id="net_sales", label="净销售额", agg="sum", column="net_amount", format="money")
@@ -209,6 +218,7 @@ def test_the_query_agent_sees_the_same_catalog_as_before(db) -> None:
 
 def test_the_main_agent_builds_dashboards_on_the_shared_table() -> None:
     assert DashboardService(llm=FakeLLM([])).source == "semantic:retail"
+    assert Connections().dashboard_source == "semantic:retail"  # 评测里的主 Agent 也一样
     assert BuildDashboardArgs(goal="给运营" + "看" * 590).goal  # M22 里 300 字常被退回，现在放宽到 600
     with pytest.raises(ValueError):
         BuildDashboardArgs(goal="看" * 601)
