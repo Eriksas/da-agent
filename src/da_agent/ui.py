@@ -36,7 +36,7 @@ TOOL_LABELS = {
     "data_quality_overview": "数据质量概览", "load_skill": "加载分析流程", "ab_proportion_test": "AB 实验检验",
     "ab_sample_size": "AB 样本量", "calculate": "计算器", "company_overview": "公司概览",
     "financial_summary": "财务摘要", "dupont": "杜邦分析", "peer_compare": "同行对比",
-    "query_data": "取数（查询 Agent）",
+    "query_data": "取数（查询 Agent）", "build_dashboard": "搭看板（看板 Agent）",
 }
 QUERY_PREVIEW_ROWS = 8  # 取数结果在进度框里只显示前几行：看得出算了什么就够了
 # 代码块原样显示；其余部分里 $ 会被 Streamlit 当成公式、~ 会被当成删除线（“3~5 天”会被划掉），要转义
@@ -76,12 +76,33 @@ def show_event(box: Any, event: dict[str, Any], label_prefix: str | None = None)
             box.caption(f"⚠️ {to_streamlit_markdown(warning)}")
         if step["ok"] and step["tool"] == "query_data":
             box.markdown(query_preview(event["result"]))
+        if step["ok"] and step["tool"] == "build_dashboard":
+            box.markdown(dashboard_preview(event["result"]))
     elif kind == "repair":
         numbers = "、".join(m["text"] for m in event["ungrounded"])
         box.warning(f"自动核查：初稿有 {len(event['ungrounded'])} 个数字找不到出处（{to_streamlit_markdown(numbers)}），"
                     "退回模型修正 1 次")
     else:
         box.info(to_streamlit_markdown(event["text"].removeprefix("（系统提示）")))
+
+
+def dashboard_preview(result: dict[str, Any]) -> str:
+    """搭好的看板：标题、每张图、程序发现的数据问题。页面本身在结果区里嵌入显示。"""
+    charts = "\n".join(f"- {to_streamlit_markdown(c['title'])}（{c['type']}）" for c in result["charts"])
+    problems = "\n".join(f"- ⚠️ {to_streamlit_markdown(p)}" for p in result.get("data_problems", []))
+    return (f"看板 Agent 搭好了「{to_streamlit_markdown(result['title'])}」，{len(result['charts'])} 张图：\n\n{charts}"
+            + (f"\n\n程序发现的数据问题：\n\n{problems}" if problems else ""))
+
+
+def dashboard_pages(run: dict[str, Any]) -> list[Path]:
+    """这次运行里搭好的看板页面（按顺序，只取还在磁盘上的）。"""
+    pages = []
+    for message in run["messages"]:
+        if message["role"] == "tool" and '"tool": "build_dashboard"' in message["content"]:
+            page = Path(json.loads(message["content"]).get("page", ""))
+            if page.name == "dashboard.html" and page.exists():
+                pages.append(page)
+    return pages
 
 
 def query_preview(result: dict[str, Any]) -> str:
@@ -223,10 +244,12 @@ def make_llm(settings: Settings) -> LLMClient:
 
 
 def ask(question: str, domain: str, settings: Settings,
-        on_step: Callable[[dict[str, Any]], None] | None = None, with_query: bool = False) -> Path:
+        on_step: Callable[[dict[str, Any]], None] | None = None, with_query: bool = False,
+        with_dashboard: bool = False) -> Path:
     """回答一个问题，保存运行记录并生成核查结果和报告（和命令行的 ask、company-ask 相同），返回运行目录。
 
-    with_query：给 Agent 加上 query_data 工具（M19b，只支持电商），和命令行的 ask --with-query 相同。
+    with_query：给 Agent 加上 query_data 工具（M19b，只支持电商），和命令行的 ask 相同。
+    with_dashboard：加上 build_dashboard 工具（M22，只支持电商），和命令行的 ask --with-dashboard 相同。
     """
     from .cleaning import connect
     from .company import connect_financials
@@ -239,6 +262,10 @@ def ask(question: str, domain: str, settings: Settings,
         from .semantic import prepare
 
         contexts["query_data"] = QueryService(llm=llm, db=prepare("retail"))
+    if with_dashboard and domain == "ecommerce":
+        from .dashboard_tool import DashboardService
+
+        contexts["build_dashboard"] = DashboardService(llm=llm)
     with (connect_financials() if domain == "company" else connect(PARQUET_PATH)) as con:
         run = run_agent(question, llm=llm, con=con, max_tool_calls=settings.llm_max_tool_calls, domain=domain,
                         on_step=on_step, tool_contexts=contexts)

@@ -130,3 +130,40 @@ def test_mixed_text_is_left_alone(tmp_path: Path) -> None:
     book.save(tmp_path / "m.xlsx")
     frame, _, _ = read_excel_table(tmp_path / "m.xlsx")
     assert frame["时间"].tolist() == ["2011-01", "上半年"]  # 整列不都是日期时不转
+
+
+def test_a_period_limits_the_whole_dashboard(book: Path) -> None:
+    """整个看板只看一段时间（M22）：所有图、年份筛选、数据范围都只算这段时间；预览也一样。"""
+    from da_agent.autodash.compile import DashboardProblems, preview_chart
+    from da_agent.autodash.spec import Metric, Period
+
+    base = {"title": "月度销售", "goal": "看 2011 年 11 月各国的 GMV",
+            "metrics": [{"id": "gmv", "label": "GMV", "agg": "sum", "column": "GMV（英镑）"}],
+            "charts": [{"id": "k", "title": "总 GMV", "type": "kpi", "metrics": ["gmv"], "why": "整体"},
+                       {"id": "c", "title": "各国 GMV", "type": "bar", "metrics": ["gmv"], "x": {"column": "国家"}, "why": "对比"}],
+            "year_filter": True}
+    with connect_source(f"{book}#销售") as con:
+        out = compile_dashboard(con, DashboardSpec.model_validate(base | {"period": {"start": "2011-11", "end": "2011-11"}}))
+        assert out["slices"]["all"]["k"]["facts"]["value"] == pytest.approx(1950.25)  # 只有 11 月：1,500.00 + 450.25
+        assert out["source"]["range"] == "2011-11 至 2011-11（按月汇总）"
+        everything = compile_dashboard(con, DashboardSpec.model_validate(base))
+        assert everything["slices"]["all"]["k"]["facts"]["value"] == pytest.approx(3450.75)  # 不给 period 时看全部
+        preview = preview_chart(con, [Metric.model_validate(base["metrics"][0])], DashboardSpec.model_validate(base).charts[1],
+                                Period(start="2011-10", end="2011-10"))
+        assert {r["x"]: r["values"][0] for r in preview["rows"]} == {"United Kingdom": 1200.5, "France": 300.0}
+        with pytest.raises(DashboardProblems, match="period 2012 里没有数据；数据范围是 2011-10-01 至 2011-11-01"):
+            compile_dashboard(con, DashboardSpec.model_validate(base | {"period": {"start": "2012", "end": "2012"}}))
+        with pytest.raises(DashboardProblems, match="开始 2011-11 晚于结束 2011-10"):
+            compile_dashboard(con, DashboardSpec.model_validate(base | {"period": {"start": "2011-11", "end": "2011-10"}}))
+
+
+def test_period_bounds() -> None:
+    from datetime import date
+
+    from da_agent.autodash.spec import Period
+
+    assert Period(start="2010", end="2010").bounds() == (date(2010, 1, 1), date(2011, 1, 1))
+    assert Period(start="2010-07", end="2010-12").bounds() == (date(2010, 7, 1), date(2011, 1, 1))
+    assert Period(start="2010-07-15", end="2010-07-20").bounds() == (date(2010, 7, 15), date(2010, 7, 21))
+    with pytest.raises(ValueError):
+        Period(start="2010-7", end="2010")  # 月份要两位

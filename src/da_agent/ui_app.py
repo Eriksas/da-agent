@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from da_agent import ui
 from da_agent.checks import check_run
@@ -67,6 +68,9 @@ def show_result(saved: ui.SavedRun) -> None:
             st.caption(f"标红的 {len(ungrounded)} 个数字在本次工具输出里找不到出处，必须核对。")
         if run.get("answer"):
             st.markdown(ui.to_streamlit_markdown(run["answer"], ungrounded))
+        for page in ui.dashboard_pages(run):  # 看板 Agent 搭好的看板直接显示在这里
+            st.caption(f"看板页面：{page}")
+            components.html(page.read_text(encoding="utf-8"), height=900, scrolling=True)
         else:
             st.error(f"没有答案：{run.get('error') or run['status']}")
     with tabs[1]:
@@ -159,6 +163,9 @@ def live_page() -> None:
     with_query = st.toggle("允许取数：固定工具答不了时，交给查询 Agent 写只读 SQL", key="with_query", value=True,
                            disabled=running or domain != "ecommerce",
                            help="多 Agent（M19b）：主 Agent 写取数请求，查询 Agent 写 SQL，程序在只读数据库上执行。更慢、更费 token")
+    with_dashboard = st.toggle("允许搭看板：要看板时，交给看板 Agent 搭", key="with_dashboard", value=True,
+                               disabled=running or domain != "ecommerce",
+                               help="多 Agent（M22）：主 Agent 写出给谁看、判断什么，看板 Agent 设计看板，程序校验、算数、画图。一次要几分钟")
     problem = ui.live_problem(domain, settings)
     if problem:
         st.warning(problem)
@@ -167,7 +174,8 @@ def live_page() -> None:
         with st.status("分析中：准备数据", expanded=True) as box:
             try:
                 run_dir = ui.ask(question.strip(), domain, settings, on_step=lambda e: ui.show_event(box, e, "分析中"),
-                                 with_query=with_query and domain == "ecommerce")
+                                 with_query=with_query and domain == "ecommerce",
+                                 with_dashboard=with_dashboard and domain == "ecommerce")
             finally:  # 中途停止（异常中断）也要让输入框恢复可用
                 st.session_state.running = False
         st.session_state.live_dir = str(run_dir)

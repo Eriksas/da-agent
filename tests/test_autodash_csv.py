@@ -116,3 +116,32 @@ def test_submissions_are_capped_at_nine_charts_but_old_plans_still_render(csv_pa
         bad = execute(con, "submit_dashboard", plan)
         assert not bad.ok and "图最多 9 张" in bad.content["error"]
         assert compile_dashboard(con, DashboardSpec.model_validate(plan))["charts"]  # 以前 10 张图的方案照常生成
+
+
+def test_months_written_as_text_become_the_time_column(tmp_path: Path) -> None:
+    """“2011-01”这样的年月 DuckDB 认不出是时间：整列转成日期，能按月画折线；月报的最后一个月不算“不完整”（M22）。"""
+    path = tmp_path / "monthly.csv"
+    path.write_text("month,region,sales\n2011-01,North,10\n2011-01,South,5\n2011/2,North,12\n2011年3月,South,7\n",
+                    encoding="utf-8")
+    with connect_source(str(path)) as con:
+        source = source_of(con)
+        profile = profile_table(con)
+        spec = DashboardSpec.model_validate({
+            "title": "月度销售", "goal": "看每月销售额的走势",
+            "metrics": [{"id": "sales", "label": "销售额", "agg": "sum", "column": "sales"}],
+            "charts": [{"id": "k", "title": "销售额", "type": "kpi", "metrics": ["sales"], "why": "整体"},
+                       {"id": "t", "title": "每月销售额", "type": "line", "metrics": ["sales"],
+                        "x": {"column": "month", "grain": "month"}, "why": "走势"}]})
+        out = compile_dashboard(con, spec)
+    assert source.time_column == "month" and "转成了日期（取每月 1 号）：month" in profile["description"]
+    rows = out["slices"]["all"]["t"]["rows"]
+    assert [(r["x"], r["values"][0], r.get("partial", False)) for r in rows] == [
+        ("2011-01", 15, False), ("2011-02", 12, False), ("2011-03", 7, False)]  # 最后一个月是整月，不标不完整
+    assert out["source"]["range"] == "2011-01 至 2011-03（按月汇总）"
+
+
+def test_text_that_only_looks_like_months_is_left_alone(tmp_path: Path) -> None:
+    path = tmp_path / "mixed.csv"
+    path.write_text("month,sales\n2011-01,10\nQ2,12\n", encoding="utf-8")
+    with connect_source(str(path)) as con:
+        assert source_of(con).time_column is None and "转成了日期" not in profile_table(con)["description"]

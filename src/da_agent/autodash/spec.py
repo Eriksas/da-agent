@@ -8,6 +8,7 @@
 每条问题都写成模型能照着改的中文。
 """
 
+from datetime import date, timedelta
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
@@ -98,6 +99,37 @@ class Chart(_Model):
         "这张图看出了什么（按全部数据，不加筛选）。里面的数字必须来自 preview_chart 返回的数据，程序会核查"))
 
 
+PERIOD_TEXT = r"^\d{4}(-\d{2}(-\d{2})?)?$"
+
+
+class Period(_Model):
+    """整个看板只看一段时间（M22）。用户说“2010 年”“2011 年下半年”时用它，不要在 where 里写时间。"""
+
+    start: str = Field(pattern=PERIOD_TEXT, description="开始（含），写成 2010、2010-07 或 2010-07-01")
+    end: str = Field(pattern=PERIOD_TEXT, description="结束（含），写法同上：2010 表示到 2010-12-31，2010-09 表示到 9 月 30 日")
+
+    def bounds(self) -> tuple[date, date]:
+        """[开始, 结束的下一天)。"""
+        return _first_day(self.start), _after(self.end)
+
+    def label(self) -> str:
+        return self.start if self.start == self.end else f"{self.start} 至 {self.end}"
+
+
+def _first_day(text: str) -> date:
+    parts = [int(x) for x in text.split("-")]
+    return date(parts[0], parts[1] if len(parts) > 1 else 1, parts[2] if len(parts) > 2 else 1)
+
+
+def _after(text: str) -> date:
+    parts = [int(x) for x in text.split("-")]
+    if len(parts) == 1:
+        return date(parts[0] + 1, 1, 1)
+    if len(parts) == 2:
+        return date(parts[0] + parts[1] // 12, parts[1] % 12 + 1, 1)
+    return date(*parts) + timedelta(days=1)
+
+
 class DashboardSpec(_Model):
     title: str = Field(min_length=2, max_length=30, description="看板标题")
     goal: str = Field(min_length=4, max_length=120, description="这个看板给谁看、帮他判断什么")
@@ -106,6 +138,8 @@ class DashboardSpec(_Model):
     filters: list[Dimension] = Field(default_factory=list, max_length=2, description=(
         "页面顶部的筛选器（对所有图生效），每个最多 6 个取值，取值多时用 keep 合并"))
     year_filter: bool = Field(False, description="是否加按年份筛选（需要数据有时间列）")
+    period: Period | None = Field(None, description=(
+        "整个看板只看这段时间（例如读者说“2010 年”“2011 年下半年”）；不填看全部数据。不要在指标的 where 里写时间"))
     notes: list[str] = Field(default_factory=list, max_length=6, description="给读者的数据说明，例如口径和局限")
 
 
@@ -276,10 +310,26 @@ def check_spec(spec: DashboardSpec, types: dict[str, str], source: Source) -> li
         problems.append(f"要分区就给每张非 kpi 的图都写 section；这些图没有写：{[c.id for c in charts if not c.section]}")
     if len(sections) > MAX_SECTIONS:
         problems.append(f"分区有 {len(sections)} 个，最多 {MAX_SECTIONS} 个：{sections}")
+    problems += period_problems(spec.period, source)
     if spec.year_filter and source.time_column is None:
         problems.append("这份数据没有时间戳列，不能用 year_filter；可以把年份放在横轴上")
     if not any(c.type == "kpi" for c in spec.charts):
         problems.append("至少放一张 kpi：读者先看到最重要的数")
+    return problems
+
+
+def period_problems(period: Period | None, source: Any) -> list[str]:
+    if period is None:
+        return []
+    problems = []
+    if source.time_column is None:
+        problems.append("这份数据没有时间列，不能用 period")
+    try:
+        start, end = period.bounds()
+    except ValueError:
+        return problems + [f"period 的日期不存在：{period.start} 至 {period.end}"]
+    if start >= end:
+        problems.append(f"period 的开始 {period.start} 晚于结束 {period.end}")
     return problems
 
 

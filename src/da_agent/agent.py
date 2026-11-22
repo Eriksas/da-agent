@@ -87,13 +87,15 @@ class AgentRun:
 
 
 QUERY_SECTION_PATH = ROOT / "prompts" / "query_data_section.md"
+DASHBOARD_SECTION_PATH = ROOT / "prompts" / "dashboard_tool_section.md"  # M22
 
 
 def build_system_prompt(con: duckdb.DuckDBPyConnection, max_tool_calls: int, use_skills: bool = True,
-                        domain: str = "ecommerce", query: bool = False) -> str:
+                        domain: str = "ecommerce", query: bool = False, dashboard: bool = False) -> str:
     """把数据范围（电商：周范围和最近完整周；财报：公司和财年）、工具上限、本领域的流程目录填进提示词模板。
 
-    query：有 query_data 工具时，在电商提示词里加上它的用法；没有时这一段是空的，提示词和以前一字不差。
+    query：有 query_data 工具时，在电商提示词里加上它的用法；dashboard：有 build_dashboard 工具时加上它的用法。
+    都没有时这一段是空的，提示词和以前一字不差。
     """
     template = SYSTEM_PROMPTS[domain].read_text(encoding="utf-8")
     skills = catalog(load_skills(domain=domain) if use_skills else {})
@@ -103,7 +105,8 @@ def build_system_prompt(con: duckdb.DuckDBPyConnection, max_tool_calls: int, use
         source = source_of(con)
         return template.format(source_label=source.label, source_description=source.description,
                                max_tool_calls=max_tool_calls, skills_catalog=skills)
-    query_section = QUERY_SECTION_PATH.read_text(encoding="utf-8") if query else ""
+    query_section = ((QUERY_SECTION_PATH.read_text(encoding="utf-8") if query else "")
+                     + (DASHBOARD_SECTION_PATH.read_text(encoding="utf-8") if dashboard else ""))
     return template.format(**data_range(con), max_tool_calls=max_tool_calls, skills_catalog=skills,
                            query_section=query_section)
 
@@ -131,7 +134,8 @@ def run_agent(question: str, *, llm: LLMClient, con: Any, max_tool_calls: int,
                    started_at=datetime.now(UTC).isoformat(timespec="seconds"))
     run.messages = [{"role": "system",
                      "content": system_prompt or build_system_prompt(con, max_tool_calls, use_skills, domain,
-                                                                     query="query_data" in contexts)},
+                                                                     query="query_data" in contexts,
+                                                                     dashboard="build_dashboard" in contexts)},
                     {"role": "user", "content": question}]
     specs = [s for s in tool_specs(domain, optional=list(contexts)) if use_skills or s["function"]["name"] != "load_skill"]
     allowed = [s["function"]["name"] for s in specs]  # 只执行这个领域的工具：别的领域的工具连的是另一份数据

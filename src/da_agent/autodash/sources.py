@@ -108,19 +108,57 @@ CSV_TABLE = "csv_data"
 CSV_TYPES = ["BIGINT", "DOUBLE", "TIMESTAMP", "DATE", "VARCHAR"]
 
 
+# 年月写成文字：2011-01、2011/1、2011.01、2011年1月。整列都是这种写法时转成日期（取每月 1 号），不然看板认不出时间列
+MONTH_TEXT_SQL = r"^\s*\d{4}\s*[-/.年]\s*\d{1,2}\s*月?\s*$"
+
+
+def _month_text_columns(con: duckdb.DuckDBPyConnection, table: str) -> list[str]:
+    """整列（非空的值）都是年月写法的文字列。"""
+    found = []
+    for name, kind, *_ in con.execute(f'DESCRIBE "{table}"').fetchall():
+        if kind != "VARCHAR":
+            continue
+        q = f'"{name}"'
+        filled, matched = con.execute(f"SELECT count({q}), count(*) FILTER (WHERE regexp_matches({q}, ?)) FROM \"{table}\"",
+                                      [MONTH_TEXT_SQL]).fetchone()
+        if filled and filled == matched:
+            found.append(name)
+    return found
+
+
+def _months_to_dates(con: duckdb.DuckDBPyConnection, table: str, columns: list[str]) -> None:
+    for name in columns:
+        q = f'"{name}"'
+        con.execute(f"""ALTER TABLE "{table}" ALTER COLUMN {q} TYPE DATE USING
+                        make_date(CAST(regexp_extract({q}, '(\\d{{4}})', 1) AS INTEGER),
+                                  CAST(regexp_extract({q}, '\\d{{4}}\\s*[-/.年]\\s*(\\d{{1,2}})', 1) AS INTEGER), 1)""")
+
+
 def csv_source(path: Path | str, label: str | None = None) -> Source:
-    """用户给的任意 CSV：一张表，没有语义标注，也没有列的说明。分隔符、类型由 DuckDB 自动识别。"""
+    """用户给的任意 CSV：一张表，没有语义标注，也没有列的说明。分隔符、类型由 DuckDB 自动识别。
+
+    写成文字的年月（“2011-01”）DuckDB 认不出是时间，这里整列转成日期，并写进数据说明（M22，和 Excel 入口一致）。
+    """
     path = Path(path).resolve()
     if not path.exists():
         raise ValueError(f"找不到 CSV 文件：{path}")
     name = f"csv:{path.as_posix()}"
     label = label or path.name
+    read = f"CREATE TABLE {CSV_TABLE} AS SELECT * FROM read_csv(?, header = true, auto_type_candidates = {CSV_TYPES})"
+    probe = duckdb.connect()
+    try:
+        probe.execute(read, [path.as_posix()])
+        months = _month_text_columns(probe, CSV_TABLE)
+    finally:
+        probe.close()
     description = f"用户提供的 CSV（{path.name}），没有数据说明：列的含义只能从列名和取值判断。"
+    if months:
+        description += f"读取时程序把这些写成文字的年月转成了日期（取每月 1 号）：{'、'.join(months)}。"
 
     def connect() -> duckdb.DuckDBPyConnection:
         con = duckdb.connect()
-        con.execute(f"CREATE TABLE {CSV_TABLE} AS SELECT * FROM read_csv(?, header = true, "
-                    f"auto_type_candidates = {CSV_TYPES})", [path.as_posix()])
+        con.execute(read, [path.as_posix()])
+        _months_to_dates(con, CSV_TABLE, months)
         con.execute("CREATE TABLE dash_source AS SELECT ? AS name, ? AS label", [name, label])
         return con
 

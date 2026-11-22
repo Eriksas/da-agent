@@ -19,9 +19,10 @@ from .abtest import proportion_test, sample_size_proportions, srm_check
 from .analyst import QueryDataArgs, RunSqlArgs, SubmitQueryArgs, query_data, run_sql, submit_query
 from .autodash.compile import compile_dashboard, preview_chart
 from .autodash.sources import profile_table
-from .autodash.spec import MAX_SUBMIT_CHARTS, Chart, DashboardSpec, Metric
+from .autodash.spec import MAX_SUBMIT_CHARTS, Chart, DashboardSpec, Metric, Period
 from .calculator import MAX_LENGTH, calculate
 from .company import RATIOS, company_overview, dupont, financial_summary, peer_compare
+from .dashboard_tool import BuildDashboardArgs, build_dashboard_tool
 from .decompose import decompose_gmv
 from .financials import COMPANIES
 from .llm import INVALID_JSON_KEY
@@ -107,6 +108,7 @@ class SampleSizeArgs(_Args):
 class PreviewChartArgs(_Args):
     metrics: list[Metric] = Field(min_length=1, max_length=6, description="这张图用到的指标定义（ratio 要连同它引用的两个指标一起给）")
     chart: Chart = Field(description="要预览的图")
+    period: Period | None = Field(None, description="整个看板只看一段时间时，预览也带上同样的 period")
 
 
 class SubmitDashboardArgs(DashboardSpec):
@@ -253,7 +255,7 @@ TOOLS: dict[str, Tool] = {tool.name: tool for tool in (
     Tool("preview_chart",
          "预览一张图的数据（不加筛选）：每个点的数值、合计、占比、最大最小、最近一期变化，以及自动发现的数据问题（notes）。"
          "insight 里的数字只能用这里返回的数。方案有问题时返回修改意见。",
-         PreviewChartArgs, lambda con, a: preview_chart(con, a.metrics, a.chart), PREVIEW_HINT),
+         PreviewChartArgs, lambda con, a: preview_chart(con, a.metrics, a.chart, a.period), PREVIEW_HINT),
     Tool("submit_dashboard",
          f"提交整个看板方案：标题、读者和目标、指标、图（2–{MAX_SUBMIT_CHARTS} 张，至少 1 张 kpi）、筛选器、数据说明。"
          "程序校验后计算所有数字并生成看板；不通过时返回逐条修改意见，改完再提交。",
@@ -273,6 +275,10 @@ TOOLS: dict[str, Tool] = {tool.name: tool for tool in (
          "写一个明确的请求（时间范围、指标、分组、筛选、排序），另一位分析师会写只读 SQL 算出一张结果表。"
          "结果表（rows）里的数可以直接引用；unverified_notes 是对方写的说明，没有核对过。",
          QueryDataArgs, query_data),
+    Tool("build_dashboard",
+         "搭看板：用户要看板、仪表盘或能反复打开看的页面时用。写清楚给谁看、帮他判断什么，另一位同事（看板 Agent）设计看板，"
+         "程序校验、算数、生成页面。返回页面位置、每张图的标题和结论、程序发现的数据问题。一个具体问题不要用它，直接回答。",
+         BuildDashboardArgs, build_dashboard_tool),
     Tool("run_sql",
          "试一条只读查询（DuckDB 的 SELECT），返回前几行和总行数。用来确认筛选条件、数量级和口径；出错时返回原因。",
          RunSqlArgs, run_sql),
@@ -294,7 +300,7 @@ DOMAIN_TOOLS: dict[str, tuple[str, ...]] = {
     "analyst": ("run_sql", "submit_query"),  # 查询 Agent：只写只读 SQL，上下文是 analyst.QueryContext
 }
 # 可选的工具（M19b）：调用方提供了它的上下文才给模型看。query_data 的上下文是 analyst.QueryService，不是数据库连接
-OPTIONAL_TOOLS: dict[str, tuple[str, ...]] = {"ecommerce": ("query_data",)}
+OPTIONAL_TOOLS: dict[str, tuple[str, ...]] = {"ecommerce": ("query_data", "build_dashboard")}  # build_dashboard：M22
 
 
 def _drop_titles(schema: Any, property_names: bool = False) -> Any:
