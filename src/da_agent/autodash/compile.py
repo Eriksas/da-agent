@@ -155,8 +155,13 @@ class Compiler:
         bounds = None
         if self.source.time_column:
             col = _q(self.source.time_column)
-            bounds = fetch_one(con, f"SELECT min({col}) AS lo, max({col}) AS hi FROM {self.table}")
+            # monthly：时间列的值全是每月 1 号零点（按月汇总的表，例如 Excel 月报里的“2011-01”）。这时每个值代表一整个月，
+            # 最后一个月不算“没覆盖完”，数据范围也按月写（M22：以前会把月报的最后一个月一律标成不完整）
+            bounds = fetch_one(con, f"""SELECT min({col}) AS lo, max({col}) AS hi,
+                                              bool_and(CAST({col} AS TIMESTAMP) = date_trunc('month', CAST({col} AS TIMESTAMP))) AS monthly
+                                       FROM {self.table}""")
         self.time_bounds = (bounds["lo"], bounds["hi"]) if bounds else None
+        self.monthly = bool(bounds and bounds["monthly"])
         self._ranges: dict[str, tuple[Any, Any]] = {}
 
     def label(self, dim: Dimension | None, value: Any) -> str | None:
@@ -484,13 +489,15 @@ class Compiler:
 
     def _range_text(self) -> str:
         lo, hi = self.time_bounds
-        return f"{lo:%Y-%m-%d} 至 {hi:%Y-%m-%d}"
+        return f"{lo:%Y-%m} 至 {hi:%Y-%m}（按月汇总）" if self.monthly else f"{lo:%Y-%m-%d} 至 {hi:%Y-%m-%d}"
 
     def _mark_partial(self, c: Chart, rows: list[dict[str, Any]]) -> list[str]:
         """时间横轴上，第一个或最后一个周期没被数据完整覆盖的，标成 partial。"""
         if c.x is None or c.x.grain not in ("year", "quarter", "month", "week") or not self.time_bounds:
             return []
         lo, hi = (t.date() if isinstance(t, datetime) else t for t in self.time_bounds)
+        if self.monthly:  # 每个值代表一整个月：最后一个月覆盖到月底
+            hi = _period("month", f"{hi:%Y-%m}")[1]
         partial = []
         for r in rows:
             start, end = _period(c.x.grain, r["x"])
